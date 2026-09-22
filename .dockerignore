@@ -1,0 +1,32 @@
+# 构建上下文排除清单：这些内容不需要进运行时镜像，
+# 排除后显著减小上下文体积、加快 COPY 与构建。
+# （venv ~84M / node_modules ~122M / .git ~18M）
+
+# 版本库与 IDE
+.git
+.gitignore
+.idea
+.vscode
+
+# 本地 Python 虚拟环境（uv 生成）
+venv
+
+# Python 缓存
+**/__pycache__
+*.pyc
+
+# 前端依赖（dist 保留，供运行时静态资源）
+static/node_modules
+
+# 文档 / 知识库 / AI 工具配置（运行镜像不需要）
+docs
+*_wiki
+openspec
+.claude
+MANUAL.md
+COLLABORATION.md
+
+# 本地日志
+logs
+log
+*.log

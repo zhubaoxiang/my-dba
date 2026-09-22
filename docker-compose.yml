@@ -1,0 +1,15 @@
+version: "3"
+
+networks: # 自定义网络(默认桥接), 不使用links通信
+  nginx_network:
+    driver: bridge
+
+services:
+  web:
+    image: my-dba/my-dba:V1.0R01F00
+    container_name: my-dba
+    network_mode: "host"
+    ports:
+      - "8080:8080"
+    tty: true
+    restart: always

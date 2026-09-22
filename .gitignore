@@ -1,0 +1,16 @@
+.pyc
+migrations/*.py
+__pycache__
+.idea
+migrations
+packages
+venv
+logs
+docs
+!docs/superpowers/
+.superpowers/
+.obsidian/
+.ai-harness/
+.claude/
+.ci
+.ruff_cache

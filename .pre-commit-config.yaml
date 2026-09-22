@@ -1,0 +1,23 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff lint
+        entry: ruff check src/ --config .ci/lint-rules/ruff.toml
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: ruff-format
+        name: ruff format check
+        entry: ruff format --check src/ --config .ci/lint-rules/ruff.toml
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: scaffold-check
+        name: scaffold compliance check
+        entry: python .ci/custom-checks/scaffold_check.py
+        language: system
+        types: [python]
+        pass_filenames: false

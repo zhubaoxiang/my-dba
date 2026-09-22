@@ -1,0 +1,64 @@
+{
+  "name": "我的数据库管理专家",
+  "key": "my-dba",
+  "app_name": "my-dba",
+  "allfix": [],
+  "fix": [
+    "^/my-dba"
+  ],
+  "pinyin": "my-dba",
+  "link": "/WebApi/peafowls_cyberOps/static/dist/#/route/full-screen/overview/newBuildSafeOperation",
+  "children": [
+    {
+      "fix": [],
+      "name": "系统概览",
+      "key": "overview",
+      "link": "/WebApi/peafowls_cyberOps/static/dist/#/route/full-screen/overview/newBuildSafeOperation",
+      "children": [
+      ]
+    },
+    {
+      "fix": [],
+      "name": "模板管理",
+      "key": "template",
+      "link": "/WebApi/peafowls_demo/static/dist/#/route/full-screen/overview/newBuildSafeOperation",
+      "children": []
+    },
+    {
+      "fix": [],
+      "name": "组管理",
+      "key": "group",
+      "link": "/WebApi/peafowls_demo/static/dist/#/route/full-screen/overview/newBuildSafeOperation",
+      "children": []
+    },
+    {
+      "fix": [],
+      "name": "实例管理",
+      "key": "instance",
+      "link": "/WebApi/peafowls_demo/static/dist/#/route/full-screen/overview/newBuildSafeOperation",
+      "children": []
+    },
+    {
+      "fix": [],
+      "name": "数据源管理",
+      "key": "datasource",
+      "link": "/WebApi/peafowls_my-dba/static/dist/#/route/datasource/index",
+      "children": [
+        {
+          "fix": [],
+          "name": "库表分析",
+          "key": "datasource_tables",
+          "link": "/WebApi/peafowls_my-dba/static/dist/#/route/datasource/tables",
+          "children": []
+        },
+        {
+          "fix": [],
+          "name": "问题清单",
+          "key": "datasource_issues",
+          "link": "/WebApi/peafowls_my-dba/static/dist/#/route/datasource/issues",
+          "children": []
+        }
+      ]
+    }
+  ]
+}
