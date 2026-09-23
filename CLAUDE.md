@@ -30,7 +30,9 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 ## 项目概述
 
-我的数据库管理专家后端服务，面向**开发与测试人员**（不是 DBA 运维工具）：帮其看懂被管理库的表结构与隐患、用自然语言完成建表与查询、审查 SQL 的规范与性能、解答数据库相关问题。Django 3.2 + DRF，对接 BSA 底座平台。PostgreSQL 数据库，JWT 认证，自定义响应格式，软删除模型。
+我的数据库管理专家后端服务，面向**开发与测试人员**（不是 DBA 运维工具）：帮其看懂被管理库的表结构与隐患、用自然语言完成建表与查询、审查 SQL 的规范与性能、解答数据库相关问题。Django 3.2 + DRF + PostgreSQL，**docker compose 部署**，自定义响应格式，软删除模型。
+
+> 接口不做应用层鉴权（本仓库无 Token 来源），访问控制依赖网络隔离，服务只允许部署在内网。详见 README「认证与鉴权」。
 
 ## 常用命令
 
@@ -61,7 +63,8 @@ gunicorn -c settings/gunicorn.py config.wsgi:application
 - 响应：`baseviews.ResponseOK/ResponseError/ResponseBadRequest/ResponseForbidden/ResponseNotFound/ResponseExpectationFailed`（code 2000/5000/4000/4003/4004/0017）
 - 模型：继承 `AbstractTimeFiledModel`（`apps/base/models.py`），软删除 `is_deleted`
 - 分页：`pagination.paginate(self, queryset)` → `baseviews.ResponseOK(result)`
-- BSA 对接：`BsaClient` 单例 + `hooks/install.py`
+- 部署：docker compose（`Dockerfile` 分层构建 + `docker-compose.yml`）
+- BSA 对接：`BsaClient` 单例 + `hooks/install.py` —— **当前未使用**，项目不在 BSA 底座上部署
 
 ## Harness 规则引用
 

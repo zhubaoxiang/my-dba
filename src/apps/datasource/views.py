@@ -26,7 +26,9 @@ class DatasourceView(baseviews.AnyLogin):
     """
     数据源配置管理
 
-    鉴权交由 BSA 平台：本类不做认证与角色校验，访问控制由平台的菜单/路由权限实现。
+    本类不做认证与角色校验：本仓库没有任何代码会产出 `Token` 头，任何基于
+    `IsAuthenticated` / `IsAdminUser` 的校验都会让接口恒返回 4003。
+    因此访问控制**依赖网络隔离**——服务只允许部署在内网，不要直接暴露到公网。
     """
 
     queryset = models.Datasource.objects.all()
@@ -159,7 +161,7 @@ class CatalogView(baseviews.AnyLogin):
     """
     元数据查询：快照、库表总览、表详情、问题清单、版本差异
 
-    同 DatasourceView，鉴权交由 BSA 平台。
+    同 DatasourceView，不做应用层鉴权，访问控制依赖网络隔离。
     """
 
     queryset = models.MetadataSnapshot.objects.all()

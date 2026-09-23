@@ -59,7 +59,8 @@
 - 配置读取统一走 `utils/configure.py` 的 `Configure` 单例，禁止直接使用 `os.environ`（环境变量 `ENV_TYPE` 除外）
 - 认证统一走 `utils/authentication.py` 的 `JwtAuthentication`，禁止自建认证
 - 配置层级：`settings/settings.py`（基础）→ `settings/{local|dev|prod|test}.py`（环境覆盖 DEBUG 与渲染器）→ `config/conf.ini`（外部配置，由 `ENV_TYPE` 决定 section）
-- BSA 底座对接：`utils/bsa.py` 的 `BsaClient` 单例；生命周期入口 `hooks/install.py` / `hooks/uninstall.py`
+- 部署：docker compose；`Dockerfile` 分层构建（依赖层在前），`docker-compose.yml` 用 `network_mode: host`
+- BSA 底座对接（**当前未使用**）：`utils/bsa.py` 的 `BsaClient` 单例；生命周期入口 `hooks/install.py` / `hooks/uninstall.py`
 
 详见 [architecture.md](../.ai-harness/rules/architecture.md) 与 [scaffold.md](../.ai-harness/rules/scaffold.md)。
 
@@ -80,10 +81,10 @@
 
 ## Domain Context
 
-- **BSA 底座平台**：本系统运行于 BSA 平台之上。平台侧概念包括服务包、菜单权限、组件信息
-- **服务包**：`service.json` 定义 BSA Chart 包 —— 服务元信息、镜像、资源限制、探针、生命周期钩子、端口与路径映射。版本发布时修改
-- **菜单注册**：`src/right_config.json` 声明本系统在 BSA 平台中的菜单树；`hooks/install.py` 调用 `scripts/bsa_register_menu.py`（经 Kong 网关）完成注册，`hooks/uninstall.py` 注销
-- **URL 前缀**：`SYS_NAME`（定义在 `src/config/urls.py`）是系统在网关上的路径前缀，当前为 `my-dba`。约定 ViewSet 路由为 `{SYS_NAME}/v1/{module}`，函数视图为 `{SYS_NAME}/api/{name}`
+- **部署**：**docker compose**（`Dockerfile` + `docker-compose.yml`），未使用容器编排平台
+- **访问控制**：接口不做应用层鉴权（本仓库无 Token 来源），依赖**网络隔离**——只允许内网部署
+- **BSA 底座平台（当前未使用，保留备查）**：项目原设计运行于 BSA 平台之上。相关资产 `utils/bsa.py`、`hooks/install.py`、`hooks/uninstall.py`、`src/right_config.json`、`scripts/bsa_register_menu.py`、`service.json`、`package.py`、`service-mgr-tool/` **目前均未接入、无调用方**。新增功能不要依赖它们
+- **URL 前缀**：`SYS_NAME`（定义在 `src/config/urls.py`）是系统的对外路径前缀，当前为 `my-dba`。约定 ViewSet 路由为 `{SYS_NAME}/v1/{module}`，函数视图为 `{SYS_NAME}/api/{name}`
 - **响应封装**：所有接口返回 `{code, message, data}`。2000 成功、4000 参数错误、4003 无权限、4004 不存在、4017 业务条件未满足、5000 服务端错误
 - **认证载体**：JWT Token 通过自定义请求头 `Token` 传递，**不是**标准的 `Authorization: Bearer`
 
@@ -110,8 +111,9 @@
 |------|------|---------|
 | PostgreSQL | 业务数据库 | `src/config/conf.ini` 的 `[db_{ENV_TYPE}]` 段 |
 | Redis | 缓存 | 依赖已声明；`settings.py` 当前用 LocMemCache |
-| BSA 底座平台 | 菜单注册、服务组件信息查询 | `conf.ini` 中的 BSA 地址与认证信息，经 `utils/bsa.py` 访问 |
-| Kong 网关 | 菜单注册的调用链路 | `scripts/bsa_register_menu.py` |
+| Docker / docker compose | **实际部署方式** | `Dockerfile`、`docker-compose.yml` |
+| BSA 底座平台（**当前未使用**） | 原设计的菜单注册、组件信息查询 | `conf.ini` 中的 BSA 地址与认证信息，经 `utils/bsa.py` 访问 |
+| Kong 网关（**当前未使用**） | 原设计的菜单注册调用链路 | `scripts/bsa_register_menu.py` |
 
 ## Known Issues
 

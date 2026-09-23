@@ -2,7 +2,7 @@
 
 **面向开发与测试人员**的数据库助手。把你要用的库接进来，就能看懂表结构、发现设计隐患、写出正确的 SQL，并随时问数据库相关的问题。
 
-后端 Django 3.2 + DRF，前端 Vue 3 + Element Plus，数据库 PostgreSQL，部署在 BSA 底座平台上（URL 前缀 `my-dba`）。
+后端 Django 3.2 + DRF，前端 Vue 3 + Element Plus，数据库 PostgreSQL。**通过 docker compose 部署**（对外路径前缀 `my-dba`）。
 
 > 本文档描述**当前代码状态**。`openspec/changes/` 下的变更提案尚未落地的部分会明确标注。
 
@@ -82,7 +82,9 @@ DDL 见 `src/sql/pg_struct.sql`（全量）与 `src/sql/patch.sql`（增量）�
 | GET | `/catalog/issues?datasource_id=&issue_level=` | 问题清单（按级别筛选） |
 | GET | `/catalog/diff?snapshot_id=&compare_snapshot_id=` | 两个快照的结构差异 |
 
-> **鉴权**：以上接口继承 `baseviews.AnyLogin`，**系统内不做认证与角色校验**，访问控制由 BSA 平台的菜单/路由权限实现。部署时必须确保服务仅经平台网关对外——原因与风险见 `openspec/changes/archive/2026-09-22-add-datasource-catalog/design.md` 的 D7。
+> ⚠️ **鉴权风险**：以上接口继承 `baseviews.AnyLogin`，**系统内不做任何认证与角色校验**，且本仓库没有任何代码会产出 `Token` 头（见「认证与鉴权」一节）。这意味着**只要服务可达，任何人都能读写数据源配置（含目标库凭据）、触发采集、并借「连接测试」探测内网**。
+>
+> **因此：服务只能部署在内网，不要直接暴露到公网或不可信网络。** 访问控制依赖网络隔离，不依赖应用层。—— 决策背景见 `openspec/changes/archive/2026-09-22-add-datasource-catalog/design.md` 的 D7。
 
 ### 健康分析规则
 
@@ -190,9 +192,9 @@ npm run dev                                             # http://localhost:5173�
 my-dba/
 ├── Dockerfile                    # Docker 镜像构建
 ├── docker-compose.yml            # 本地容器编排
-├── package.py                    # BSA dat 包打包脚本
-├── service.json                  # BSA Chart 包配置（服务元信息、资源限制、生命周期钩子）
-├── service-mgr-tool/             # Chart 打包工具
+├── package.py                    # BSA dat 包打包脚本（未使用）
+├── service.json                  # BSA Chart 包配置（未使用）
+├── service-mgr-tool/             # Chart 打包工具（未使用）
 │
 ├── openspec/                     # 变更提案与规格基线
 │   ├── project.md                # 项目上下文（约定、约束、外部依赖、已知问题）
@@ -208,7 +210,7 @@ my-dba/
 └── src/                          # 后端代码根目录
     ├── manage.py
     ├── requirements.txt / requirements-dev.txt
-    ├── right_config.json         # BSA 平台菜单注册配置
+    ├── right_config.json         # BSA 平台菜单注册配置（未使用）
     ├── start.sh                  # 生产启动脚本（gunicorn）
     │
     ├── config/                   # Django 项目配置包
@@ -240,7 +242,7 @@ my-dba/
     │
     ├── utils/                    # 通用能力（扁平结构，禁止业务模块自建工具类）
     │   ├── authentication.py     # JWT 认证（JwtAuthentication、AuthedUser）
-    │   ├── bsa.py                # BSA 底座客户端（BsaClient）
+    │   ├── bsa.py                # BSA 底座客户端（未使用）
     │   ├── common.py             # 密码哈希、DRF 错误格式化、DB 连接清理装饰器
     │   ├── configure.py          # INI 配置解析（CONF_ATTR 单例）
     │   ├── crypto.py             # 数据源凭据可逆加解密（Fernet）
@@ -250,9 +252,9 @@ my-dba/
     │   ├── middleware.py         # 自定义中间件（当前为空实现）
     │   └── pagination.py         # 分页（StandardPagination + paginate）
     │
-    ├── hooks/                    # BSA 生命周期钩子（install / uninstall）
+    ├── hooks/                    # BSA 生命周期钩子（未使用）
     ├── jobs/                     # 定时任务目录（预留）
-    ├── scripts/                  # 运维脚本（BSA 菜单注册 SDK、SQL 初始化）
+    ├── scripts/                  # 运维脚本（BSA 菜单注册 SDK（未使用）、SQL 初始化）
     │
     └── sql/                      # 数据库 SQL
         ├── pg_struct.sql         # 全量表结构（新建库执行）
@@ -316,7 +318,7 @@ class YourEnum(models.IntegerChoices):
 
 | 基类 | 权限 | 适用场景 |
 |------|------|---------|
-| `AnyLogin` | 无认证、无权限 | BSA 底座上的业务接口默认用此基类，接口权限由 BSA 平台控制 |
+| `AnyLogin` | 无认证、无权限 | **本项目采用**：服务仅在内网部署，访问控制依赖网络隔离（见「部署」一节的鉴权风险） |
 | `BaseView` / `OperatorView` | 需登录（`IsAuthenticated`） | 常规业务接口 |
 | `SuperUserView` | 需管理员（`IsAdminUser`） | 系统管理接口 |
 
@@ -415,7 +417,9 @@ return baseviews.ResponseExpectationFailed("该数据源已有采集任务在执
 - 解码后用户信息在 `request.user`（`AuthedUser`，含 `user_id` / `username` / `role`；`is_staff = (role == "admin")`）
 - `JWT_SECRET` 在 `settings/settings.py`，生产环境必须设置
 
-> ⚠️ **本仓库当前没有任何代码会产出 `Token` 头**（`CustomMiddleware` 是空实现，前端无登录页、从不调用 `setToken`，`utils/bsa.py` 的 sessionid/csrftoken 是出方向调用）。因此 `IsAuthenticated` / `IsAdminUser` 会让接口恒返回 4003。BSA 底座上的业务接口请用 `AnyLogin`，把访问控制交给平台。
+> ⚠️ **本仓库当前没有任何代码会产出 `Token` 头**（`CustomMiddleware` 是空实现，前端无登录页、从不调用 `setToken`）。因此 `IsAuthenticated` / `IsAdminUser` 会让接口恒返回 4003。
+>
+> 本项目因此统一使用 `AnyLogin`，**访问控制依靠网络隔离而非应用层鉴权**——服务只允许部署在内网。若要对外开放，必须先补齐登录/token 机制（属独立的变更）。
 
 ### 5. 环境配置规范
 
@@ -430,12 +434,14 @@ return baseviews.ResponseExpectationFailed("该数据源已有采集任务在执
 
 外部配置在 `config/conf.ini` 中按 `[名称_环境]` 分段，由 `utils/configure.py` 解析为 `CONF_ATTR`。**禁止直接使用 `os.environ`**（`ENV_TYPE` 除外）。注意 `CONF_ATTR` 在模块导入时载入，改配置需重启。
 
-### 6. BSA 平台集成规范
+### 6. BSA 平台集成规范（当前未使用，保留备查）
 
-- 菜单配置：修改 `src/right_config.json` 的 `children` 数组
+> 本项目**不在 BSA 底座上部署**，改用 docker compose。以下能力与相关文件目前**未接入、未被调用**，保留仅为将来可能的平台化部署备查。修改业务代码时不要依赖它们。
+
+- 菜单配置：`src/right_config.json` 的 `children` 数组
 - 安装钩子：`hooks/install.py` 执行菜单注册与 SQL 初始化
 - 卸载钩子：`hooks/uninstall.py` 执行菜单注销与数据清理
-- 菜单注册 SDK：`scripts/bsa_register_menu.py`（经 Kong 网关调用 BSA 权限服务）
+- 菜单注册 SDK：`scripts/bsa_register_menu.py`（原设计经 Kong 网关调用 BSA 权限服务）
 
 ### 7. 后台任务规范
 
@@ -456,7 +462,9 @@ LOGGER.info("操作成功")
 
 日志落在 `src/logs/`，按天轮转、保留 30 天，同时输出文件与终端。**禁止在日志中输出密码、token 等敏感信息。**
 
-### 9. BSA 平台客户端规范
+### 9. BSA 平台客户端规范（当前未使用，保留备查）
+
+> 同 §6：项目不在 BSA 底座上部署，`utils/bsa.py` 目前无调用方。
 
 ```python
 from utils.bsa import bsa_client
@@ -464,7 +472,7 @@ from utils.bsa import bsa_client
 info = bsa_client.get_service_component_info("b-vuln-backend")
 ```
 
-认证信息从 `CONF_ATTR` 读取 `common_sessionid` 与 `common_csrftoken`，构造请求头代理到 BSA 平台。
+原设计：认证信息从 `CONF_ATTR` 读取 `common_sessionid` 与 `common_csrftoken`，构造请求头代理到 BSA 平台。
 
 ### 10. SQL 规范
 
@@ -491,11 +499,12 @@ PEP 8，由 `ruff check` / `ruff format` 强制，配置在 `.ci/lint-rules/ruff
 | `utils/pagination.py` | 分页工具 | 一般不修改 |
 | `utils/logger.py` | 统一日志 | 一般不修改 |
 | `utils/exception.py` | 全局异常处理 | 一般不修改 |
-| `utils/bsa.py` | BSA 底座客户端 | 一般不修改 |
+| `utils/bsa.py` | BSA 底座客户端（**当前未使用**） | 一般不修改 |
 | `settings/settings.py` | Django 核心配置（**注意：不需要改 `INSTALLED_APPS`**） | 极少 |
 | `config/conf.ini` | 外部配置（数据库、数据源密钥） | 新环境时 |
-| `right_config.json` | BSA 菜单注册结构 | 新增菜单时 |
-| `service.json` | Chart 包服务定义 | 版本发布时 |
+| `right_config.json` | BSA 菜单注册结构（**当前未使用**） | 接入平台时 |
+| `service.json` | Chart 包服务定义（**当前未使用**，仅镜像名与 `docker-compose.yml` 对齐） | 接入平台时 |
+| `docker-compose.yml` / `Dockerfile` | **实际部署方式** | 部署形态变更时 |
 | `sql/pg_struct.sql` / `sql/patch.sql` | 全量结构 / 增量补丁 | 表结构变更时 |
 
 ## 测试与质量检查
@@ -517,12 +526,31 @@ ruff format --check src/ --config .ci/lint-rules/ruff.toml
 cd static && npm run build
 ```
 
-## 打包部署
+## 部署
 
-打 BSA R03 平台的 dat 包：
+**部署方式：docker compose。**
 
 ```bash
-登录打包机，进入项目根目录
+# 1. 构建镜像（Dockerfile 已做分层：依赖层在前，改代码只重建代码层）
+docker build -t my-dba/my-dba:V1.0R01F00 .
+
+# 2. 启动（network_mode: host，容器内监听 8080）
+docker compose up -d
+
+# 3. 查看日志 / 停止
+docker compose logs -f
+docker compose down
+```
+
+`docker-compose.yml` 使用 `network_mode: "host"`，`restart: always`。镜像名需与 `service.json` 的 `imageProjectName` / `imageRepoName` 保持一致。
+
+> ⚠️ **只在内网部署**：数据源接口无应用层鉴权（见上文「鉴权风险」），宿主网络必须可信。
+
+### 附：BSA dat 包打包（当前未使用）
+
+`package.py` 与 `service-mgr-tool/` 是原 BSA 平台化部署的打包链路，现已不用。如将来需要：
+
+```bash
 python3 package.py --clean
 git pull origin main
 python3 package.py
