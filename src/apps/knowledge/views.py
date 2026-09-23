@@ -208,7 +208,7 @@ class KnowledgeBaseView(baseviews.AnyLogin):
         instance = self._get_instance(kwargs)
         if instance is None:
             return baseviews.ResponseNotFound("知识库不存在")
-        _purge_chunks(models.KbChunk.objects.filter(knowledge_base_id=instance.id))
+        ingest.purge_chunks(models.KbChunk.objects.filter(knowledge_base_id=instance.id))
         models.KbChunk.objects.filter(knowledge_base_id=instance.id).update(is_deleted=True)
         models.KbDocument.objects.filter(knowledge_base_id=instance.id).update(is_deleted=True)
         instance.is_deleted = True
@@ -246,6 +246,9 @@ class KbDocumentView(baseviews.AnyLogin):
     def create(self, request, **kwargs):
         """
         上传文件摄入。文件内容随任务驻留内存，不落盘存储
+
+        上传是同步的、内容当时就能拿到，所以重复来源在这里就能判定——
+        命中且使用者没表态时**返回提示让前端问一次**，而不是自作主张。
         """
         upload = request.FILES.get("file")
         if not upload:
@@ -256,15 +259,34 @@ class KbDocumentView(baseviews.AnyLogin):
 
         raw = upload.read()
         try:
-            title, _ = ingest.parse_file(upload.name, raw)
+            title, text = ingest.parse_file(upload.name, raw)
         except ingest.IngestError as exc:
             return baseviews.ResponseBadRequest(str(exc))
+
+        digest = ingest.content_hash(text)
+        action = _parse_duplicate_action(request.data.get("on_duplicate"))
+        duplicate = ingest.find_duplicate(base.id, digest)
+        if duplicate is not None:
+            if action is None:
+                return baseviews.ResponseExpectationFailed(
+                    f"该知识库中已存在内容相同的文档《{duplicate.title}》(id={duplicate.id})。"
+                    f"覆盖请带 on_duplicate={custom_enum.DuplicateActionEnum.OVERWRITE.value}，"
+                    f"跳过请带 on_duplicate={custom_enum.DuplicateActionEnum.SKIP.value}"
+                )
+            if action == custom_enum.DuplicateActionEnum.SKIP:
+                data = self.get_serializer(duplicate).data
+                data["duplicated"] = True
+                return baseviews.ResponseOK(data)
+            ingest.reset_document(duplicate)
+            duplicate.is_deleted = True
+            duplicate.save(update_fields=["is_deleted", "update_time"])
 
         document = models.KbDocument.objects.create(
             knowledge_base_id=base.id,
             title=title,
             source_type=custom_enum.DocumentSourceEnum.FILE.value,
             source=upload.name[:1024],
+            content_hash=digest,
             status=custom_enum.DocumentStatusEnum.PENDING.value,
             creator=self._creator(request),
         )
@@ -292,7 +314,13 @@ class KbDocumentView(baseviews.AnyLogin):
             status=custom_enum.DocumentStatusEnum.PENDING.value,
             creator=self._creator(request),
         )
-        background.submit(ingest.run_ingest, document_id=document.id, url=data["url"])
+        action = data.get("on_duplicate")
+        background.submit(
+            ingest.run_ingest,
+            document_id=document.id,
+            url=data["url"],
+            on_duplicate=action.value if action else None,
+        )
         return baseviews.ResponseOK(self.get_serializer(document).data)
 
     @action(detail=True, methods=["POST"], url_path="reingest")
@@ -307,7 +335,7 @@ class KbDocumentView(baseviews.AnyLogin):
             # 上传的文件没有落盘，无法重新解析
             return baseviews.ResponseExpectationFailed("文件来源的文档无法重新摄入，请重新上传该文件")
 
-        _reset_document(document)
+        ingest.reset_document(document)
         background.submit(ingest.run_ingest, document_id=document.id, url=document.source)
         return baseviews.ResponseOK(self.get_serializer(document).data)
 
@@ -315,38 +343,22 @@ class KbDocumentView(baseviews.AnyLogin):
         document = self._get_instance(kwargs)
         if document is None:
             return baseviews.ResponseNotFound("文档不存在")
-        _reset_document(document)
+        ingest.reset_document(document)
         document.is_deleted = True
         document.save(update_fields=["is_deleted", "update_time"])
         return baseviews.ResponseOK(None)
 
 
-def _purge_chunks(chunk_queryset):
+def _parse_duplicate_action(raw):
     """
-    删除一批块对应的向量。
-
-    向量清不掉不该挡住业务侧删除——库内数据是事实来源，残留的向量在「检索后回库取正文」
-    时会被过滤掉，只影响检索的候选集大小。
+    解析重复处理方式；未提供或非法都返回 None，由调用方决定默认行为
     """
-    chunk_ids = list(chunk_queryset.values_list("id", flat=True))
-    if not chunk_ids:
-        return
+    if raw in (None, ""):
+        return None
     try:
-        vectorstore.delete_chunks(chunk_ids)
-    except vectorstore.VectorStoreError as exc:
-        LOGGER.warning("清理向量失败，仅影响检索候选集: %s", exc)
-
-
-def _reset_document(document):
-    """
-    清掉一份文档的块与向量，并把状态复位为待处理
-    """
-    _purge_chunks(models.KbChunk.objects.filter(document_id=document.id))
-    models.KbChunk.objects.filter(document_id=document.id).delete()
-    document.chunk_count = 0
-    document.status = custom_enum.DocumentStatusEnum.PENDING.value
-    document.fail_reason = ""
-    document.save(update_fields=["chunk_count", "status", "fail_reason", "update_time"])
+        return custom_enum.DuplicateActionEnum(int(raw))
+    except (TypeError, ValueError):
+        return None
 
 
 class QaSessionView(baseviews.AnyLogin):

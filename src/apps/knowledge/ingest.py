@@ -58,6 +58,23 @@ def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def find_duplicate(knowledge_base_id: int, digest: str, exclude_document_id: int = None):
+    """
+    在同一知识库内按内容指纹找已存在的文档。
+
+    以**内容**而非文件名/URL 判定重复：换个文件名上传同一份文档也算重复，
+    这正是「同一来源被再次摄入」要拦的情况。
+    """
+    if not digest:
+        return None
+    queryset = models.KbDocument.objects.filter(
+        knowledge_base_id=knowledge_base_id, content_hash=digest, is_deleted=False
+    )
+    if exclude_document_id:
+        queryset = queryset.exclude(id=exclude_document_id)
+    return queryset.first()
+
+
 # ----------------------------------------------------------------------
 # 解析
 # ----------------------------------------------------------------------
@@ -271,6 +288,55 @@ def ingest(document: models.KbDocument, text: str) -> int:
     return len(chunks)
 
 
+def purge_chunks(chunk_queryset):
+    """
+    删除一批块对应的向量。
+
+    向量清不掉不该挡住业务侧删除——库内数据是事实来源，残留的向量在「检索后回库取正文」
+    时会被 `is_deleted` 过滤掉，只影响检索的候选集大小。
+    """
+    chunk_ids = list(chunk_queryset.values_list("id", flat=True))
+    if not chunk_ids:
+        return
+    try:
+        vectorstore.delete_chunks(chunk_ids)
+    except vectorstore.VectorStoreError as exc:
+        LOGGER.warning("清理向量失败，仅影响检索候选集: %s", exc)
+
+
+def reset_document(document):
+    """
+    清掉一份文档的块与向量，并把状态复位为待处理
+    """
+    purge_chunks(models.KbChunk.objects.filter(document_id=document.id))
+    models.KbChunk.objects.filter(document_id=document.id).delete()
+    document.chunk_count = 0
+    document.status = custom_enum.DocumentStatusEnum.PENDING.value
+    document.fail_reason = ""
+    document.save(update_fields=["chunk_count", "status", "fail_reason", "update_time"])
+
+
+def _discard_duplicate(document: models.KbDocument, duplicate, on_duplicate):
+    """
+    处理命中重复来源的情况，返回 True 表示「本次文档已被处理掉，不该继续摄入」
+
+    关键约束是**不静默**：要么跳过并写明原因，要么按使用者的明确要求覆盖。
+    """
+    if on_duplicate == custom_enum.DuplicateActionEnum.OVERWRITE.value:
+        reset_document(duplicate)
+        duplicate.is_deleted = True
+        duplicate.save(update_fields=["is_deleted", "update_time"])
+        return False
+
+    _finish(
+        document,
+        custom_enum.DocumentStatusEnum.FAILED,
+        f"内容与已有文档《{duplicate.title}》(id={duplicate.id}) 重复，已跳过。"
+        f"如需覆盖请带 on_duplicate={custom_enum.DuplicateActionEnum.OVERWRITE.value} 重新提交",
+    )
+    return True
+
+
 def _finish(document: models.KbDocument, status, fail_reason: str = "", text_hash: str = ""):
     document.status = status.value
     document.fail_reason = (fail_reason or "")[:1024]
@@ -279,9 +345,13 @@ def _finish(document: models.KbDocument, status, fail_reason: str = "", text_has
     document.save(update_fields=["status", "fail_reason", "content_hash", "update_time"])
 
 
-def run_ingest(document_id: int, raw: bytes = None, url: str = ""):
+def run_ingest(document_id: int, raw: bytes = None, url: str = "", on_duplicate=None):
     """
     后台任务入口。raw 为上传文件的字节，url 为待抓取的链接（二选一）。
+
+    on_duplicate 为命中重复来源时的处理方式（见 DuplicateActionEnum）；
+    链接来源的内容要抓取后才知道，因此重复检测只能在这里做——那时已无法回头问使用者，
+    所以默认是「跳过并写明原因」，而不是静默产生重复内容。
 
     任何失败都落到文档状态上，不向上抛——否则后台线程只会打一行日志，使用者看不到。
     """
@@ -303,9 +373,13 @@ def run_ingest(document_id: int, raw: bytes = None, url: str = ""):
 
         digest = content_hash(text)
         document.source = (url or document.source)[:1024]
-        if not document.content_hash:
-            document.content_hash = digest
+        document.content_hash = digest
         document.save(update_fields=["title", "source", "content_hash", "update_time"])
+
+        duplicate = find_duplicate(document.knowledge_base_id, digest, exclude_document_id=document.id)
+        if duplicate is not None and _discard_duplicate(document, duplicate, on_duplicate):
+            LOGGER.info("摄入跳过（重复来源）document_id=%s 已有=%s", document_id, duplicate.id)
+            return
 
         count = ingest(document, text)
         _finish(document, custom_enum.DocumentStatusEnum.SUCCESS)

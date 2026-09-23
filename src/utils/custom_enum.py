@@ -114,6 +114,17 @@ class DocumentSourceEnum(models.IntegerChoices):
     URL = 2, "网页链接"
 
 
+class DuplicateActionEnum(models.IntegerChoices):
+    """
+    命中重复来源时的处理方式
+
+    不静默产生重复内容是这个枚举存在的意义：要么跳过、要么明确覆盖，都必须让使用者知道。
+    """
+
+    SKIP = 1, "跳过重复来源"
+    OVERWRITE = 2, "覆盖已有文档"
+
+
 class MessageRoleEnum(models.IntegerChoices):
     """
     问答消息角色

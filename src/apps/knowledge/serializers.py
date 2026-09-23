@@ -132,6 +132,8 @@ class KbImportUrlSerializer(serializers.Serializer):
 
     knowledge_base_id = serializers.IntegerField(min_value=1)
     url = serializers.CharField(max_length=1024)
+    # 链接的内容要抓取后才知道是否重复，故处理方式需随请求带进异步任务
+    on_duplicate = serializers.ChoiceField(choices=custom_enum.DuplicateActionEnum.choices, required=False)
 
     def validate_url(self, value):
         if not value.strip().lower().startswith(("http://", "https://")):

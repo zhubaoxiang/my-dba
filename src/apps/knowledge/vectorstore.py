@@ -45,8 +45,16 @@ def _timeout() -> float:
 
 
 def _client() -> QdrantClient:
+    """
+    构造 Qdrant 客户端。
+
+    **`trust_env=False`**：向量服务是内网组件，不该受开发机/服务器上的系统代理影响。
+    实测踩过一次——本机开着代理时，httpx 会把发往内网地址的请求也丢给代理，
+    代理连不通内网便回 502，现象与「向量服务挂了」完全一样，很难定位。
+    注意这只关掉向量客户端的环境探测；模型调用走的是公网，那边仍需要代理。
+    """
     url = str(CONF_ATTR.get("knowledge_qdrant_url") or _DEFAULT_URL)
-    return QdrantClient(url=url, timeout=_timeout())
+    return QdrantClient(url=url, timeout=_timeout(), trust_env=False)
 
 
 def ensure_collection() -> None:

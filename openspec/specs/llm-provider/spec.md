@@ -1,0 +1,94 @@
+# llm-provider Specification
+
+## Purpose
+TBD - created by archiving change add-rag-knowledge-qa. Update Purpose after archive.
+## Requirements
+### Requirement: 模型接入配置管理
+
+系统 SHALL 提供大模型接入配置的管理能力，支持创建、分页查询、查看详情、修改与软删除。每条配置 MUST 记录名称、用途（对话 / 嵌入）、接口地址（base_url）、模型名、API Key（加密存储）、是否启用。**一条配置 MUST 只承载一种用途**。模型 MUST 通过 API 接入，MUST NOT 依赖本地模型部署。
+
+#### Scenario: 创建模型配置
+
+- **WHEN** 用户提交合法的模型配置（名称、用途、接口地址、模型名、API Key）
+- **THEN** 系统创建该配置并以加密形式存储 API Key
+- **AND** 响应中不含 API Key 的明文或密文
+
+#### Scenario: 用途取值受限
+
+- **WHEN** 提交的用途不在「对话 / 嵌入」范围内
+- **THEN** 系统返回参数错误（code 4000）
+
+#### Scenario: 每类用途各自指定生效配置
+
+- **WHEN** 已有多条配置且均处于启用状态
+- **THEN** 系统 MUST 为「对话」与「嵌入」**分别**指定至多一条当前生效配置
+- **AND** 问答使用生效的对话配置，摄入与检索使用生效的嵌入配置
+
+#### Scenario: 新增一类配置不影响另一类
+
+- **WHEN** 新增一条嵌入配置并使它生效
+- **THEN** 已生效的对话配置 MUST 保持生效，不被顶替
+
+#### Scenario: 已有该类生效项时新配置不自动生效
+
+- **WHEN** 某类用途下已存在生效配置，再创建一条同类配置
+- **THEN** 新配置 MUST NOT 自动成为生效项，须由使用者显式指定
+
+#### Scenario: 名称重复
+
+- **WHEN** 创建或修改时使用了已存在（未删除）的配置名称
+- **THEN** 系统拒绝并返回参数错误（code 4000）
+
+#### Scenario: 软删除配置
+
+- **WHEN** 删除一条模型配置
+- **THEN** 系统将其 `is_deleted` 置为 True，不物理删除
+- **AND** 该配置不再出现在列表与生效候选中
+
+### Requirement: 模型凭据保护
+
+API Key MUST 以可逆加密方式存储，密钥来源与项目既有约定一致。任何 API 响应与日志输出 MUST NOT 包含 API Key 明文。
+
+#### Scenario: 查询不返回 API Key
+
+- **WHEN** 查询模型配置的列表或详情
+- **THEN** 响应中的 API Key 字段为空或掩码值，不含明文与密文
+
+#### Scenario: 日志不泄露 API Key
+
+- **WHEN** 模型调用失败并记录日志
+- **THEN** 日志内容 MUST NOT 包含 API Key
+
+#### Scenario: 修改时留空表示不更换
+
+- **WHEN** 修改模型配置但 API Key 字段留空
+- **THEN** 系统保留原 API Key，仅更新其他字段
+
+### Requirement: 模型连通性测试
+
+系统 SHALL 提供模型连通性测试能力，在不落库问答内容的前提下验证接口地址与凭据可用，且 MUST 设置超时。测试 MUST 按配置的用途发起对应的请求——嵌入配置测嵌入接口，对话配置测对话接口。
+
+#### Scenario: 测试成功
+
+- **WHEN** 对一份配置发起连通性测试且接口可达、凭据有效
+- **THEN** 返回成功响应；对话配置返回模型名与回复长度，嵌入配置返回模型名与向量维度
+
+#### Scenario: 测试失败
+
+- **WHEN** 接口不可达、凭据无效或模型名不存在
+- **THEN** 返回失败响应并给出可读原因，失败原因中不含 API Key
+
+#### Scenario: 测试超时
+
+- **WHEN** 模型接口在超时时间内无响应
+- **THEN** 测试在超时后终止并返回超时原因，不得无限阻塞请求
+
+### Requirement: 模型配置界面
+
+系统 SHALL 提供前端页面用于模型配置管理，包含列表展示与新建、编辑、删除、连通性测试、设为生效配置的入口。
+
+#### Scenario: 模型配置页可用
+
+- **WHEN** 用户进入模型配置页面
+- **THEN** 页面展示配置列表，标注当前生效项，并提供新建、编辑、删除与测试连接的操作入口
+

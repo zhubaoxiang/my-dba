@@ -52,7 +52,11 @@
 - [x] 4.3b 向量写入 Qdrant：集合按需创建（1024 维、余弦）；**点标识直接使用 `kb_chunk.id`**，点 payload 只放知识库 id 与文档 id（正文不进 Qdrant，D1b）
 - [x] 4.4 摄入走 `simple-background-task` 异步执行（参考 `apps/datasource/services.py` 显式启动 worker）
 - [x] 4.5 状态机：待处理 / 处理中 / 成功 / 失败；**先嵌入再落库**，嵌入失败一行不写；写向量失败则补偿删除刚写入的块
-- [ ] 4.6 重复来源检测（同一 URL / 同一文件）并支持覆盖或跳过 —— `content_hash` 已在摄入时写入，但**「提示已存在并让用户选择」是接口层行为**，随第 7 节一起做
+- [x] 4.6 重复来源检测：按**内容指纹**（非文件名/URL）在同一知识库内判重
+      - 上传（同步）：内容当场可得，命中且使用者未表态时返回 4017 提示，并给出 `on_duplicate=1`（跳过）/ `2`（覆盖）两个选项
+      - 链接导入（异步）：内容要抓取后才知道，检测只能在任务里做，那时无法回头问使用者，故退化为「跳过并写明原因」
+      - 两种路径都**不静默**产生重复内容
+      - 验证（真实库 + 真实 Qdrant）：未表态→4017；跳过→返回已有文档且不新建；覆盖→旧文档软删、新文档建立、总数不变；不同内容→正常新建
 - [x] 4.7 验证（对着真实库与真实 Qdrant 跑，仅把嵌入函数替换为假实现）：
       - 切分：Markdown 标题层级正确产出 `标题一` / `标题一/子节` / `标题二`
       - 解析：不支持的格式、空文件、超大文件均给出可读原因
@@ -110,11 +114,11 @@
 ## 9. 配置、文档与整体验证
 
 - [x] 9.1 `src/config/conf.ini` 增加 `[knowledge]` 段：Qdrant 地址与集合名、模型超时、top-k、相似度阈值、切分块大小与重叠、agent 最大步数、历史轮数——**不含 API Key**（Key 在 `llm_provider` 表加密存储）
-- [ ] 9.2 更新 `README.md`：能力说明、API 清单、配置项、**Qdrant 服务与出网两个部署前提**
-- [ ] 9.3 更新 `openspec/project.md`：Domain Context 与 External Dependencies 补充模型 API 与 Qdrant（`docker-compose.yml` 已加 Qdrant 服务）
-- [ ] 9.4 整体验证：`scaffold_check.py`、`manage.py test`、`ruff check`/`format`、`npm run build` 全绿
-- [ ] 9.5 端到端手工走查：模型配置 → 知识库摄入 → 三种模式提问 → 来源可点开 → 回退提示可见
-- [ ] 9.6 对照 `.ai-harness/rules/` 逐条自查（模型继承、ViewSet 基类、响应格式、分页、软删除、枚举、路由注册、db_table、Serializer 类型、DDL 管理、依赖引入）
+- [x] 9.2 更新 `README.md`：新增「已实现：知识问答」章节（数据表、API 清单、三种模式、重复来源检测、`[knowledge]` 配置项、**部署前提与已知限制**），并把路线图与目录结构同步
+- [x] 9.3 更新 `openspec/project.md`：Domain Context 补充知识问答流程与**向量维度三方一致**的约束；External Dependencies 增加 Qdrant 与模型 API
+- [x] 9.4 整体验证全绿：`scaffold_check.py` ✅、`manage.py test` **88 项** ✅、`ruff check`/`format` ✅、`npm run build` ✅
+- [ ] 9.5 【**待你执行**】浏览器端到端走查：模型配置 → 知识库摄入 → 三种模式提问 → 来源可点开 → 回退提示可见。**这是人工确认项，自动化无法替代**
+- [x] 9.6 规则自查：模型继承 `AbstractTimeFiledModel` ✅、`db_table` 全部显式 ✅、4 个 ViewSet 均继承 `baseviews.AnyLogin` ✅、路由全部注册 ✅；枚举走 `custom_enum`、DDL 写 `pg_struct.sql`/`patch.sql`、新依赖均先评估
 
 ## 依赖关系说明
 

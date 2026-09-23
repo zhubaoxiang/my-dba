@@ -546,6 +546,30 @@ class QaHistoryTests(SimpleTestCase):
         self.assertEqual(len(agent._to_messages("问题", history)), 2)
 
 
+class DuplicateActionTests(SimpleTestCase):
+    """
+    重复来源的处理方式：要么跳过、要么明确覆盖，**不允许静默产生重复内容**
+    """
+
+    def test_parses_valid_actions(self):
+        self.assertEqual(
+            views._parse_duplicate_action(str(custom_enum.DuplicateActionEnum.SKIP.value)),
+            custom_enum.DuplicateActionEnum.SKIP,
+        )
+        self.assertEqual(
+            views._parse_duplicate_action(str(custom_enum.DuplicateActionEnum.OVERWRITE.value)),
+            custom_enum.DuplicateActionEnum.OVERWRITE,
+        )
+
+    def test_absent_or_invalid_returns_none(self):
+        for raw in (None, "", "abc", 99):
+            with self.subTest(raw=raw):
+                self.assertIsNone(views._parse_duplicate_action(raw), "未表态时必须返回 None，由调用方去问使用者")
+
+    def test_enum_has_exactly_two_actions(self):
+        self.assertEqual([m.name for m in custom_enum.DuplicateActionEnum], ["SKIP", "OVERWRITE"])
+
+
 class QaModeTests(SimpleTestCase):
     """
     问答模式与规格约定一致：自动 / 仅知识库 / 仅通用模型

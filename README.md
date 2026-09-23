@@ -27,8 +27,8 @@
 
 | 能力 | 使用者的诉求 | 状态 |
 |------|-------------|------|
-| **分析数据库表** | 「这个库/表长什么样？有没有坑？」 | ✅ 已实现并归档（`add-datasource-catalog`） |
-| **知识问答**（RAG） | 「这个报错 / 概念 / 用法是什么？」 | ⬜ 未开始 |
+| **分析数据库表** | 「这个库/表长什么样？有没有坑？」 | ✅ 已实现（`add-datasource-catalog`） |
+| **知识问答**（RAG） | 「这个报错 / 概念 / 用法是什么？」 | ✅ 已实现（`add-rag-knowledge-qa`，见下文） |
 | **分析 SQL** | 「我这条 SQL 写得对吗？会不会慢？」 | ⬜ 未开始 |
 | **自然语言转建表语句 / SQL** | 「按我说的建张表 / 写条查询」 | ⬜ 未开始 |
 | 分析规则注册表（支撑） | 让分析规则可配置、可开关 | 🚧 进行中（`add-analysis-rule-registry`，见下文） |
@@ -134,6 +134,75 @@ DDL 见 `src/sql/pg_struct.sql`（全量）与 `src/sql/patch.sql`（增量）�
 - **快照没有保留策略**：每次采集整份复制，长期运行会持续占用存储
 - MySQL 采集器尚未在真实 MySQL 上验证过（PostgreSQL 分支已端到端验证）
 
+## 已实现：知识问答
+
+把数据库相关的文档交给它，就能就着文档提问；文档里没有的，回退到通用大模型，并**明确告诉你这次没有文档支撑**。
+
+### 数据表
+
+| 表 | 说明 |
+|----|------|
+| `llm_provider` | 模型接入配置。**一条记录一种用途**（对话 / 嵌入），两类各自独立选生效；API Key 可逆加密 |
+| `knowledge_base` | 知识库 |
+| `kb_document` | 知识库中的文档（含摄入状态与内容指纹） |
+| `kb_chunk` | 切分后的块，**正文以本表为准** |
+| `qa_session` / `qa_message` | 问答会话与消息（含引用来源、调用过的工具、是否回退） |
+
+> 向量**不在本库**，由独立的 Qdrant 服务承载。正文留在库内是可审计的事实来源，Qdrant 只是可随时重建的索引——点标识直接用块 id，因此索引可由正文纯函数式重建。
+
+### API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET/POST | `/llm-provider` | 模型配置列表 / 新建 |
+| PUT/DELETE | `/llm-provider/{id}` | 修改（`api_key` 留空表示不更换）/ 软删除 |
+| POST | `/llm-provider/{id}/test` | 连通性测试（按用途发对应请求） |
+| POST | `/llm-provider/{id}/activate` | 设为该类用途的生效配置 |
+| GET/POST | `/knowledge-base` | 知识库列表 / 新建 |
+| PUT/DELETE | `/knowledge-base/{id}` | 修改 / 软删除（连带清理文档与向量） |
+| GET/POST | `/kb-document` | 文档列表 / 上传文件摄入 |
+| POST | `/kb-document/import-url` | 通过链接导入 |
+| POST | `/kb-document/{id}/reingest` | 重新摄入（仅链接来源；文件未落盘） |
+| GET | `/qa-session` | 会话列表 |
+| GET | `/qa-session/{id}` | 会话详情（含全部消息） |
+| POST | `/qa-session/ask` | 提问 |
+
+**提问的三种模式**（`mode`：1 自动 / 2 仅知识库 / 3 仅通用模型）：
+
+| 模式 | 无命中时的行为 |
+|------|---------------|
+| 自动（默认） | 回退到通用模型，**结果里标明「未经文档支撑」** |
+| 仅知识库 | 如实告知未找到，**不调用模型** |
+| 仅通用模型 | 根本不检索 |
+
+**重复来源检测**：按内容指纹判重。上传时命中会返回 4017 并给出 `on_duplicate=1`（跳过）/ `2`（覆盖）两个选项；链接导入在异步任务里判重，默认跳过并写明原因。两种路径都不静默产生重复内容。
+
+### 配置（`src/config/conf.ini` 的 `[knowledge]` 段）
+
+| 配置项 | 说明 |
+|--------|------|
+| `qdrant_url` / `qdrant_collection` | 向量服务地址与集合名 |
+| `llm_timeout` | 模型调用超时（秒） |
+| `retrieval_top_k` / `similarity_threshold` | 检索条数与相似度阈值（低于阈值视为无命中） |
+| `chunk_size` / `chunk_overlap` | 文档切分块大小与重叠窗口 |
+| `agent_max_steps` / `history_rounds` | agent 最大步数、多轮上下文保留轮数 |
+
+> 向量维度**不在配置里**：它必须与嵌入模型的实际输出、Qdrant 集合的 size 三方一致，写在 `models.EMBEDDING_DIMENSIONS`，改它等于换嵌入模型（需重建集合并重新摄入）。
+
+### 部署前提
+
+1. **Qdrant 服务**：`docker-compose.yml` 已含该服务（REST 6333 / gRPC 6334）
+2. **出网通道**：模型走的是公有云 API（对话与嵌入可以是不同服务商），服务需能访问它们；内网有模型代理则把 `base_url` 指向代理
+3. **嵌入模型单独配置**：不少网关只提供对话模型。缺嵌入时「仅通用模型」仍可用，需要检索时才报出可操作的提示
+
+### 已知限制
+
+- **一次提问会多次调用嵌入服务**：实测「自动」模式 7 次、「仅知识库」5 次（1 次预检索 + 模型自行改写查询后的多次检索），耗时与费用随之上升
+- **不做流式输出**：与统一响应格式冲突，一次性返回完整回答
+- **上传的文件不落盘**：因此「重新摄入」只支持链接来源，文件来源需重新上传
+- **PDF 扫描件**抽不出文本，会明确报错要求先做 OCR
+- 换嵌入模型需改 `models.EMBEDDING_DIMENSIONS`、重建 Qdrant 集合并重新摄入（正文在库内，重建只是重算向量）
+
 ## 🚧 进行中：分析规则注册表
 
 对应 `openspec/changes/add-analysis-rule-registry`（18/59 任务）。目标：让规则的**启用开关、严重级别、阈值**运行时可调、无需改代码发版，并支持规则作用于库/模式/表/列不同层级。
@@ -238,12 +307,22 @@ my-dba/
     │   │   ├── collectors/       # 方言采集器（base / postgres / mysql）
     │   │   ├── differ.py         # 快照结构差异对比
     │   │   └── tests.py
+    │   ├── knowledge/            # 知识问答（RAG + 通用大模型）
+    │   │   ├── models.py         # 模型配置 / 知识库 / 文档 / 块 / 会话 / 消息
+    │   │   ├── llm.py            # 模型接入（对话与嵌入分开取）
+    │   │   ├── vectorstore.py    # Qdrant 封装（集合 / 写入 / 删除 / 检索）
+    │   │   ├── ingest.py         # 解析 → 切分 → 嵌入 → 写库写向量
+    │   │   ├── retrieval.py      # 检索 + 回库取正文
+    │   │   ├── qa/               # langgraph 单 agent 与工具
+    │   │   ├── serializers.py / views.py
+    │   │   └── tests.py
     │   └── test/                 # 脚手架示例模块（见附录）
     │
     ├── utils/                    # 通用能力（扁平结构，禁止业务模块自建工具类）
     │   ├── authentication.py     # JWT 认证（JwtAuthentication、AuthedUser）
     │   ├── bsa.py                # BSA 底座客户端（未使用）
     │   ├── common.py             # 密码哈希、DRF 错误格式化、DB 连接清理装饰器
+    │   ├── background.py         # 后台任务提交（worker 启动与入队）
     │   ├── configure.py          # INI 配置解析（CONF_ATTR 单例）
     │   ├── crypto.py             # 数据源凭据可逆加解密（Fernet）
     │   ├── custom_enum.py        # 枚举定义（IntegerChoices）
