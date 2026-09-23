@@ -62,3 +62,62 @@ class ObjectLevelEnum(models.IntegerChoices):
     SCHEMA = 2, "模式"
     TABLE = 3, "表"
     COLUMN = 4, "列"
+
+
+class ProviderTypeEnum(models.IntegerChoices):
+    """
+    大模型接入的接口类型
+    """
+
+    OPENAI_COMPATIBLE = 1, "OpenAI 兼容接口"
+
+
+class ModelTypeEnum(models.IntegerChoices):
+    """
+    模型用途
+
+    对话与嵌入分开配置：现实里两者常来自不同服务（例如对话走网关、嵌入走内网
+    的 bge 服务），各自独立选「生效」互不影响，一端没配不该拖累另一端。
+    """
+
+    CHAT = 1, "对话模型"
+    EMBEDDING = 2, "嵌入模型"
+
+
+class QaModeEnum(models.IntegerChoices):
+    """
+    问答模式
+    """
+
+    AUTO = 1, "自动（先检索，无命中回退通用模型）"
+    KNOWLEDGE_ONLY = 2, "仅知识库"
+    MODEL_ONLY = 3, "仅通用模型"
+
+
+class DocumentStatusEnum(models.IntegerChoices):
+    """
+    文档摄入状态
+    """
+
+    PENDING = 1, "待处理"
+    PROCESSING = 2, "处理中"
+    SUCCESS = 3, "成功"
+    FAILED = 4, "失败"
+
+
+class DocumentSourceEnum(models.IntegerChoices):
+    """
+    文档来源类型
+    """
+
+    FILE = 1, "上传文件"
+    URL = 2, "网页链接"
+
+
+class MessageRoleEnum(models.IntegerChoices):
+    """
+    问答消息角色
+    """
+
+    USER = 1, "提问"
+    ASSISTANT = 2, "回答"

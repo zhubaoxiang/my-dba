@@ -9,15 +9,11 @@
 为准，重启后可重新触发。多 worker 部署时任务在接收请求的那个 worker 内执行。
 """
 
-import threading
 from datetime import datetime
-
-from simple_background_task import BackgroundTask
-from simple_background_task.task import Task
 
 from apps.datasource import analyzer, models
 from apps.datasource.collectors import get_collector
-from utils import common, custom_enum
+from utils import background, common, custom_enum
 from utils.configure import CONF_ATTR
 from utils.logger import get_logger
 
@@ -51,35 +47,6 @@ def load_collect_config() -> dict:
 
 
 # ----------------------------------------------------------------------
-# 后台 worker
-#
-# BackgroundTask 是单例，但每次构造都会重建内部队列，因此这里只构造一次并直接持有，
-# 不再调用 defer()（它内部会重新构造，导致已入队任务丢失）。
-# ----------------------------------------------------------------------
-
-_worker = BackgroundTask()
-_worker.daemon = True
-_worker_lock = threading.Lock()
-_worker_started = False
-
-
-def _ensure_worker():
-    global _worker_started
-    if _worker_started:
-        return
-    with _worker_lock:
-        if _worker_started:
-            return
-        _worker.start()
-        _worker_started = True
-
-
-def _submit(func, **kwargs):
-    _ensure_worker()
-    _worker.put(Task(func, **kwargs))
-
-
-# ----------------------------------------------------------------------
 # 对外入口
 # ----------------------------------------------------------------------
 
@@ -103,7 +70,7 @@ def trigger_collect(datasource, creator: str = "") -> models.CollectTask:
         status=custom_enum.CollectTaskStatusEnum.PENDING.value,
         creator=creator,
     )
-    _submit(run_collect_task, task_id=task.id)
+    background.submit(run_collect_task, task_id=task.id)
     return task
 
 
@@ -196,3 +163,43 @@ def latest_snapshot(datasource_id: int):
         .order_by("-collect_time", "-id")
         .first()
     )
+
+
+def list_snapshot_tables(datasource_id: int, keyword: str = "") -> list:
+    """
+    取某数据源最近快照中的表摘要
+
+    **跨模块请调用本函数，不要直接查 MetadataSnapshot**（architecture.md 跨模块约束）。
+    返回结构经裁剪，只含调用方通常需要的字段。
+    """
+    snapshot = latest_snapshot(datasource_id)
+    if snapshot is None:
+        return []
+    keyword = (keyword or "").strip().lower()
+    result = []
+    for table in snapshot.raw_data.get("tables") or []:
+        if keyword and keyword not in (table.get("name") or "").lower():
+            continue
+        result.append(
+            {
+                "schema": table.get("schema") or "",
+                "name": table.get("name") or "",
+                "comment": table.get("comment") or "",
+                "row_count": int(table.get("row_count") or 0),
+                "columns": [
+                    {
+                        "name": column.get("name") or "",
+                        "data_type": column.get("data_type") or "",
+                        "nullable": bool(column.get("nullable")),
+                        "comment": column.get("comment") or "",
+                    }
+                    for column in table.get("columns") or []
+                ],
+                "primary_key": (table.get("primary_key") or {}).get("columns") or [],
+                "foreign_keys": [
+                    {"columns": fk.get("columns") or [], "ref_table": fk.get("ref_table") or ""}
+                    for fk in table.get("foreign_keys") or []
+                ],
+            }
+        )
+    return result

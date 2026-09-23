@@ -167,6 +167,12 @@ LOGGING = {
         "handlers": ["console"],
         "level": "INFO",
     },
+    # 第三方 HTTP 客户端会把每次请求按 INFO 打出来（qdrant-client 走 httpx），
+    # 默认的 root=INFO 会让日志被请求明细淹没，压到 WARNING。
+    "loggers": {
+        "httpx": {"level": "WARNING"},
+        "httpcore": {"level": "WARNING"},
+    },
     "formatters": {
         "simple": {
             "format": "[{asctime}] [{levelname}] {message}",

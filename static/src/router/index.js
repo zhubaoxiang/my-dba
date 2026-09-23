@@ -33,6 +33,24 @@ const routes = [
         meta: { title: '问题清单', icon: 'Warning', showInMenu: true }
       },
       {
+        path: 'knowledge/qa',
+        name: 'KnowledgeQa',
+        component: () => import('@/views/knowledge/qa.vue'),
+        meta: { title: '知识问答', icon: 'ChatDotRound', showInMenu: true }
+      },
+      {
+        path: 'knowledge/bases',
+        name: 'KnowledgeBase',
+        component: () => import('@/views/knowledge/bases.vue'),
+        meta: { title: '知识库', icon: 'Collection', showInMenu: true }
+      },
+      {
+        path: 'knowledge/provider',
+        name: 'ModelProvider',
+        component: () => import('@/views/knowledge/provider.vue'),
+        meta: { title: '模型配置', icon: 'Cpu', showInMenu: true }
+      },
+      {
         path: 'user',
         name: 'UserManagement',
         component: () => import('@/views/development/index.vue'),

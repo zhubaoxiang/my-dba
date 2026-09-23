@@ -5,6 +5,31 @@ networks: # 自定义网络(默认桥接), 不使用links通信
     driver: bridge
 
 services:
+  # 业务数据库。
+  #
+  # ⚠️ 上线前请先用 `docker inspect <现有容器>` 核对四件事，不要照抄：
+  #    1. image 的**完整** tag（当前数据目录是 Alpine/musl 的，必须用 alpine 变体）
+  #    2. volumes 里挂的**已有卷名**（写进下面的 external.name，否则会起一个空库）
+  #    3. environment 里的 POSTGRES_DB / POSTGRES_USER
+  #    4. 端口与 network_mode
+  #
+  # 镜像 tag 必须显式写死。历史上这里用的是默认的 latest/alpine 变动导致过故障：
+  # Alpine 的 postgres 用户是 uid 70、Debian 是 uid 999，换基础镜像会让数据目录属主不匹配、
+  # PostgreSQL 直接启动失败；且 musl 与 glibc 的排序规则不同，混用会让文本索引静默失效。
+  postgres:
+    image: postgres:17-alpine
+    container_name: my-dba-postgres
+    # 与 web 同为 host 网络，应用侧连 127.0.0.1:5432 即可
+    network_mode: "host"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-dba}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      # 不要在此硬编码口令；在 .env 或部署环境的变量里给
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 未设置}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    restart: always
+
   web:
     image: my-dba/my-dba:V1.0R01F00
     container_name: my-dba
@@ -13,3 +38,27 @@ services:
       - "8080:8080"
     tty: true
     restart: always
+
+  # 向量库：知识问答的检索载体。
+  # 正文存在应用库里（唯一事实来源），本服务只存向量，是可随时重建的索引——
+  # 数据卷丢了只需重建索引，不涉及正文。
+  # web 用 network_mode: host，因此应用侧连 127.0.0.1:6333 即可。
+  qdrant:
+    # 上线前请固定到具体版本，勿长期用 latest
+    image: qdrant/qdrant:latest
+    container_name: my-dba-qdrant
+    ports:
+      - "6333:6333"   # REST / Web UI
+      - "6334:6334"   # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: always
+
+volumes:
+  # ⚠️ 引用**已有**数据卷，不新建。先用 `docker volume ls` 找到当前 PG 实际在用的卷名填进来。
+  # external: true 的作用是：compose 只引用不创建，避免手滑起出一个空库。
+  pg_data:
+    external: true
+    name: ${PG_VOLUME_NAME:?PG_VOLUME_NAME 未设置}
+
+  qdrant_data:

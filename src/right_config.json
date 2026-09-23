@@ -40,6 +40,35 @@
     },
     {
       "fix": [],
+      "name": "知识问答",
+      "key": "knowledge",
+      "link": "/WebApi/peafowls_my-dba/static/dist/#/route/knowledge/qa",
+      "children": [
+        {
+          "fix": [],
+          "name": "问答",
+          "key": "knowledge_qa",
+          "link": "/WebApi/peafowls_my-dba/static/dist/#/route/knowledge/qa",
+          "children": []
+        },
+        {
+          "fix": [],
+          "name": "知识库",
+          "key": "knowledge_bases",
+          "link": "/WebApi/peafowls_my-dba/static/dist/#/route/knowledge/bases",
+          "children": []
+        },
+        {
+          "fix": [],
+          "name": "模型配置",
+          "key": "knowledge_provider",
+          "link": "/WebApi/peafowls_my-dba/static/dist/#/route/knowledge/provider",
+          "children": []
+        }
+      ]
+    },
+    {
+      "fix": [],
       "name": "数据源管理",
       "key": "datasource",
       "link": "/WebApi/peafowls_my-dba/static/dist/#/route/datasource/index",
