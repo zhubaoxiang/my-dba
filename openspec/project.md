@@ -74,8 +74,9 @@
 
 ### Git Workflow
 
-- 主干开发，默认分支 `main`（同时是 PR 的目标分支）
+- 主干开发，默认分支 `master`（同时是 PR 的目标分支）。**不是 `main`**，勿按 Git 新版默认习惯改
 - 提交信息：Conventional Commits 风格前缀 + 中文描述，如 `feat:`、`fix:`、`docs:`、`build:`、`refactor:`、`init:`
+- 提交信息里**不要出现平台名等已废弃的专有名词**，用「平台集成资产」这类泛指说法
 - 示例：`feat: api-test 完成 CLI 接线与报告`、`build: Dockerfile 分层 + 阿里云归档源修复`
 - 生产打包在打包机上执行 `python3 package.py`（先 `--clean`，再 `git pull`，再打包）
 
