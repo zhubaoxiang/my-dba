@@ -41,26 +41,35 @@
 - [ ] 5.5 `is_complete === false` 时展示「已中断」标记（含会话回看）
 - [ ] 5.6 `error` 事件弹出提示并标记该轮不完整
 
-## 6. 测试
+## 6. 测试基础设施
 
-- [ ] 6.1 **确认测试库可用性**：现有 88 项全为 `SimpleTestCase`（不碰 DB），中断落库需 `TestCase`。若测试库不可用，则把落库逻辑压薄到只测入参组装，并在任务中记录该取舍
-- [ ] 6.2 SSE 帧格式化纯函数测试
-- [ ] 6.3 行缓冲过滤器的增量行为测试（含工具语法外泄场景与全被剥离时的兜底）
-- [ ] 6.4 `_prepare()` 各分支测试（四种执行路径 + 预检错误）
-- [ ] 6.5 中断落库测试（若 6.1 可行）
-- [ ] 6.6 回归：既有 88 项全通过
+- [x] 6.1 建立 `test` 测试库（`conf.ini` 的 `[db_test]`，参数与 `dba` 一致）
+- [x] 6.2 `src/utils/test_runner.py`：新增 `SqlSchemaTestRunner`——建好测试库后灌入 `sql/pg_struct.sql`
+- [x] 6.3 `src/settings/settings.py`：配置 `TEST_RUNNER`
+- [x] 6.4 验证守卫：全部为 `SimpleTestCase` 时**不建测试库、不灌 DDL**（真实库结构不受影响）
+- [x] 6.5 验证 `TestCase` 可对业务表读写
 
-## 7. 文档
+## 7. 测试
 
-- [ ] 7.1 `docs/knowledge-qa.md`：新增「流式输出」章节（事件协议、架构、限制）
-- [ ] 7.2 `docs/knowledge-qa.md`：改写关键设计决策表中「不做流式输出」一条，及「已知限制」里对应两条
-- [ ] 7.3 `docs/knowledge-qa.md`：API 表补入 `/qa-session/ask-stream`，并写明两个接口**落库时机不同**
-- [ ] 7.4 `docs/architecture.md`：「接口约定」补充流式接口作为统一响应格式的**显式例外**及其边界
-- [ ] 7.5 部署文档写明流式的并发占用（gthread 线程被整条连接占住）
+- [ ] 7.1 SSE 帧格式化纯函数测试
+- [ ] 7.2 行缓冲过滤器的增量行为测试（含工具语法外泄场景与全被剥离时的兜底）
+- [ ] 7.3 `_prepare()` 各分支测试（四种执行路径 + 预检错误）
+- [ ] 7.4 中断落库测试（`TestCase`，须以 `ENV_TYPE=test` 运行）
+- [ ] 7.5 回归：既有 88 项全通过
 
-## 8. 校验
+## 8. 文档
 
-- [ ] 8.1 `python .ci/custom-checks/scaffold_check.py`
-- [ ] 8.2 `ruff check src/ --config .ci/lint-rules/ruff.toml` 与 `ruff format --check`
-- [ ] 8.3 `cd static && npm run build`
-- [ ] 8.4 `openspec validate add-qa-streaming --strict --no-interactive`
+- [ ] 8.1 `docs/knowledge-qa.md`：新增「流式输出」章节（事件协议、架构、限制）
+- [ ] 8.2 `docs/knowledge-qa.md`：改写关键设计决策表中「不做流式输出」一条，及「已知限制」里对应两条
+- [ ] 8.3 `docs/knowledge-qa.md`：API 表补入 `/qa-session/ask-stream`，并写明两个接口**落库时机不同**
+- [ ] 8.4 `docs/architecture.md`：「接口约定」补充流式接口作为统一响应格式的**显式例外**及其边界
+- [ ] 8.5 `docs/development.md`：测试与质量检查一节写明 DB 测试的跑法（`ENV_TYPE=test`）、`TEST_RUNNER` 的作用，并把 `utils/test_runner.py` 补入核心文件表
+- [ ] 8.6 `docs/deployment.md`：写明流式的并发占用（gthread 线程被整条连接占住）
+
+## 9. 校验
+
+- [ ] 9.1 `python .ci/custom-checks/scaffold_check.py`
+- [ ] 9.2 `ruff check src/ --config .ci/lint-rules/ruff.toml` 与 `ruff format --check`
+- [ ] 9.3 `cd static && npm run build`
+- [ ] 9.4 `openspec validate add-qa-streaming --strict --no-interactive`
+

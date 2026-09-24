@@ -15,6 +15,7 @@
 - 前端问答页改为流式呈现，增加停止按钮与不完整标记
 - **BREAKING（限本接口）**：流式接口成功回答时响应体**不遵循** `{code, message, data}` 统一响应格式。**预检失败**（参数非法、会话不存在、未配置模型、向量服务不可用）仍按统一格式返回并带对应 HTTP 状态
 - 原有同步接口 `/qa-session/ask` **行为不变**，继续遵循统一响应格式
+- **补齐测试基础设施**：本项目禁止 Django migration，Django 建测试库时跑不出任何业务表（实测报 `relation "qa_message" does not exist`）。新增测试运行器，改为把 `sql/pg_struct.sql` 灌入测试库，使 `TestCase` 可用。「中断保留已生成内容」这条需求没有数据库就无法自动化验证
 
 ## Impact
 
@@ -27,5 +28,8 @@
   - `src/apps/knowledge/serializers.py`（输出 `is_complete`）
   - `src/sql/pg_struct.sql` / `src/sql/patch.sql`
   - `static/src/api/knowledge.js` / `static/src/views/knowledge/qa.vue`
+  - `src/utils/test_runner.py`（**新增**，测试基础设施）
+  - `src/settings/settings.py`（`TEST_RUNNER` 配置）
 - 不影响：`datasource-management`、`metadata-catalog`、`llm-provider`、`knowledge-base`
 - 无新增第三方依赖
+- 需要一台可达的测试数据库（`conf.ini` 的 `[db_test]`，库名 `test`）

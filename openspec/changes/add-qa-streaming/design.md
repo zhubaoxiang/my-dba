@@ -109,6 +109,19 @@
 - **Decision**：**本次不引入任何新依赖。**
 - **说明**：SSE 只是 `text/event-stream` 内容类型加纯文本帧格式，Django 的 `StreamingHttpResponse` 原生支持；前端用浏览器内置的 `fetch` + `TextDecoder` 手写解析。langgraph 的流式能力已在现有 `langgraph 1.2.12` 中，无需升级。
 
+### D12: 用测试运行器把 DDL 灌入测试库，而不是补写 migration
+
+- **Decision**：新增 `utils/test_runner.py`（`SqlSchemaTestRunner`），在建好测试库之后把 `sql/pg_struct.sql` 整份灌入；`settings/settings.py` 配置 `TEST_RUNNER` 指向它。**不写 migration。**
+- **背景（实测发现）**：本项目禁止 Django migration，仓库中**没有任何 `migrations/` 目录**。而 Django 建测试库靠跑 `migrate`——实测结果是测试库里一张业务表都没有，任何 `TestCase` 都以 `relation "qa_message" does not exist` 失败。既有 88 项测试全为 `SimpleTestCase`（不碰数据库），因此这个问题此前从未暴露；而本次「中断保留已生成内容」这条需求**没有数据库就无法自动化验证**。
+- **Why 这个方案**：`pg_struct.sql` 全是 `CREATE TABLE/INDEX IF NOT EXISTS`，无 psql 反斜杠元命令、无事务控制、无 `CONCURRENTLY`，可被 psycopg2 一次 `execute` 执行，因此不需要引入 psql 客户端或额外的 DDL 切分逻辑。
+- **Alternatives considered**：
+  - **补写 migration**：直接违反项目「禁止 Django migration」的硬性约定，且会让 DDL 出现两处事实来源
+  - **每个 `TestCase` 在 `setUpClass` 里执行 DDL**：每个测试类都要重复，且无法覆盖将来新增的测试
+  - **不测数据库层**：把落库逻辑压薄到只测入参组装——等于让「中断保留内容」这条需求失去自动化覆盖
+- **必须在 `setup_databases` 里加守卫**：当测试套件不涉及数据库时（全部为 `SimpleTestCase`），Django **不会创建测试库**，此时连接仍指向 `conf.ini` 里配置的真实库。若无条件灌 DDL，就是在改真实库的结构。因此只在 `aliases` 非空时才灌。
+- **附带收益**：`pg_struct.sql` 成为跑 DB 测试的前置条件——**改了表结构却忘记同步 `pg_struct.sql`，新写的 DB 测试会立刻失败**，形成一道防漂移的约束。
+- **已验证**：`TestCase` 可读写业务表；既有 88 项不受影响；全 `SimpleTestCase` 时未建库、未灌 DDL，真实库结构原封不动。
+
 ## Risks / Trade-offs
 
 | 风险 | 影响 | 缓解 |
@@ -132,7 +145,7 @@
 
 ## Open Questions
 
-1. **测试库是否可用？** 现有 88 项测试全为 `SimpleTestCase`（不碰数据库），而中断落库必须有数据库才能测。若 CI / 本地无法建测试库，则只能把落库逻辑压薄到只测其入参组装，中断路径本身留作人工验证——这会在 tasks 6.1 中先行确认。
+1. ~~**测试库是否可用？**~~ **已解决**：测试库已建立（服务端 PostgreSQL 17.11，参数与 `dba` 一致），并补齐了 `SqlSchemaTestRunner`（见 D12）。`TestCase` 现已可用，中断落库可被自动化覆盖。**注意**：跑 DB 测试须用 `ENV_TYPE=test`，避免 Django 在 `local` 环境下建出 `test_dba` 之类的中间库。
 2. 是否需要**心跳**？当前靠 `status` 与 `delta` 事件天然产生周期输出；若将来引入前置代理导致空闲超时断开，再补心跳事件。
 3. 进度提示文案是否要可配置？当前硬编码在工具内，与工具实现同处，改起来成本低。
 4. 是否要把流式接口的**最大生成时长**做成配置？当前依赖模型调用超时（`knowledge_llm_timeout`）与 agent 最大步数间接约束。

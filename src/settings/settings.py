@@ -69,6 +69,9 @@ DATABASES = {
     },
 }
 
+# 本项目禁止 Django migration，测试库的表结构改由 sql/pg_struct.sql 灌入
+TEST_RUNNER = "utils.test_runner.SqlSchemaTestRunner"
+
 # 跨域设置
 CORS_ALLOW_HEADERS = list(default_headers) + ["TOKEN", "Token"]
 CORS_ORIGIN_ALLOW_ALL = True
