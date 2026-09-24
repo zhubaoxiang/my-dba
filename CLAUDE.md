@@ -32,7 +32,7 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 我的数据库管理专家后端服务，面向**开发与测试人员**（不是 DBA 运维工具）：帮其看懂被管理库的表结构与隐患、用自然语言完成建表与查询、审查 SQL 的规范与性能、解答数据库相关问题。Django 3.2 + DRF + PostgreSQL，**docker compose 部署**，自定义响应格式，软删除模型。
 
-> 接口不做应用层鉴权（本仓库无 Token 来源），访问控制依赖网络隔离，服务只允许部署在内网。详见 README「认证与鉴权」。
+> 接口不做应用层鉴权（本仓库无 Token 来源），访问控制依赖网络隔离，服务只允许部署在内网。详见 [docs/architecture.md](docs/architecture.md) 的「认证与鉴权」。
 
 ## 常用命令
 

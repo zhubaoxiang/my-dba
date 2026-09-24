@@ -6,8 +6,6 @@ migrations
 packages
 venv
 logs
-docs
-!docs/superpowers/
 .superpowers/
 .obsidian/
 .ai-harness/
