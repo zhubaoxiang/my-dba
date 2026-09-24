@@ -148,6 +148,8 @@ class QaMessage(AbstractTimeFiledModel):
     sources = models.JSONField(default=list, verbose_name="引用来源")
     tools_used = models.JSONField(default=list, verbose_name="调用过的工具")
     is_fallback = models.BooleanField(default=False, verbose_name="是否由通用模型回退产生")
+    # 流式生成被中止或断连时为 False。旧数据均为完整生成，默认 True 即正确
+    is_complete = models.BooleanField(default=True, verbose_name="是否生成完整")
 
     class Meta:
         db_table = "qa_message"

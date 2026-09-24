@@ -42,11 +42,21 @@
             </div>
           </template>
 
-          <div class="messages" v-loading="asking">
+          <div ref="messagesEl" class="messages">
             <el-empty v-if="!messages.length" description="提个问题试试，例如「PostgreSQL 默认隔离级别是什么」" />
             <div v-for="(item, index) in messages" :key="index" class="message" :class="item.role">
               <div class="bubble">
-                <div class="content">{{ item.content }}</div>
+                <div v-if="item.status" class="status">{{ item.status }}</div>
+                <div v-if="item.content" class="content">{{ item.content }}</div>
+
+                <el-alert
+                  v-if="item.is_complete === false"
+                  class="interrupted"
+                  type="info"
+                  :closable="false"
+                  show-icon
+                  title="本次回答已中断，内容不完整"
+                />
 
                 <el-alert
                   v-if="item.is_fallback && item.note"
@@ -82,7 +92,8 @@
               placeholder="输入问题，Ctrl+Enter 发送"
               @keydown.ctrl.enter="ask"
             />
-            <el-button type="primary" :loading="asking" :disabled="!question.trim()" @click="ask">发送</el-button>
+            <el-button v-if="asking" type="danger" @click="stop">停止生成</el-button>
+            <el-button v-else type="primary" :disabled="!question.trim()" @click="ask">发送</el-button>
           </div>
         </el-card>
       </el-col>
@@ -91,9 +102,9 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { nextTick, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { knowledgeApi, qaApi } from '@/api/knowledge'
+import { askStream, knowledgeApi, qaApi } from '@/api/knowledge'
 
 const sessions = ref([])
 const currentSessionId = ref(null)
@@ -103,6 +114,9 @@ const knowledgeBaseId = ref(null)
 const mode = ref(1)
 const question = ref('')
 const asking = ref(false)
+const messagesEl = ref(null)
+// 生成中的请求，供「停止生成」中断
+let controller = null
 
 async function loadSessions() {
   const data = await qaApi.sessions({ page: 1, page_size: 100 })
@@ -129,34 +143,88 @@ function newSession() {
   question.value = ''
 }
 
+async function scrollToBottom() {
+  await nextTick()
+  if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+}
+
 async function ask() {
   const text = question.value.trim()
   if (!text) return
   asking.value = true
   messages.value.push({ role: 'user', content: text })
   question.value = ''
+
+  // 先占位再由流式事件填充：工具阶段（实测数秒到十几秒）因此有进度可看，而不是一片空白
+  const reply = reactive({
+    role: 'assistant',
+    content: '',
+    status: '',
+    sources: [],
+    tools_used: [],
+    is_fallback: false,
+    note: '',
+    is_complete: true
+  })
+  messages.value.push(reply)
+  controller = new AbortController()
+  await scrollToBottom()
+
   try {
-    const data = await qaApi.ask({
-      question: text,
-      session_id: currentSessionId.value || undefined,
-      knowledge_base_id: knowledgeBaseId.value || undefined,
-      mode: mode.value
-    })
-    currentSessionId.value = data.session_id
-    messages.value.push({
-      role: 'assistant',
-      content: data.content,
-      sources: data.sources,
-      tools_used: data.tools_used,
-      is_fallback: data.is_fallback,
-      note: data.note
-    })
-    loadSessions()
+    const finished = await askStream(
+      {
+        question: text,
+        session_id: currentSessionId.value || undefined,
+        knowledge_base_id: knowledgeBaseId.value || undefined,
+        mode: mode.value
+      },
+      {
+        onStatus: (message) => {
+          reply.status = message
+          scrollToBottom()
+        },
+        onDelta: (chunk) => {
+          reply.status = ''
+          reply.content += chunk
+          scrollToBottom()
+        },
+        onDone: (data) => {
+          currentSessionId.value = data.session_id
+          reply.status = ''
+          reply.sources = data.sources || []
+          reply.tools_used = data.tools_used || []
+          reply.is_fallback = data.is_fallback
+          reply.note = data.note
+          reply.is_complete = true
+          loadSessions()
+        },
+        onError: (message) => {
+          reply.status = ''
+          reply.is_complete = false
+          ElMessage.error(message)
+        }
+      },
+      controller.signal
+    )
+    // 没收到 done 就说明这一轮没生成完（点了停止，或连接断了）——已生成的内容保留
+    if (!finished) {
+      reply.status = ''
+      reply.is_complete = false
+    }
   } catch (err) {
-    // 拦截器已提示（后端对回退与失败有区分）
+    reply.status = ''
+    reply.is_complete = false
+    // 主动停止不算失败，不弹提示
+    if (err.name !== 'AbortError') ElMessage.error(err.message || '请求失败')
   } finally {
+    controller = null
     asking.value = false
+    scrollToBottom()
   }
+}
+
+function stop() {
+  if (controller) controller.abort()
 }
 
 async function removeSession(item) {
@@ -250,7 +318,13 @@ onMounted(async () => {
   background-color: #ecf5ff;
 }
 
-.fallback {
+.status {
+  font-size: 12px;
+  color: #909399;
+}
+
+.fallback,
+.interrupted {
   margin-top: 8px;
 }
 

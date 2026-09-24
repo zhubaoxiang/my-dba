@@ -2,7 +2,10 @@
 知识问答视图
 """
 
+import json
+
 from django.db import transaction
+from django.http import StreamingHttpResponse
 from rest_framework.decorators import action
 
 from apps.base import baseviews
@@ -477,6 +480,144 @@ class QaSessionView(baseviews.AnyLogin):
                 "mode": mode,
             }
         )
+
+    @action(detail=False, methods=["POST"], url_path="ask-stream")
+    def ask_stream(self, request):
+        """
+        流式提问，边生成边推送
+
+        与同步接口的两点差别（见 design.md D6/D7）：
+
+        1. **开流前的失败仍走统一响应格式**——那时 HTTP 状态码还有意义；开流之后
+           只能走流内 `error` 事件，因为状态码已经发出去了
+        2. **先落库再生成**——否则生成被中止时，提问与半截回答都会丢
+        """
+        serializer = serializers.QaAskSerializer(data=request.data)
+        if not serializer.is_valid():
+            return baseviews.ResponseBadRequest(common.ToolUtil.format_drf_error(serializer.errors))
+        data = serializer.validated_data
+
+        session = None
+        if data.get("session_id"):
+            session = self._get_instance({"pk": data["session_id"]})
+            if session is None:
+                return baseviews.ResponseNotFound("会话不存在")
+
+        knowledge_base_id = data.get("knowledge_base_id") or (session.knowledge_base_id if session else None)
+        mode = data.get("mode") or (session.mode if session else custom_enum.QaModeEnum.AUTO.value)
+        history = _session_history(session) if session else []
+
+        # 预检与预检索都在这里做完，因此它**不是**生成器：生成器的函数体要到首次迭代
+        # 才执行，那时响应头已经发出，失败就没法再改回统一格式的 JSON 了
+        try:
+            prep = agent.prepare_stream(
+                question=data["question"],
+                knowledge_base_id=knowledge_base_id,
+                datasource_id=data.get("datasource_id"),
+                mode=mode,
+                history=history,
+            )
+        except agent.QaError as exc:
+            return baseviews.ResponseExpectationFailed(str(exc))
+        except vectorstore.VectorStoreError as exc:
+            # 与「无命中」必须区分：这是服务故障，不能让它看起来像查无结果
+            LOGGER.error("流式问答失败（向量服务）: %s", exc)
+            return baseviews.ResponseError(f"向量服务不可用：{exc}")
+
+        creator = self._creator(request)
+        if session is None:
+            session = models.QaSession.objects.create(
+                title=data["question"][:128],
+                knowledge_base_id=knowledge_base_id,
+                mode=mode,
+                creator=creator,
+            )
+        models.QaMessage.objects.create(
+            session_id=session.id,
+            role=custom_enum.MessageRoleEnum.USER.value,
+            mode=mode,
+            content=data["question"],
+            creator=creator,
+        )
+        answer_message = models.QaMessage.objects.create(
+            session_id=session.id,
+            role=custom_enum.MessageRoleEnum.ASSISTANT.value,
+            mode=mode,
+            content="",
+            creator=creator,
+        )
+
+        response = StreamingHttpResponse(
+            _stream_body(answer_message, prep, data["question"]),
+            content_type="text/event-stream; charset=utf-8",
+        )
+        response["Cache-Control"] = "no-cache"
+        response["X-Accel-Buffering"] = "no"
+        return response
+
+
+def _sse(event: str, payload: dict) -> str:
+    """
+    SSE 帧。data 用 JSON，便于前端按事件类型解析
+    """
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _persist_stream_message(message, content: str, done: dict, completed: bool):
+    """
+    流结束时一次性写入。**不逐 token 写库**——那会产生数百次 UPDATE。
+
+    代价是进程在生成过程中被杀会丢失这半截内容（与「进程内后台任务重启即丢」同级），
+    见 design.md D8。
+    """
+    message.content = content
+    message.sources = done.get("sources") or []
+    message.tools_used = done.get("tools_used") or []
+    message.is_fallback = bool(done.get("is_fallback"))
+    message.is_complete = completed
+    message.save(update_fields=["content", "sources", "tools_used", "is_fallback", "is_complete", "update_time"])
+
+
+def _stream_body(answer_message, prep, question: str):
+    """
+    产出 SSE 帧，并在结束时落库
+
+    正常结束由 `done` 事件标志；客户端断开时 Django 关闭本生成器（GeneratorExit），
+    此时不能再 yield，只能靠 `finally` 把已收到的内容存下来并标记为不完整。
+    """
+    text_parts, done, completed = [], {}, False
+    try:
+        for event in agent.stream_events(prep, question):
+            kind = event["type"]
+            if kind == "status":
+                yield _sse("status", {"text": event["text"]})
+            elif kind == "delta":
+                text_parts.append(event["text"])
+                yield _sse("delta", {"text": event["text"]})
+            elif kind == "done":
+                done, completed = event, True
+                yield _sse(
+                    "done",
+                    {
+                        "session_id": answer_message.session_id,
+                        "message_id": answer_message.id,
+                        "sources": event["sources"],
+                        "tools_used": event["tools_used"],
+                        "is_fallback": event["is_fallback"],
+                        "note": event["note"],
+                        "mode": event["mode"],
+                        # 收到 done 即完整；流意外结束（无 done）由前端判定为中断
+                        "interrupted": False,
+                    },
+                )
+    except Exception as exc:  # noqa: BLE001 开流后失败只能走流内错误事件
+        LOGGER.error("流式问答中断: %s", exc)
+        yield _sse("error", {"message": f"问答中断：{exc}"})
+    finally:
+        try:
+            _persist_stream_message(answer_message, "".join(text_parts), done, completed)
+        except Exception as exc:  # noqa: BLE001 落库失败不该盖住已经推给使用者的内容
+            LOGGER.error("流式回答落库失败 message_id=%s err=%s", answer_message.id, exc)
 
 
 def _session_history(session) -> list:

@@ -259,6 +259,7 @@ CREATE TABLE IF NOT EXISTS qa_message (
     sources     jsonb       NOT NULL DEFAULT '[]'::jsonb,
     tools_used  jsonb       NOT NULL DEFAULT '[]'::jsonb,
     is_fallback boolean     NOT NULL DEFAULT false,
+    is_complete boolean     NOT NULL DEFAULT true,
     create_time timestamp   NOT NULL DEFAULT now(),
     update_time timestamp   NOT NULL DEFAULT now(),
     creator     varchar(32) NOT NULL DEFAULT '',
@@ -270,5 +271,6 @@ COMMENT ON COLUMN qa_message.role IS '角色：1=提问 2=回答';
 COMMENT ON COLUMN qa_message.sources IS '回答引用的来源，须对本次检索实际返回的片段';
 COMMENT ON COLUMN qa_message.tools_used IS '本次回答实际调用过的工具';
 COMMENT ON COLUMN qa_message.is_fallback IS '是否由通用模型回退产生；回退不得静默';
+COMMENT ON COLUMN qa_message.is_complete IS '回答是否生成完整；流式生成被中止或断连时为 false';
 
 CREATE INDEX IF NOT EXISTS idx_qa_message_session ON qa_message (session_id, id);

@@ -14,8 +14,24 @@ from apps.knowledge import llm, retrieval
 _MAX_SNIPPET_CHARS = 700
 _MAX_TABLE_CHARS = 1200
 
+# 工具名 → 面向使用者的进度文案。
+#
+# 流式回答在**模型开始发起工具调用时**就据它给出提示，因此提示出现在工具执行之前，
+# 使用者不会对着空白等待。文案 MUST NOT 包含入参或工具返回内容。
+TOOL_STATUS = {
+    "search_knowledge_base": "正在检索知识库…",
+    "get_table_schema": "正在查询表结构…",
+}
 
-def build_tools(knowledge_base_id: int = None, datasource_id: int = None, collected: list = None):
+
+def status_text(tool_name: str) -> str:
+    """
+    取某个工具的进度文案；未登记的工具给一个通用说法，不暴露内部细节
+    """
+    return TOOL_STATUS.get(tool_name) or "正在查询…"
+
+
+def build_tools(knowledge_base_id: int | None = None, datasource_id: int | None = None, collected: list | None = None):
     """
     构造工具集。collected 用于收集本次实际检索到的片段，作为回答的来源依据。
     """

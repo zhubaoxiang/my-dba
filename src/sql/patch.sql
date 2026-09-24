@@ -218,3 +218,13 @@ COMMENT ON COLUMN qa_message.sources IS '回答引用的来源，须对本次检
 COMMENT ON COLUMN qa_message.is_fallback IS '是否由通用模型回退产生；回退不得静默';
 
 CREATE INDEX IF NOT EXISTS idx_qa_message_session ON qa_message (session_id, id);
+
+-- ============================================================
+-- 知识问答流式输出（openspec: add-qa-streaming）
+-- ============================================================
+
+-- 标记回答是否生成完整：流式生成被中止或客户端断连时为 false。
+-- 旧数据均为完整生成，默认 true 即语义正确，无需回填。
+ALTER TABLE qa_message ADD COLUMN IF NOT EXISTS is_complete boolean NOT NULL DEFAULT true;
+
+COMMENT ON COLUMN qa_message.is_complete IS '回答是否生成完整；流式生成被中止或断连时为 false';

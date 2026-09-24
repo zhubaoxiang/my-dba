@@ -161,6 +161,10 @@ return baseviews.ResponseExpectationFailed("该数据源已有采集任务在执
 
 > 4017 是「可预期的业务拒绝」的落点：凭据测试失败、重复来源、配置缺失等**使用者能自己解决**的情况用它，而不是报 5000。
 
+> ⚠️ **HTTP 状态码恒为 200**：`baseviews.FormatResponse.__init__` 里的 `FormatResponse.status_code = 200` 是赋在**类**上而非实例上，因此所有接口的 HTTP 状态码都是 200，业务结果只由 body 里的 `code` 表达。前端据此只看 `code`，不按状态码判断。
+
+> **唯一的显式例外**：知识问答的 `POST /qa-session/ask-stream` 在成功回答时响应体是 `text/event-stream` 事件流，不是 `{code, message, data}`。它的**预检失败**仍走统一格式（前端按 `Content-Type` 区分两者）。边界、事件协议与理由见 [knowledge-qa.md 的「流式输出」](knowledge-qa.md#流式输出)。
+
 ### 分页
 
 列表接口必须使用 `pagination.paginate(self, qs)`，返回结构含 `count` / `total` / `results`。分页参数：`page`、`page_size`（默认 10）。

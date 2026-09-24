@@ -96,6 +96,12 @@ psql "postgresql://<用户>:<密码>@<主机>:<端口>/<库名>" -f src/sql/patc
 
 > **多 worker 的后果**：后台任务是**进程内内存队列**（见 [architecture.md 的「后台任务」](architecture.md#后台任务)）。采集与文档摄入的任务会在**接收该请求的那个 worker 进程**内执行；进程重启后队列中未执行的任务会丢失，需重新触发。任务状态以数据库为准。
 
+### 流式问答的并发占用
+
+`worker_class` 没有显式配置，而 `threads = 6 > 1`，gunicorn 会**自动选用 gthread**（见其 `config.py` 的 `worker_class` 属性）。因此流式连接占用的是**线程**而非整个 worker，但仍是**从请求开始占到最后一块 token 推完**。
+
+容量上限是 `workers × threads = 3 × 6 = 18` 个并发请求，超出即排队。知识问答的流式接口（`/qa-session/ask-stream`）单次生成可能持续十几秒，若并发提问较多，需要调大 `workers`。详见 [knowledge-qa.md 的「流式输出」](knowledge-qa.md#流式输出)。
+
 ---
 
 ## 附录：平台化部署（当前未使用）

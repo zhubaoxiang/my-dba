@@ -152,8 +152,8 @@ PEP 8，由 `ruff check` / `ruff format` 强制，配置在 `.ci/lint-rules/ruff
 # 脚手架合规检查
 python .ci/custom-checks/scaffold_check.py
 
-# 单元测试（当前 88 项，均为 SimpleTestCase，不需要数据库）
-cd src && python manage.py test apps.datasource apps.knowledge
+# 单元测试（当前 131 项）
+cd src && ENV_TYPE=test python manage.py test apps.datasource apps.knowledge
 
 # 代码规范
 ruff check src/ --config .ci/lint-rules/ruff.toml
@@ -162,6 +162,20 @@ ruff format --check src/ --config .ci/lint-rules/ruff.toml
 # 前端构建
 cd static && npm run build
 ```
+
+### 跑测试要知道的三件事
+
+**1. 用 `ENV_TYPE=test`**，它指向 `conf.ini` 的 `[db_test]`（库名 `test`）。不指定时会按 `local` 走，Django 建出的是 `test_dba` 之类的中间库。
+
+**2. 绝大多数用例是 `SimpleTestCase`，不碰数据库**；只有知识问答的少数几个用到：`StreamPersistenceTests`（`TestCase`）与 `StreamEndpointTests`（`TransactionTestCase`）。
+
+**3. 测试库的表结构由 `utils/test_runner.py` 灌入。** 本项目禁止 Django migration，仓库里没有任何 `migrations/`，而 Django 建测试库靠跑 `migrate`——不干预的话测试库里一张业务表都不会有，`TestCase` 会直接以 `relation "xxx" does not exist` 失败。`SqlSchemaTestRunner` 在建好测试库之后把 `sql/pg_struct.sql` 整份灌进去。
+
+> 它**只在测试套件确实涉及数据库时才灌**。全部为 `SimpleTestCase` 时 Django 不会创建测试库，连接仍指向 `conf.ini` 配置的真实库——那时无条件灌 DDL 等于改真实库的结构。
+>
+> 附带收益：**改了表结构却忘记同步 `pg_struct.sql`，DB 测试会立刻失败**，形成一道防漂移的约束。
+
+> **为什么接口级测试要用 `TransactionTestCase`**：`TestCase` 把每个用例包在 atomic 里（autocommit=False），而测试客户端每个请求结束发的 `request_finished` 信号会触发 `close_old_connections`——它见到 autocommit 与配置不符就关闭连接，于是流式响应结束后那段落库代码拿到的是一条已关闭的连接。生产环境请求周期内 autocommit 一致，不存在该问题。
 
 ## 6. 核心文件说明
 
@@ -179,6 +193,7 @@ cd static && npm run build
 | `utils/logger.py` | 统一日志 | 一般不修改 |
 | `utils/exception.py` | 全局异常处理 | 一般不修改 |
 | `utils/background.py` | 后台任务提交入口 | 一般不修改 |
+| `utils/test_runner.py` | 测试运行器：把 `sql/pg_struct.sql` 灌进测试库（本项目无 migration） | 表结构管理方式变更时 |
 | `utils/bsa.py` | 平台底座客户端（**当前未使用**，见 [deployment.md](deployment.md) 附录） | 一般不修改 |
 | `sql/pg_struct.sql` / `sql/patch.sql` | 全量结构 / 增量补丁 | 表结构变更时 |
 | `docker-compose.yml` / `Dockerfile` | **实际部署方式**（见 [deployment.md](deployment.md)） | 部署形态变更时 |
