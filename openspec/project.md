@@ -84,7 +84,7 @@
 
 - **部署**：**docker compose**（`Dockerfile` + `docker-compose.yml`），未使用容器编排平台
 - **访问控制**：接口不做应用层鉴权（本仓库无 Token 来源），依赖**网络隔离**——只允许内网部署
-- **BSA 底座平台（当前未使用，保留备查）**：项目原设计运行于 BSA 平台之上。相关资产 `utils/bsa.py`、`hooks/install.py`、`hooks/uninstall.py`、`src/right_config.json`、`scripts/bsa_register_menu.py`、`service.json`、`package.py`、`service-mgr-tool/` **目前均未接入、无调用方**。新增功能不要依赖它们
+- **BSA 底座平台（当前未使用，保留备查）**：项目原设计运行于 BSA 平台之上。相关资产 `utils/bsa.py`、`hooks/install.py`、`hooks/uninstall.py`、`src/right_config.json` **目前均未接入、无调用方**，新增功能不要依赖它们。`package.py` 是**仍在使用的统一编译打包脚本**（镜像 → chart → dat），取件路径写在脚本开头。`scripts/bsa_register_menu.py`、`service.json`、`service-mgr-tool/` 已删除
 - **URL 前缀**：`SYS_NAME`（定义在 `src/config/urls.py`）是系统的对外路径前缀，当前为 `my-dba`。约定 ViewSet 路由为 `{SYS_NAME}/v1/{module}`，函数视图为 `{SYS_NAME}/api/{name}`
 - **知识问答**：文档摄入 → 切分 → 嵌入 → 存 Qdrant；提问时先检索、再交给单 agent 作答。**正文留在业务库内**（唯一事实来源），Qdrant 只是可重建的索引。对话模型与嵌入模型**分开配置**、各自独立选生效
 - **向量维度**：必须与嵌入模型的实际输出、Qdrant 集合的 size 三方一致，写在 `apps/knowledge/models.py` 的 `EMBEDDING_DIMENSIONS`。换嵌入模型须改这里、重建集合、重新摄入
@@ -130,4 +130,4 @@
 - `src/apps/test/models.py` 的 `MavenEnforcerRules` 未显式声明主键类型，触发 `models.W042` 警告
 - `manage.py check` 的输出**不稳定**：由于模型靠导入副作用注册（见上文），Django 的 `apps.get_models()` 结果可能缓存于模型被导入之前，导致同样的代码有时报 `no issues`、有时报 1 条 `models.W042`。判定 CI 是否通过时不要依赖该命令的输出条数
 - `package.py:24` 的注释中含一段 GitLab OAuth2 令牌明文（`oauth2:zRddW7Z9hhGfEkSkqrhG@...`），已进入 git 历史。虽为注释，仍应视为凭据泄露并轮换
-- `docker-compose.yml` 仅用于本地容器编排，其镜像名需与 `service.json` 的 `imageProjectName`/`imageRepoName` 保持一致
+- `hooks/install.py`、`hooks/uninstall.py` 以子进程方式调用已删除的 `scripts/bsa_register_menu.py`，如将来启用平台化部署需连同该脚本一并恢复

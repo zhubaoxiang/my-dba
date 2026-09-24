@@ -182,7 +182,7 @@ cd static && npm run build
 | `utils/bsa.py` | 平台底座客户端（**当前未使用**，见 [deployment.md](deployment.md) 附录） | 一般不修改 |
 | `sql/pg_struct.sql` / `sql/patch.sql` | 全量结构 / 增量补丁 | 表结构变更时 |
 | `docker-compose.yml` / `Dockerfile` | **实际部署方式**（见 [deployment.md](deployment.md)） | 部署形态变更时 |
-| `right_config.json` / `service.json` | 平台菜单注册与 Chart 包配置（**当前未使用**） | 接入平台时 |
+| `right_config.json` | 平台菜单注册配置（**当前未使用**） | 接入平台时 |
 
 ## 7. AI 开发约束加载流程
 

@@ -88,7 +88,7 @@ my-dba/
 │
 ├── Dockerfile                    # 镜像构建（依赖层 / 代码层分开）
 ├── docker-compose.yml            # 容器编排（web / postgres / qdrant）
-├── package.py / service.json / service-mgr-tool/   # 平台化打包链路（未使用）
+├── package.py                    # 统一编译打包脚本（镜像 → chart → dat）
 │
 ├── openspec/                     # 变更提案与规格基线
 │   ├── project.md                # 项目上下文（约定、约束、外部依赖、已知问题）

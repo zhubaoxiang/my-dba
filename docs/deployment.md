@@ -17,7 +17,7 @@ docker build -t my-dba/my-dba:V1.0R01F00 .
 - **`ENV_TYPE=test` 在镜像里写死**，因此容器运行时读的是 `conf.ini` 的 `[db_test]` 段。改成部署环境对应的段落需要重建镜像或覆盖该环境变量
 - 编译类工具（`build-essential` 等）仅在 pip 构建 wheel 时需要，装完即卸以压体积
 - 构建上下文由 `.dockerignore` 排除 `venv` / `node_modules` / `.git` 等（约 220M）
-- 镜像名需与 `service.json` 的 `imageProjectName` / `imageRepoName` 保持一致
+- 镜像名与 tag 由 `docker-compose.yml` 的 `image:` 决定，构建时用同一个名字打 tag
 
 ## 启动
 
@@ -100,19 +100,16 @@ psql "postgresql://<用户>:<密码>@<主机>:<端口>/<库名>" -f src/sql/patc
 
 ## 附录：平台化部署（当前未使用）
 
-本项目**不在原平台底座上部署**，已改用 docker compose。以下能力与文件目前**未接入、未被调用**，保留仅为将来可能的平台化部署备查。**修改业务代码时不要依赖它们。**
+本项目**不在原平台底座上部署**，已改用 docker compose。以下为平台相关资产：`package.py` 是**仍在使用的统一编译打包脚本**（构建镜像 → 生成 chart 包 → 生成 dat 包），其余目前**未接入、未被调用**，保留仅为将来可能的平台化部署备查。**修改业务代码时不要依赖它们。**
 
-| 文件 / 目录 | 原用途 |
-|------------|--------|
-| `package.py` | dat 包打包脚本 |
-| `service-mgr-tool/` | Chart 打包工具 |
-| `service.json` | Chart 包服务定义（仅镜像名与 `docker-compose.yml` 对齐） |
+| 文件 / 目录 | 用途 |
+|------------|------|
+| `package.py` | **统一编译打包脚本**。取件路径（`service-mgr-tool/`、`service.json`）写在脚本开头 |
 | `src/right_config.json` | 菜单注册配置（`children` 数组） |
-| `src/hooks/install.py` / `uninstall.py` | 安装/卸载钩子：菜单注册与注销、SQL 初始化与数据清理 |
-| `src/scripts/bsa_register_menu.py` | 菜单注册 SDK（原设计经网关调用权限服务） |
-| `src/utils/bsa.py` | 底座客户端 |
+| `src/hooks/install.py` / `uninstall.py` | 安装/卸载钩子：菜单注册与注销、SQL 初始化与数据清理。二者以子进程方式调用已删除的 `scripts/bsa_register_menu.py`，将来若启用平台化部署需连同该脚本一并恢复 |
+| `src/utils/bsa.py` | 平台底座客户端 |
 
-打包链路（如将来需要）：
+打包流程：
 
 ```bash
 python3 package.py --clean

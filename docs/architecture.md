@@ -24,7 +24,7 @@
 | langchain-qdrant / qdrant-client | 1.1.0 / 1.19.1 | 向量库客户端 |
 | pypdf / beautifulsoup4 | 6.19.0 / 4.15.0 | 文档解析（PDF / HTML） |
 
-> `requests` 与 `urllib3` 因 langchain 生态顶替而跨大版本升级（`urllib3` 1.x → 2.x）。旧版只被 `utils/bsa.py` 与 `scripts/bsa_register_menu.py` 引用，而这两个文件**当前无调用方**（见 [deployment.md](deployment.md) 附录），升级不触碰活代码。
+> `requests` 与 `urllib3` 因 langchain 生态顶替而跨大版本升级（`urllib3` 1.x → 2.x）。旧版只被 `utils/bsa.py` 引用，而该文件**当前无调用方**（见 [deployment.md](deployment.md) 附录），升级不触碰活代码。
 
 ## 配置层级
 
@@ -122,7 +122,7 @@ src/                          # 后端代码根目录
 │
 ├── hooks/                    # 平台生命周期钩子（未使用）
 ├── jobs/                     # 定时任务目录（预留）
-├── scripts/                  # 运维脚本（平台菜单注册 SDK（未使用）、SQL 初始化）
+├── scripts/                  # 运维脚本（SQL 初始化）
 │
 └── sql/                      # 数据库 SQL
     ├── pg_struct.sql         # 全量表结构（新建库执行）
