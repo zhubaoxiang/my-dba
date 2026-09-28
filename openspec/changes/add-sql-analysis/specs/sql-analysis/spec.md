@@ -53,6 +53,17 @@
 
 - **WHEN** 未指定任何数据源
 - **THEN** 基于语法本身即可判定的规则 MUST 照常产出
+- **AND** 需要表结构才能判定的规则 MUST 被跳过并说明原因
+
+#### Scenario: JOIN 的判定
+
+- **WHEN** 语句包含 JOIN
+- **THEN** 系统 MUST 判定是否存在无连接条件的 JOIN，并 MUST 在能取得表结构时判定两侧连接键的类型是否匹配
+
+#### Scenario: GROUP BY 的判定
+
+- **WHEN** 语句包含 GROUP BY
+- **THEN** 系统 MUST 判定是否遗漏了未聚合的列，并 MUST 判定 GROUP BY 的列与 SELECT 中的非聚合列是否一致
 
 ### Requirement: 已纳管库的结构校验
 
@@ -67,6 +78,11 @@
 
 - **WHEN** 语句中对列的比较或运算存在明显的类型不匹配
 - **THEN** 系统 MUST 报出，并说明涉及的列与类型
+
+#### Scenario: 指出连接键类型不匹配
+
+- **WHEN** JOIN 两侧连接键的列类型不一致
+- **THEN** 系统 MUST 报出并指出涉及的列与类型，说明可能带来的隐式转换或索引失效
 
 #### Scenario: 未指定数据源时说明跳过原因
 

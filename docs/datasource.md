@@ -106,7 +106,7 @@ DDL 见 `src/sql/pg_struct.sql`（全量）与 `src/sql/patch.sql`（增量）�
 
 设计边界：**规则判定逻辑仍是代码**（不引入表达式引擎），只有元数据可配置。
 
-代码侧已完成（声明式规则、`analysis_rule` 模型、`catalog_issue` 以 `rule_code` 取代 `issue_type`），**数据库结构变更尚未执行**。落地步骤：
+代码侧已完成（声明式规则、`analysis_rule` 模型、`catalog_issue` 以 `rule_code` 取代 `issue_type`），**库结构补丁已在开发库（`dba` / `test`）执行**。其余环境的落地步骤：
 
 ```bash
 # 已有数据的库执行增量补丁（新库直接执行 pg_struct.sql 即可）
@@ -115,4 +115,4 @@ psql "postgresql://<用户>:<密码>@<主机>:<端口>/<库名>" -f src/sql/patc
 
 补丁会给 `catalog_issue` 补 `rule_code` / `rule_name` / `object_level` / `schema_name` 并删除 `issue_type`。旧行因 `rule_code` 为空属失效数据，确认可清空后手动执行 `DELETE FROM catalog_issue;`（该语句只写在 `patch.sql` 注释里，不会自动执行）。
 
-规则管理 API、前端规则页、阈值从 `conf.ini` 迁出等尚待实现。
+**剩余工作**：规则注册表的加载与覆盖合并（代码声明为全集、库为覆盖层）、规则管理 API、前端规则页、阈值从 `conf.ini` 迁出。SQL 分析能力（`add-sql-analysis`）排在本变更之后，届时会给注册表增加 scope 维度以承载语句级规则。
