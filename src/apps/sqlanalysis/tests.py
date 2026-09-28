@@ -9,7 +9,7 @@ from unittest import mock
 
 from django.test import SimpleTestCase
 
-from apps.sqlanalysis import analyzer, formatting, parse, schema
+from apps.sqlanalysis import analyzer, explain, formatting, parse, schema
 from apps.sqlanalysis.rules import registry
 from apps.sqlanalysis.schema import SchemaIndex, SchemaUnavailable, families_conflict, type_family
 from utils import custom_enum
@@ -491,3 +491,190 @@ class SchemaUnavailableTests(SimpleTestCase):
         ):
             index = schema.load_schema_index(7)
         self.assertEqual(index.column_type("users", "id"), "integer")
+
+
+class _FakeCursor:
+    def __init__(self, rows, fail_on=()):
+        self.rows = list(rows or [])
+        self.fail_on = tuple(fail_on)
+        self.executed = []
+
+    def execute(self, sql, *args):
+        self.executed.append(sql)
+        # 用 startswith 而不是 in：`EXPLAIN SELECT ...` 里也含 SELECT，
+        # 用 in 会让「只让真执行那一步失败」的用例变成 EXPLAIN 就失败
+        for marker in self.fail_on:
+            if sql.lstrip().startswith(marker):
+                raise RuntimeError("目标库拒绝执行")
+
+    def fetchall(self):
+        return self.rows
+
+    def fetchmany(self, size):
+        return self.rows[:size]
+
+    def close(self):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class _FakeConnection:
+    """
+    替身只读连接：记录所有真正发出去的语句，供断言「写操作有没有被执行」
+    """
+
+    def __init__(self, rows=None, fail_on=()):
+        self.db_type = custom_enum.DbTypeEnum.POSTGRESQL.value
+        self.cursors = []
+        self.rolled_back = 0
+        self.closed = False
+        self._rows = rows or []
+        self._fail_on = fail_on
+
+    def _make(self):
+        cursor = _FakeCursor(self._rows, self._fail_on)
+        self.cursors.append(cursor)
+        return cursor
+
+    def cursor(self, *args, **kwargs):
+        return self._make()
+
+    def probe_cursor(self, name=None):
+        return self._make()
+
+    def rollback(self):
+        self.rolled_back += 1
+
+    def close(self):
+        self.closed = True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+        return False
+
+    def issued_sql(self):
+        return [sql for cursor in self.cursors for sql in cursor.executed]
+
+
+class ExplainTests(SimpleTestCase):
+    """
+    试运行：**只有只读语句会被真正执行**，其余一律只出计划
+
+    这是整个模块唯一会碰到真实库的地方，判错了就是在别人的库上执行了不该执行的语句。
+    """
+
+    def run_with(self, sql, rows=None, fail_on=(), **kwargs):
+        connection = _FakeConnection(rows, fail_on)
+        with mock.patch.object(explain.datasource_services, "open_readonly_connection", return_value=connection):
+            return explain.execute(parse.parse_sql(sql), datasource_id=1, **kwargs), connection
+
+    def test_read_only_statement_is_executed(self):
+        result, connection = self.run_with("SELECT id FROM users", rows=[(1,), (2,)])
+        self.assertTrue(result["executed"])
+        self.assertEqual(result["row_count"], 2)
+        self.assertTrue(any(sql.startswith("EXPLAIN") for sql in connection.issued_sql()))
+        self.assertIn("SELECT id FROM users", connection.issued_sql()[-1])
+
+    def test_delete_is_not_executed(self):
+        result, connection = self.run_with("DELETE FROM users")
+        self.assertFalse(result["executed"])
+        self.assertEqual(result["row_count"], 0)
+        self.assertIn("未被执行", result["note"])
+        issued = connection.issued_sql()
+        self.assertEqual(len(issued), 1, "除了 EXPLAIN 不该再发出任何语句")
+        self.assertTrue(issued[0].startswith("EXPLAIN"), "唯一发出的是 EXPLAIN")
+
+    def test_ddl_is_not_executed(self):
+        result, connection = self.run_with("DROP TABLE users")
+        self.assertFalse(result["executed"])
+        self.assertEqual(len(connection.issued_sql()), 1)
+        self.assertIn("结构变更", result["note"])
+
+    def test_update_is_not_executed(self):
+        result, connection = self.run_with("UPDATE users SET name = 'x'")
+        self.assertFalse(result["executed"])
+        self.assertEqual(len(connection.issued_sql()), 1)
+
+    def test_explain_analyze_is_not_executed(self):
+        """EXPLAIN ANALYZE 会真执行语句，绝不能因为「看着像 EXPLAIN」就放行"""
+        result, connection = self.run_with("EXPLAIN ANALYZE SELECT id FROM users")
+        self.assertFalse(result["executed"])
+        self.assertEqual(len(connection.issued_sql()), 1)
+
+    def test_multi_statement_is_rejected(self):
+        """多语句里若混有写操作很容易看漏，直接不支持"""
+        with self.assertRaises(explain.ExecutionRejected) as ctx:
+            explain.execute(parse.parse_sql("SELECT 1; SELECT 2"), datasource_id=1)
+        self.assertIn("一条语句", str(ctx.exception))
+
+    def test_truncated_result_is_reported(self):
+        """只报取到的行数而不说被截断，使用者会以为结果就这么多"""
+        result, _ = self.run_with("SELECT id FROM users LIMIT 10", rows=[(i,) for i in range(6)], max_row_count=3)
+        self.assertTrue(result["truncated"])
+        self.assertEqual(result["row_count"], 3)
+        self.assertIn("截断", result["note"])
+
+    def test_untruncated_result_has_no_note(self):
+        result, _ = self.run_with("SELECT id FROM users", rows=[(1,)], max_row_count=10)
+        self.assertFalse(result["truncated"])
+        self.assertEqual(result["note"], "")
+
+    def test_plan_failure_on_a_write_statement_is_not_an_error(self):
+        """
+        DDL 生成不了执行计划是目标库的能力边界（PostgreSQL 的 EXPLAIN 只支持
+        SELECT/INSERT/UPDATE/DELETE），不是使用者的 SQL 有问题——不能因此报错
+        """
+        result, _ = self.run_with("DROP TABLE users", fail_on=("EXPLAIN",))
+        self.assertFalse(result["executed"])
+        self.assertEqual(result["plan"], "")
+        self.assertIn("未被执行", result["note"])
+        self.assertIn("不支持为这类语句生成执行计划", result["note"])
+
+    def test_plan_failure_on_a_read_only_statement_is_an_error(self):
+        """只读语句拿不到计划才是真失败，要如实说明，不能伪装成空结果"""
+        with self.assertRaises(explain.ExecutionRejected) as ctx:
+            self.run_with("SHOW TABLES", fail_on=("EXPLAIN",))
+        self.assertIn("未能取得执行计划", str(ctx.exception))
+
+    def test_execution_failure_is_reported(self):
+        with self.assertRaises(explain.ExecutionRejected) as ctx:
+            self.run_with("SELECT id FROM users", fail_on=("SELECT",))
+        self.assertIn("执行失败", str(ctx.exception))
+
+    def test_datasource_unavailable_is_reported(self):
+        with (
+            mock.patch.object(
+                explain.datasource_services,
+                "open_readonly_connection",
+                side_effect=explain.datasource_services.DatasourceUnavailable("数据源 9 不存在或已删除"),
+            ),
+            self.assertRaises(explain.ExecutionRejected) as ctx,
+        ):
+            explain.execute(parse.parse_sql("SELECT 1"), datasource_id=9)
+        self.assertIn("不存在", str(ctx.exception))
+
+    def test_syntax_error_means_nothing_to_execute(self):
+        """解析不出语句时根本没有东西可试运行，必须明确拒绝而不是去连库"""
+        broken = "SELECT id,\n  FROM users\nWHERE"
+        self.assertFalse(parse.parse_sql(broken).ok)
+        with (
+            mock.patch.object(explain.datasource_services, "open_readonly_connection") as opener,
+            self.assertRaises(explain.ExecutionRejected) as ctx,
+        ):
+            explain.execute(parse.parse_sql(broken), datasource_id=1)
+        self.assertIn("没有可执行的语句", str(ctx.exception))
+        opener.assert_not_called()
+
+    def test_connection_is_rolled_back_and_closed(self):
+        """只读事务用完即回滚，不留下悬挂事务"""
+        _, connection = self.run_with("SELECT id FROM users", rows=[(1,)])
+        self.assertGreaterEqual(connection.rolled_back, 1)
+        self.assertTrue(connection.closed)

@@ -11,9 +11,12 @@
 
 from datetime import datetime
 
+import psycopg2
+import pymysql
+
 from apps.datasource import analyzer, models
 from apps.datasource.collectors import get_collector
-from utils import background, common, custom_enum
+from utils import background, common, crypto, custom_enum
 from utils.configure import CONF_ATTR
 from utils.logger import get_logger
 
@@ -158,6 +161,114 @@ def _save_issues(datasource, snapshot, issues: list, creator: str):
             for item in issues
         ]
     )
+
+
+class DatasourceUnavailable(Exception):
+    """
+    数据源不存在或不可用
+    """
+
+
+class ReadonlyConnection:
+    """
+    目标库的**只读短连接**，用作上下文管理器
+
+    只读是**服务端保证**（PostgreSQL 的 `set_session(readonly=True)`、MySQL 的
+    `SET SESSION TRANSACTION READ ONLY`）：即便语句里带了写操作，目标库也会拒绝执行，
+    而不是靠调用方自觉。
+
+    PostgreSQL 连接是**非 autocommit** 的：服务端游标（`DECLARE`）必须在事务里才能用，
+    而只有服务端游标才能在取到 N 行后停下——否则 `SELECT *` 会先把整表读进内存。
+    调用方用完请 `rollback()`（只读会话，回滚无副作用），`close()` 时会自动兜底。
+    """
+
+    def __init__(self, connection, db_type: int):
+        self.connection = connection
+        self.db_type = db_type
+
+    def cursor(self, *args, **kwargs):
+        return self.connection.cursor(*args, **kwargs)
+
+    def probe_cursor(self, name: str = None):
+        """
+        流式游标：逐批取数，**不会把整个结果集读进内存**
+
+        这是试运行能安全跑 `SELECT *` 的前提——普通游标会在 execute 时把全部行拉回来。
+        方言差异留在这里，调用方只管用。
+        """
+        if self.db_type == custom_enum.DbTypeEnum.POSTGRESQL.value:
+            return self.connection.cursor(name=name or "my_dba_probe")
+        return self.connection.cursor(pymysql.cursors.SSCursor)
+
+    def rollback(self):
+        """
+        结束当前只读事务；只读会话里回滚没有副作用
+        """
+        try:
+            self.connection.rollback()
+        except Exception:  # noqa: BLE001 回滚失败不影响已取得的结果
+            LOGGER.warning("回滚只读事务失败")
+
+    def close(self):
+        try:
+            self.connection.close()
+        except Exception:  # noqa: BLE001 关闭失败不影响已取得的结果
+            LOGGER.warning("关闭只读连接失败")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
+
+
+def open_readonly_connection(datasource_id: int, statement_timeout: int = None) -> ReadonlyConnection:
+    """
+    按数据源 id 开一条只读短连接，供 SQL 试运行使用
+
+    **跨模块请调用本函数，不要自己解密凭据、也不要直接读 Datasource**（architecture.md）。
+    凭据解密、只读会话与超时设置都在这里完成。调用方负责关闭，建议用 `with`。
+    """
+    row = models.Datasource.objects.filter(id=datasource_id, is_deleted=False).first()
+    if row is None:
+        raise DatasourceUnavailable(f"数据源 {datasource_id} 不存在或已删除")
+
+    config = load_collect_config()
+    timeout = int(config["statement_timeout"] if statement_timeout is None else statement_timeout)
+    credential = crypto.decrypt(row.password)
+    timeout_ms = timeout * 1000
+
+    if row.db_type == custom_enum.DbTypeEnum.POSTGRESQL.value:
+        connection = psycopg2.connect(
+            host=row.host,
+            port=row.port,
+            dbname=row.db_name,
+            user=row.username,
+            password=credential,
+            connect_timeout=config["connect_timeout"],
+            application_name="my-dba-sql-analysis",
+        )
+        connection.set_session(readonly=True, autocommit=False)
+        with connection.cursor() as cursor:
+            cursor.execute("SET statement_timeout = %s", (timeout_ms,))
+    else:
+        connection = pymysql.connect(
+            host=row.host,
+            port=row.port,
+            database=row.db_name,
+            user=row.username,
+            password=credential,
+            connect_timeout=config["connect_timeout"],
+            charset="utf8mb4",
+            autocommit=True,
+            program_name="my-dba-sql-analysis",
+        )
+        with connection.cursor() as cursor:
+            cursor.execute("SET SESSION TRANSACTION READ ONLY")
+            cursor.execute("SET SESSION MAX_EXECUTION_TIME = %s", (timeout_ms,))
+
+    return ReadonlyConnection(connection, row.db_type)
 
 
 def datasource_brief(datasource_id: int):
