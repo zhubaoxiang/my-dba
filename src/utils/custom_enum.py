@@ -132,3 +132,19 @@ class MessageRoleEnum(models.IntegerChoices):
 
     USER = 1, "提问"
     ASSISTANT = 2, "回答"
+
+
+class StatementKindEnum(models.IntegerChoices):
+    """
+    SQL 语句类别
+
+    决定「能不能真跑」：只有只读语句允许在目标库上实际执行，
+    其余一律只出执行计划。**按最严格的一条判定**，多语句里有一条非只读就整批不执行。
+    """
+
+    READ_ONLY = 1, "只读"
+    DML = 2, "DML"
+    DDL = 3, "DDL"
+    # 认不出来的（SET / VACUUM / BEGIN…）。分类采用白名单，认不出即按非只读处理——
+    # 判错这一边只是「少跑一条本来能跑的语句」，判错另一边是在真实库上执行了不该执行的语句
+    OTHER = 4, "其他"

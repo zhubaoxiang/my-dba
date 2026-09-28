@@ -1,31 +1,31 @@
 ## 1. 准备
 
-- [ ] 1.1 `requirements.txt` 增加 sqlglot 并安装；重跑既有 131 项测试确认无回归
-- [ ] 1.2 新建模块骨架 `src/apps/sqlanalysis/`（`__init__.py` / `views.py` / `serializers.py` / `filters.py`）
-- [ ] 1.3 `apps/base/baseviews.py` 增加**无模型 ViewSet 基类**（只承载权限与统一响应，供只有自定义 action 的接口用）
-- [ ] 1.4 `src/config/urls.py` 注册 `{SYS_NAME}/v1/sql-analysis`
-- [ ] 1.5 `utils/custom_enum.py` 增加所需枚举（方言、语句类别、问题级别复用既有）
+- [x] 1.1 `requirements.txt` 增加 sqlglot 并安装；重跑既有 131 项测试确认无回归
+- [x] 1.2 新建模块骨架 `src/apps/sqlanalysis/`（`__init__.py` / `views.py` / `serializers.py` / `filters.py`）
+- [x] 1.3 `apps/base/baseviews.py` 增加**无模型 ViewSet 基类**（只承载权限与统一响应，供只有自定义 action 的接口用）
+- [x] 1.4 `src/config/urls.py` 注册 `{SYS_NAME}/v1/sql-analysis`
+- [x] 1.5 `utils/custom_enum.py` 增加所需枚举（方言、语句类别、问题级别复用既有）
 
 ## 2. 静态层：解析与格式化
 
-- [ ] 2.1 `parse.py`：按方言解析，返回语法树 + 语句类别（只读 / DML / DDL）
-- [ ] 2.2 `parse.py`：语法错误转为带**位置**的可读信息
-- [ ] 2.3 `formatting.py`：输出美化语句（保持语义不变）
-- [ ] 2.4 `parse.py`：解析失败时的降级结果（错误 + 原始语句 + 后续步骤标记为未进行）
-- [ ] 2.5 单测：各方言正例、语法错误定位、美化幂等（格式化两次结果一致）、降级路径
+- [x] 2.1 `parse.py`：按方言解析，返回语法树 + 语句类别（只读 / DML / DDL）
+- [x] 2.2 `parse.py`：语法错误转为带**位置**的可读信息
+- [x] 2.3 `formatting.py`：输出美化语句（保持语义不变）
+- [x] 2.4 `parse.py`：解析失败时的降级结果（错误 + 原始语句 + 后续步骤标记为未进行）
+- [x] 2.5 单测：各方言正例、语法错误定位、美化幂等（格式化两次结果一致）、降级路径
 
 ## 3. 静态层：规则分析
 
-- [ ] 3.1 `rules/context.py`：`SqlRuleContext`——持有语句列表、原始 SQL、方言与**可选的表结构索引**，产出统一问题项
-- [ ] 3.2 `rules/definitions.py`：`RuleDefinition`（含 `needs_schema` 声明）与第一批规则判定函数
-- [ ] 3.3 `rules/registry.py`：规则清单、查找、按语句类别与 `needs_schema` 过滤
-- [ ] 3.4 危险写操作规则：`delete_without_where`、`update_without_where`、`drop_table`、`drop_column`、`truncate_table`
-- [ ] 3.5 JOIN 规则：`join_without_condition`（无连接条件）、`join_key_type_mismatch`（连接键类型不匹配，**需快照**）
-- [ ] 3.6 GROUP BY 规则：`group_by_missing_column`（遗漏非聚合列）、`group_by_select_mismatch`（与 SELECT 列不一致）
-- [ ] 3.7 性能规则：`function_on_column`、`implicit_cast`、`select_star`、`no_limit`、`leading_wildcard_like`
-- [ ] 3.8 规范规则：`insert_without_column_list`、`ddl_locks_table`
-- [ ] 3.9 `analyzer.py`：遍历规则、注入上下文、校验产出（沿用 `datasource/analyzer.py` 的做法）
-- [ ] 3.10 单测：**每条规则 MUST 配正例与反例**；同输入结果可复现；纯语句规则不依赖数据源也能跑
+- [x] 3.1 `rules/context.py`：`SqlRuleContext`——持有语句列表、原始 SQL、方言与**可选的表结构索引**，产出统一问题项
+- [x] 3.2 `rules/definitions.py`：`RuleDefinition`（含 `needs_schema` 声明）与第一批规则判定函数
+- [x] 3.3 `rules/registry.py`：规则清单、查找、按语句类别与 `needs_schema` 过滤
+- [x] 3.4 危险写操作规则：`delete_without_where`、`update_without_where`、`drop_table`、`drop_column`、`truncate_table`
+- [x] 3.5 JOIN 规则：`join_without_condition`（无连接条件）、`join_key_type_mismatch`（连接键类型不匹配，**需快照**）
+- [x] 3.6 GROUP BY 规则：`group_by_missing_column`（遗漏非聚合列）、`group_by_select_mismatch`（与 SELECT 列不一致）
+- [x] 3.7 性能规则：`function_on_column`、`implicit_cast`、`select_star`、`no_limit`、`leading_wildcard_like`
+- [x] 3.8 规范规则：`insert_without_column_list`、`ddl_locks_table`
+- [x] 3.9 `analyzer.py`：遍历规则、注入上下文、校验产出（沿用 `datasource/analyzer.py` 的做法）
+- [x] 3.10 单测：**每条规则 MUST 配正例与反例**；同输入结果可复现；纯语句规则不依赖数据源也能跑
 
 ## 4. 需快照的规则
 
