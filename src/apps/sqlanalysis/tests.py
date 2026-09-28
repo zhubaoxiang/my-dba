@@ -5,11 +5,14 @@ SQL 分析模块单元测试
 「哪些语句允许真跑」是本模块最要紧的一条判定，单独一组重点覆盖。
 """
 
+import json
 from unittest import mock
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
+from rest_framework.test import APIClient
 
-from apps.sqlanalysis import analyzer, explain, formatting, parse, schema
+from apps.datasource import models
+from apps.sqlanalysis import analyzer, explain, formatting, interpret, parse, schema, views
 from apps.sqlanalysis.rules import registry
 from apps.sqlanalysis.schema import SchemaIndex, SchemaUnavailable, families_conflict, type_family
 from utils import custom_enum
@@ -678,3 +681,248 @@ class ExplainTests(SimpleTestCase):
         _, connection = self.run_with("SELECT id FROM users", rows=[(1,)])
         self.assertGreaterEqual(connection.rolled_back, 1)
         self.assertTrue(connection.closed)
+
+
+class _StubChat:
+    """替身对话模型"""
+
+    def __init__(self, reply_text="", raises=None):
+        self.reply_text = reply_text
+        self.raises = raises
+        self.calls = 0
+
+    def invoke(self, messages, **kwargs):
+        self.calls += 1
+        if self.raises is not None:
+            raise self.raises
+        from langchain_core.messages import AIMessage
+
+        return AIMessage(content=self.reply_text)
+
+
+class InterpretTests(SimpleTestCase):
+    """
+    模型解读：与规则判定分区，且不许编造出处
+
+    「回归不得静默」「来源不许编造」是项目在知识问答里定下的两条约束，这里同样适用：
+    使用者必须能分辨哪些是规则判定的确定结论、哪些是模型的推测。
+    """
+
+    ISSUES = [
+        {
+            "rule_code": "delete_without_where",
+            "issue_level": custom_enum.IssueLevelEnum.HIGH.value,
+            "target": "users",
+            "description": "这条 DELETE 没有 WHERE 条件",
+        }
+    ]
+
+    def run_interpret(self, reply_text="", raises=None, with_provider=True, issues=None):
+        chat = _StubChat(reply_text, raises)
+        provider = object() if with_provider else None
+        with (
+            mock.patch.object(interpret.llm, "active_chat_provider", return_value=provider),
+            mock.patch.object(interpret.llm, "build_chat_model", return_value=chat),
+        ):
+            return (
+                interpret.interpret("DELETE FROM users", self.ISSUES if issues is None else issues),
+                chat,
+            )
+
+    def test_no_chat_provider_degrades_with_actionable_hint(self):
+        result, chat = self.run_interpret(with_provider=False)
+        self.assertFalse(result["available"])
+        self.assertIn("对话模型", result["note"])
+        self.assertIn("模型配置", result["note"], "必须告诉使用者去哪里配")
+        self.assertEqual(result["explanations"], [])
+        self.assertEqual(chat.calls, 0, "没配模型就不该发起调用")
+
+    def test_explanations_and_observations_land_in_separate_fields(self):
+        payload = json.dumps(
+            {
+                "explanations": [{"rule_code": "delete_without_where", "text": "会删光整表"}],
+                "observations": ["这个表可能还有触发器"],
+            }
+        )
+        result, _ = self.run_interpret(payload)
+        self.assertTrue(result["available"])
+        self.assertEqual([item["rule_code"] for item in result["explanations"]], ["delete_without_where"])
+        self.assertEqual(result["observations"], ["这个表可能还有触发器"])
+
+    def test_observations_carry_the_disclaimer(self):
+        payload = json.dumps({"explanations": [], "observations": ["建议确认锁竞争"]})
+        result, _ = self.run_interpret(payload)
+        self.assertIn("未经规则验证", result["observations_note"])
+
+    def test_no_observations_means_no_disclaimer(self):
+        payload = json.dumps({"explanations": [], "observations": []})
+        result, _ = self.run_interpret(payload)
+        self.assertEqual(result["observations_note"], "")
+        self.assertTrue(result["available"])
+
+    def test_json_wrapped_in_a_code_fence_is_accepted(self):
+        payload = "```json\n" + json.dumps({"explanations": [], "observations": ["x"]}) + "\n```"
+        result, _ = self.run_interpret(payload)
+        self.assertTrue(result["available"])
+        self.assertEqual(result["observations"], ["x"])
+
+    def test_fabricated_rule_code_is_dropped(self):
+        """模型报了一个不存在的规则就是编造出处，必须丢弃——与「来源不许编造」同一条约束"""
+        payload = json.dumps(
+            {
+                "explanations": [
+                    {"rule_code": "delete_without_where", "text": "真的"},
+                    {"rule_code": "made_up_rule", "text": "编的"},
+                ],
+                "observations": [],
+            }
+        )
+        result, _ = self.run_interpret(payload)
+        self.assertEqual([item["rule_code"] for item in result["explanations"]], ["delete_without_where"])
+
+    def test_malformed_output_degrades_with_a_reason(self):
+        result, _ = self.run_interpret("我觉得这条 SQL 还行")
+        self.assertFalse(result["available"])
+        self.assertIn("未能完成", result["note"])
+
+    def test_model_failure_degrades_with_a_reason(self):
+        result, _ = self.run_interpret(raises=RuntimeError("模型超时"))
+        self.assertFalse(result["available"])
+        self.assertIn("失败", result["note"])
+
+    def test_clean_sql_still_lets_the_model_look_for_observations(self):
+        """规则没判出问题时模型仍可提观察——这正是「补充规则之外」的价值所在"""
+        payload = json.dumps({"explanations": [], "observations": ["建议确认该表的锁竞争"]})
+        result, _ = self.run_interpret(payload, issues=[])
+        self.assertTrue(result["available"])
+        self.assertEqual(result["observations"], ["建议确认该表的锁竞争"])
+
+    def test_degraded_result_keeps_the_same_shape(self):
+        """降级结果与正常结果的字段必须一致，前端才不用到处判空"""
+        degraded, _ = self.run_interpret(with_provider=False)
+        normal, _ = self.run_interpret(json.dumps({"explanations": [], "observations": []}))
+        self.assertEqual(sorted(degraded.keys()), sorted(normal.keys()))
+
+
+class SqlAnalysisApiTests(TestCase):
+    """
+    接口级端到端：字段分区、解析失败降级、试运行的拒绝路径
+
+    模型调用一律替换掉（不依赖外部服务）；数据库是真的——数据源存在性、是否已采集
+    这类判定离开库反而测不准，而它们正是「未做校验必须说明原因」的落点。
+    """
+
+    URL = "/my-dba/v1/sql-analysis"
+
+    def setUp(self):
+        self.client = APIClient()
+        self.interpretation = {
+            "available": False,
+            "note": "（测试替身）",
+            "explanations": [],
+            "observations": [],
+            "observations_note": "",
+        }
+        patcher = mock.patch.object(views.interpret, "interpret", return_value=self.interpretation)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def post(self, path, payload):
+        return self.client.post(f"{self.URL}/{path}", payload, format="json").json()
+
+    def make_datasource(self, name="ds"):
+        return models.Datasource.objects.create(
+            name=name,
+            db_type=custom_enum.DbTypeEnum.POSTGRESQL.value,
+            host="127.0.0.1",
+            port=5432,
+            db_name="d",
+            username="u",
+            password="p",
+            creator="test",
+        )
+
+    def test_analyze_returns_every_section_separately(self):
+        """规则判定、结构校验、模型解读在响应里各占一个字段，前端才好分区渲染"""
+        data = self.post("analyze", {"sql": "SELECT * FROM users"})["data"]
+        for key in (
+            "sql",
+            "dialect",
+            "formatted",
+            "syntax",
+            "issues",
+            "schema_check",
+            "interpretation",
+            "evaluated_rules",
+            "skipped_rules",
+        ):
+            self.assertIn(key, data)
+        self.assertTrue(data["syntax"]["ok"])
+        self.assertIn("select_star", [item["rule_code"] for item in data["issues"]])
+
+    def test_analyze_says_schema_check_was_skipped_and_why(self):
+        data = self.post("analyze", {"sql": "SELECT * FROM users"})["data"]
+        self.assertFalse(data["schema_check"]["performed"])
+        self.assertIn("未指定数据源", data["schema_check"]["note"])
+        self.assertIn("unknown_table", data["skipped_rules"], "跳过的规则要能解释")
+
+    def test_analyze_formats_the_sql(self):
+        data = self.post("analyze", {"sql": "select id from users where id=1 limit 1"})["data"]
+        self.assertIn("SELECT", data["formatted"])
+        self.assertIn("\n", data["formatted"])
+
+    def test_analyze_reports_the_dialect(self):
+        self.assertEqual(self.post("analyze", {"sql": "SELECT 1", "dialect": 2})["data"]["dialect"], 2)
+
+    def test_analyze_degrades_on_syntax_error(self):
+        """解析失败不是整体失败：仍返回语法错误与原始语句，并说明后续步骤未进行"""
+        data = self.post("analyze", {"sql": "SELECT id,\n  FROM users\nWHERE"})["data"]
+        self.assertFalse(data["syntax"]["ok"])
+        self.assertIsNotNone(data["syntax"]["errors"][0]["line"], "必须给出出错位置")
+        self.assertEqual(data["issues"], [])
+        self.assertFalse(data["schema_check"]["performed"])
+        self.assertIn("未能解析", data["schema_check"]["note"])
+        self.assertEqual(data["evaluated_rules"], [])
+
+    def test_analyze_rejects_empty_sql(self):
+        self.assertEqual(self.post("analyze", {"sql": "   "})["code"], 4000)
+
+    def test_analyze_rejects_unknown_datasource(self):
+        self.assertEqual(self.post("analyze", {"sql": "SELECT 1", "datasource_id": 999999})["code"], 4004)
+
+    def test_analyze_explains_an_uncollected_datasource(self):
+        datasource = self.make_datasource()
+        data = self.post("analyze", {"sql": "SELECT 1", "datasource_id": datasource.id})["data"]
+        self.assertFalse(data["schema_check"]["performed"])
+        self.assertIn("尚未采集", data["schema_check"]["note"])
+
+    def test_execute_requires_a_datasource(self):
+        self.assertEqual(self.post("execute", {"sql": "SELECT 1"})["code"], 4000)
+
+    def test_execute_rejects_unknown_datasource(self):
+        self.assertEqual(self.post("execute", {"sql": "SELECT 1", "datasource_id": 999999})["code"], 4004)
+
+    def test_execute_rejects_multi_statement_in_unified_format(self):
+        """多语句被拒时走统一格式，且**不会去连库**"""
+        datasource = self.make_datasource()
+        with mock.patch.object(views.explain.datasource_services, "open_readonly_connection") as opener:
+            payload = self.post("execute", {"sql": "SELECT 1; SELECT 2", "datasource_id": datasource.id})
+        self.assertEqual(payload["code"], 4017)
+        self.assertIn("一条语句", payload["message"])
+        opener.assert_not_called()
+
+    def test_execute_does_not_run_a_write_statement(self):
+        datasource = self.make_datasource()
+        connection = _FakeConnection()
+        with mock.patch.object(views.explain.datasource_services, "open_readonly_connection", return_value=connection):
+            data = self.post("execute", {"sql": "DELETE FROM users", "datasource_id": datasource.id})["data"]
+        self.assertFalse(data["executed"])
+        self.assertEqual(len(connection.issued_sql()), 1, "除了 EXPLAIN 不该发出任何语句")
+
+    def test_execute_runs_a_read_only_statement(self):
+        datasource = self.make_datasource()
+        connection = _FakeConnection(rows=[(1,), (2,)])
+        with mock.patch.object(views.explain.datasource_services, "open_readonly_connection", return_value=connection):
+            data = self.post("execute", {"sql": "SELECT id FROM users", "datasource_id": datasource.id})["data"]
+        self.assertTrue(data["executed"])
+        self.assertEqual(data["row_count"], 2)

@@ -49,19 +49,19 @@
 
 ## 6. 模型解读
 
-- [ ] 6.1 `interpret.py`：把规则命中清单交给对话模型，产出逐条解读
-- [ ] 6.2 `interpret.py`：模型可补充规则之外的观察，**单独成字段**并标注未经规则验证
-- [ ] 6.3 未配置对话模型时：规则结果照常返回，解读部分给出可操作提示，**不静默降级**
-- [ ] 6.4 复用 `knowledge.llm` 的模型构造与 `llm_provider` 的生效配置读取（不重复实现）
-- [ ] 6.5 单测：分区字段不混、未配置模型时的降级、模型输出异常时的兜底
+- [x] 6.1 `interpret.py`：把规则命中清单交给对话模型，产出逐条解读
+- [x] 6.2 `interpret.py`：模型可补充规则之外的观察，**单独成字段**并标注未经规则验证
+- [x] 6.3 未配置对话模型时：规则结果照常返回，解读部分给出可操作提示，**不静默降级**
+- [x] 6.4 复用 `knowledge.llm` 的模型构造与 `llm_provider` 的生效配置读取（不重复实现）
+- [x] 6.5 单测：分区字段不混、未配置模型时的降级、模型输出异常时的兜底
 
 ## 7. 接口
 
-- [ ] 7.1 `serializers.py`：`analyze` 与 `execute` 的入参校验（SQL 非空与长度上限、方言合法、数据源存在）
-- [ ] 7.2 `views.py`：`POST /sql-analysis/analyze`——解析 + 规则 + 结构校验 + 解读
-- [ ] 7.3 `views.py`：`POST /sql-analysis/execute`——显式触发的试运行
-- [ ] 7.4 响应结构：`formatted` / `syntax` / `issues[]` / `schema_check` / `execution` / `explanation` / `observations[]` **互相分开**
-- [ ] 7.5 单测：接口级端到端（mock 解析与模型），确认识别失败走统一格式且不开执行
+- [x] 7.1 `serializers.py`：`analyze` 与 `execute` 的入参校验（SQL 非空与长度上限、方言合法、数据源存在）
+- [x] 7.2 `views.py`：`POST /sql-analysis/analyze`——解析 + 规则 + 结构校验 + 解读
+- [x] 7.3 `views.py`：`POST /sql-analysis/execute`——显式触发的试运行
+- [x] 7.4 响应结构：`formatted` / `syntax` / `issues[]` / `schema_check` / `execution` / `explanation` / `observations[]` **互相分开**
+- [x] 7.5 单测：接口级端到端（mock 解析与模型），确认识别失败走统一格式且不开执行
 
 ## 8. 前端
 

@@ -18,6 +18,7 @@ from rest_framework.routers import DefaultRouter
 
 from apps.datasource import views as datasource_views
 from apps.knowledge import views as knowledge_views
+from apps.sqlanalysis import views as sqlanalysis_views
 from apps.test import views as test_views
 
 # System name prefix for URL paths (change this when initializing the project)
@@ -36,5 +37,6 @@ router.register(rf"{SYS_NAME}/v1/llm-provider", knowledge_views.LlmProviderView,
 router.register(rf"{SYS_NAME}/v1/knowledge-base", knowledge_views.KnowledgeBaseView, basename="knowledge_base")
 router.register(rf"{SYS_NAME}/v1/kb-document", knowledge_views.KbDocumentView, basename="kb_document")
 router.register(rf"{SYS_NAME}/v1/qa-session", knowledge_views.QaSessionView, basename="qa_session")
+router.register(rf"{SYS_NAME}/v1/sql-analysis", sqlanalysis_views.SqlAnalysisView, basename="sql_analysis")
 
 urlpatterns += router.urls
