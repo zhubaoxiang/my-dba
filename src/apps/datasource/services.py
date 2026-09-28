@@ -160,6 +160,19 @@ def _save_issues(datasource, snapshot, issues: list, creator: str):
     )
 
 
+def datasource_brief(datasource_id: int):
+    """
+    按 id 取数据源的简要信息，不存在返回 None
+
+    **跨模块请调用本函数做存在性判断与类型取用，不要直接查 Datasource**
+    （architecture.md 跨模块约束）。不带出任何凭据字段。
+    """
+    row = models.Datasource.objects.filter(id=datasource_id, is_deleted=False).first()
+    if row is None:
+        return None
+    return {"id": row.id, "name": row.name, "db_type": row.db_type, "is_enabled": row.is_enabled}
+
+
 def latest_snapshot(datasource_id: int):
     return (
         models.MetadataSnapshot.objects.filter(datasource_id=datasource_id, is_deleted=False)

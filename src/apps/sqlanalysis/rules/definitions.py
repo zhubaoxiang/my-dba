@@ -14,6 +14,7 @@ from collections.abc import Callable
 
 from sqlglot import exp
 
+from apps.sqlanalysis.schema import SchemaIndex, families_conflict, type_family
 from utils import custom_enum
 
 _HIGH = custom_enum.IssueLevelEnum.HIGH
@@ -380,6 +381,243 @@ def _check_leading_wildcard_like(ctx):
 
 
 # ----------------------------------------------------------------------
+# 需快照的规则
+#
+# 这几条要读采集快照里的表结构。未绑定数据源时由框架跳过并记录，不会静默少跑。
+# ----------------------------------------------------------------------
+
+
+def _local_names(statement) -> set:
+    """
+    语句内自定义的名字（CTE 名、子查询别名）——它们不是真实表，不能拿去快照里找
+    """
+    names = set()
+    for node in statement.expression.find_all(exp.CTE, exp.Subquery):
+        alias = node.args.get("alias")
+        name = getattr(alias, "name", "") or ""
+        if name:
+            names.add(name.lower())
+    return names
+
+
+def _alias_map(statement) -> dict:
+    """
+    语句里能对应到真实表的引用：别名或表名 -> (表名, 模式)
+    """
+    local = _local_names(statement)
+    mapping = {}
+    for table in statement.expression.find_all(exp.Table):
+        name = table.name or ""
+        if not name or name.lower() in local:
+            continue
+        mapping[(table.alias_or_name or name).lower()] = (name, table.db or None)
+    return mapping
+
+
+def _single_target(statement, aliases):
+    """
+    整条语句只引用一张真实表、且没有 CTE/子查询别名时，未限定的列名才能确定归属；
+    其余情况无法判断，宁可漏报也不误报
+    """
+    local = _local_names(statement)
+    real_tables = [
+        table
+        for table in statement.expression.find_all(exp.Table)
+        if (table.name or "") and (table.name or "").lower() not in local
+    ]
+    if len(real_tables) == 1 and len(aliases) == 1 and not local:
+        return next(iter(aliases.values()))
+    return None
+
+
+def _resolve_column(ctx, aliases, column, single=None):
+    """
+    把列解析成 (表名, 列名, 类型族)；解析不了返回 None
+
+    比较表达式的两侧不一定是列（可能是字面量、函数调用），先挡掉。
+    """
+    if not isinstance(column, exp.Column):
+        return None
+    qualifier = (column.table or "").lower()
+    target = aliases.get(qualifier) if qualifier else single
+    if target is None:
+        return None
+    table_name, schema = target
+    data_type = ctx.schema.column_type(table_name, column.name, schema)
+    if not data_type:
+        return None
+    return table_name, column.name, type_family(data_type)
+
+
+def _check_unknown_table(ctx):
+    if not ctx.has_schema:
+        return []
+    issues = []
+    for statement in ctx.statements:
+        local = _local_names(statement)
+        seen = set()
+        for table in statement.expression.find_all(exp.Table):
+            name = table.name or ""
+            if not name or name.lower() in local:
+                continue
+            key = (name.lower(), (table.db or "").lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            if ctx.schema.find_table(name, table.db or None) is not None:
+                continue
+            issues.append(
+                ctx.issue(
+                    description=f"语句引用了表 {name}，但它不在最近一次采集的快照里"
+                    f"（表名可能写错，或该表是采集之后新建的、快照已过期）。",
+                    suggestion="核对表名；若该表确实存在，重新采集一次该数据源以刷新快照。",
+                    statement=statement,
+                    target=name,
+                )
+            )
+    return issues
+
+
+def _check_unknown_column(ctx):
+    """
+    注意不能复用 `_resolve_column`：那个函数是**为取类型**设计的，列不存在或类型取不到时
+    返回 None 表示「判不了」；而这条规则要判的恰恰是「列不存在」本身，得单独解析表再查列。
+    """
+    if not ctx.has_schema:
+        return []
+    issues = []
+    for statement in ctx.statements:
+        aliases = _alias_map(statement)
+        if not aliases:
+            continue
+        single = _single_target(statement, aliases)
+        for column in statement.expression.find_all(exp.Column):
+            qualifier = (column.table or "").lower()
+            target = aliases.get(qualifier) if qualifier else single
+            if target is None:
+                continue
+            table_name, schema_name = target
+            table = ctx.schema.find_table(table_name, schema_name)
+            if table is None:
+                continue  # 表本身就不存在，由 unknown_table 报，不在这里重复
+            if SchemaIndex.find_column(table, column.name) is not None:
+                continue
+            issues.append(
+                ctx.issue(
+                    description=f"列 {column.name} 在表 {table_name} 中不存在（依最近一次采集的快照）。",
+                    suggestion="核对列名拼写；若该列是采集之后新增的，重新采集一次该数据源。",
+                    statement=statement,
+                    target=f"{table_name}.{column.name}",
+                )
+            )
+    return issues
+
+
+def _report_type_conflict(ctx, statement, left, right, left_name, right_name, extra: str = ""):
+    return ctx.issue(
+        description=f"{left_name} 是 {left[2]} 类型、{right_name} 是 {right[2]} 类型，两种类型不同族，"
+        f"比较时会发生隐式转换{extra}，通常也用不上索引。",
+        suggestion="把两侧的类型对齐（改字段类型，或显式转换其中一侧）；跨类型关联在大表上代价很高。",
+        statement=statement,
+        target=f"{left_name} × {right_name}",
+    )
+
+
+def _check_join_key_type_mismatch(ctx):
+    """
+    JOIN 连接键类型不一致——跨类型关联是慢查询的常见根因
+    """
+    if not ctx.has_schema:
+        return []
+    issues = []
+    for statement in ctx.statements:
+        aliases = _alias_map(statement)
+        for join in statement.expression.find_all(exp.Join):
+            condition = join.args.get("on")
+            if condition is None:
+                continue
+            for comparison in condition.find_all(exp.EQ):
+                left = _resolve_column(ctx, aliases, comparison.left)
+                right = _resolve_column(ctx, aliases, comparison.right)
+                if left is None or right is None or not families_conflict(left[2], right[2]):
+                    continue
+                issues.append(
+                    _report_type_conflict(
+                        ctx,
+                        statement,
+                        left,
+                        right,
+                        f"{left[0]}.{left[1]}",
+                        f"{right[0]}.{right[1]}",
+                        extra="，连接键上的转换会让索引失效",
+                    )
+                )
+    return issues
+
+
+def _check_incomparable_types(ctx):
+    """
+    WHERE 里两个不同类型的列直接比较
+
+    只判限定到具体表的列；未限定的列无法确定归属，宁可不报。
+    """
+    if not ctx.has_schema:
+        return []
+    issues = []
+    for statement in ctx.statements:
+        aliases = _alias_map(statement)
+        single = _single_target(statement, aliases)
+        for where in statement.expression.find_all(exp.Where):
+            for comparison in where.find_all(exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE):
+                left = _resolve_column(ctx, aliases, comparison.left, single)
+                right = _resolve_column(ctx, aliases, comparison.right, single)
+                if left is None or right is None or not families_conflict(left[2], right[2]):
+                    continue
+                issues.append(
+                    _report_type_conflict(ctx, statement, left, right, f"{left[0]}.{left[1]}", f"{right[0]}.{right[1]}")
+                )
+    return issues
+
+
+def _check_implicit_cast(ctx):
+    """
+    列与字面量的类型不同族
+
+    只报「数值列比字符串」与「字符串列比数值」两种——时间列比字符串（`created_at > '2024-01-01'`）
+    是正常写法，报了就是噪音。
+    """
+    if not ctx.has_schema:
+        return []
+    issues = []
+    for statement in ctx.statements:
+        aliases = _alias_map(statement)
+        single = _single_target(statement, aliases)
+        for comparison in statement.expression.find_all(exp.EQ, exp.NEQ, exp.GT, exp.GTE, exp.LT, exp.LTE):
+            for column, literal in ((comparison.left, comparison.right), (comparison.right, comparison.left)):
+                if not isinstance(column, exp.Column) or not isinstance(literal, exp.Literal):
+                    continue
+                resolved = _resolve_column(ctx, aliases, column, single)
+                if resolved is None:
+                    continue
+                table_name, column_name, family = resolved
+                if family == "numeric" and literal.is_string:
+                    detail = "数值列与字符串字面量比较，会触发隐式转换，索引用不上"
+                elif family == "string" and not literal.is_string:
+                    detail = "字符串列与数值字面量比较，会触发隐式转换，索引用不上"
+                else:
+                    continue
+                issues.append(
+                    ctx.issue(
+                        description=f"{table_name}.{column_name} 是 {family} 类型，却与字面量 {literal.sql()[:32]} 比较：{detail}。",
+                        suggestion="把字面量写成与列相同的类型（字符串加引号、数值不加），避免隐式转换。",
+                        statement=statement,
+                        target=f"{table_name}.{column_name}",
+                    )
+                )
+    return issues
+
+
+# ----------------------------------------------------------------------
 # 规则清单
 # ----------------------------------------------------------------------
 
@@ -474,5 +712,46 @@ RULES = (
         description="LIKE 以 % 开头，无法使用索引",
         default_level=_LOW,
         handler=_check_leading_wildcard_like,
+    ),
+    # ---- 以下需要表结构，未绑定数据源时由框架跳过并记录原因 ----
+    SqlRuleDefinition(
+        code="unknown_table",
+        name="引用了不存在的表",
+        description="语句引用的表不在最近一次采集的快照里",
+        default_level=_HIGH,
+        handler=_check_unknown_table,
+        needs_schema=True,
+    ),
+    SqlRuleDefinition(
+        code="unknown_column",
+        name="引用了不存在的列",
+        description="语句引用的列在对应表里不存在",
+        default_level=_HIGH,
+        handler=_check_unknown_column,
+        needs_schema=True,
+    ),
+    SqlRuleDefinition(
+        code="join_key_type_mismatch",
+        name="连接键类型不一致",
+        description="JOIN 两侧连接键类型不同族，转换会让索引失效",
+        default_level=_MEDIUM,
+        handler=_check_join_key_type_mismatch,
+        needs_schema=True,
+    ),
+    SqlRuleDefinition(
+        code="incomparable_types",
+        name="不同类型的列直接比较",
+        description="WHERE 里两个列类型不同族",
+        default_level=_MEDIUM,
+        handler=_check_incomparable_types,
+        needs_schema=True,
+    ),
+    SqlRuleDefinition(
+        code="implicit_cast",
+        name="隐式类型转换",
+        description="列与字面量类型不同族，会触发隐式转换",
+        default_level=_MEDIUM,
+        handler=_check_implicit_cast,
+        needs_schema=True,
     ),
 )

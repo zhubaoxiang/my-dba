@@ -29,11 +29,11 @@
 
 ## 4. 需快照的规则
 
-- [ ] 4.1 `schema.py`：调 `datasource.services.list_snapshot_tables()` 取快照，在内存建表/列索引
-- [ ] 4.2 规则 `unknown_table` / `unknown_column`：语句引用的表、列是否存在
-- [ ] 4.3 规则 `incomparable_types`：列类型是否可比较/可运算
-- [ ] 4.4 未指定数据源、数据源未采集、快照为空三种情况的**明确说明**（不得静默跳过）
-- [ ] 4.5 单测：mock 快照覆盖命中、缺表、缺列、类型不匹配、JOIN 键类型不匹配与三种跳过情形
+- [x] 4.1 `schema.py`：调 `datasource.services.list_snapshot_tables()` 取快照，在内存建表/列索引
+- [x] 4.2 规则 `unknown_table` / `unknown_column`：语句引用的表、列是否存在
+- [x] 4.3 规则 `incomparable_types`：列类型是否可比较/可运算
+- [x] 4.4 未指定数据源、数据源未采集、快照为空三种情况的**明确说明**（不得静默跳过）
+- [x] 4.5 单测：mock 快照覆盖命中、缺表、缺列、类型不匹配、JOIN 键类型不匹配与三种跳过情形
 - [ ] 4.6 人工验证：对一个已采集的真实数据源跑若干语句
 
 ## 5. 执行层：只读试运行与执行计划

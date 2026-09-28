@@ -5,10 +5,13 @@ SQL 分析模块单元测试
 「哪些语句允许真跑」是本模块最要紧的一条判定，单独一组重点覆盖。
 """
 
+from unittest import mock
+
 from django.test import SimpleTestCase
 
-from apps.sqlanalysis import analyzer, formatting, parse
+from apps.sqlanalysis import analyzer, formatting, parse, schema
 from apps.sqlanalysis.rules import registry
+from apps.sqlanalysis.schema import SchemaIndex, SchemaUnavailable, families_conflict, type_family
 from utils import custom_enum
 
 READ_ONLY = custom_enum.StatementKindEnum.READ_ONLY
@@ -321,7 +324,7 @@ class RuleTests(SimpleTestCase):
     def test_schema_rules_run_when_schema_is_available(self):
         """有表结构时不应有任何规则被跳过"""
         result = parse.parse_sql("SELECT id FROM users WHERE id = 1 LIMIT 1")
-        runner = analyzer.SqlAnalyzer(result, sql="", schema=object())
+        runner = analyzer.SqlAnalyzer(result, sql="", schema=SchemaIndex([]))
         runner.analyze()
         self.assertEqual(runner.skipped_rules, [])
 
@@ -330,3 +333,161 @@ class RuleTests(SimpleTestCase):
         runner = analyzer.SqlAnalyzer(result, sql="", rule_overrides={"select_star": {"enabled": False}})
         self.assertNotIn("select_star", [item["rule_code"] for item in runner.analyze()])
         self.assertNotIn("select_star", runner.evaluated_rules)
+
+
+def _table(name, *columns, schema_name="public"):
+    return {
+        "schema": schema_name,
+        "name": name,
+        "comment": "",
+        "row_count": 0,
+        "columns": [{"name": n, "data_type": t, "nullable": True, "comment": ""} for n, t in columns],
+        "primary_key": [],
+        "foreign_keys": [],
+    }
+
+
+# 造一份最小快照：users 与 orders 通过 user_id（integer）关联
+_TEST_INDEX = SchemaIndex(
+    [
+        _table("users", ("id", "integer"), ("name", "varchar"), ("created_at", "timestamp")),
+        _table("orders", ("id", "integer"), ("user_id", "integer"), ("code", "varchar")),
+    ]
+)
+
+
+class SchemaRuleTests(SimpleTestCase):
+    """
+    需快照的规则：判定表/列是否存在、类型是否可比
+
+    误报会直接损害使用者对问题清单的信任，因此这几条一律「能确定才报」。
+    """
+
+    def codes(self, sql, index=_TEST_INDEX):
+        result = parse.parse_sql(sql)
+        self.assertTrue(result.ok, result.errors)
+        runner = analyzer.SqlAnalyzer(result, sql=sql, schema=index)
+        return [item["rule_code"] for item in runner.analyze()]
+
+    def test_unknown_table(self):
+        self.assertIn("unknown_table", self.codes("SELECT id FROM nope WHERE id = 1"))
+        self.assertNotIn("unknown_table", self.codes("SELECT id FROM users WHERE id = 1"))
+
+    def test_cte_name_is_not_treated_as_a_table(self):
+        """CTE 是语句内自定义的名字，不是真实表，不能拿去快照里找"""
+        sql = "WITH recent AS (SELECT id FROM users) SELECT id FROM recent"
+        self.assertNotIn("unknown_table", self.codes(sql))
+
+    def test_subquery_alias_is_not_treated_as_a_table(self):
+        sql = "SELECT x.id FROM (SELECT id FROM users) x"
+        self.assertNotIn("unknown_table", self.codes(sql))
+
+    def test_unknown_column(self):
+        self.assertIn("unknown_column", self.codes("SELECT nope FROM users"))
+        self.assertNotIn("unknown_column", self.codes("SELECT name FROM users"))
+
+    def test_unknown_column_with_qualifier(self):
+        self.assertIn("unknown_column", self.codes("SELECT u.nope FROM users u"))
+        self.assertNotIn("unknown_column", self.codes("SELECT u.name FROM users u"))
+
+    def test_unknown_column_not_judged_when_ambiguous(self):
+        """多表且未限定列名时无法确定它属于哪张表，宁可不报"""
+        sql = "SELECT name FROM users u JOIN orders o ON u.id = o.user_id"
+        self.assertNotIn("unknown_column", self.codes(sql))
+
+    def test_join_key_type_mismatch(self):
+        sql = "SELECT 1 FROM users u JOIN orders o ON u.name = o.user_id"
+        self.assertIn("join_key_type_mismatch", self.codes(sql))
+
+    def test_join_key_same_type_is_accepted(self):
+        sql = "SELECT 1 FROM users u JOIN orders o ON u.id = o.user_id"
+        self.assertNotIn("join_key_type_mismatch", self.codes(sql))
+
+    def test_incomparable_types_in_where(self):
+        sql = "SELECT 1 FROM users u JOIN orders o ON u.id = o.user_id WHERE u.name = o.user_id"
+        self.assertIn("incomparable_types", self.codes(sql))
+
+    def test_implicit_cast_numeric_column_against_string_literal(self):
+        self.assertIn("implicit_cast", self.codes("SELECT 1 FROM users WHERE id = '1'"))
+        self.assertNotIn("implicit_cast", self.codes("SELECT 1 FROM users WHERE id = 1"))
+
+    def test_implicit_cast_string_column_against_number(self):
+        self.assertIn("implicit_cast", self.codes("SELECT 1 FROM users WHERE name = 1"))
+
+    def test_temporal_against_string_is_not_reported(self):
+        """时间列比字符串是正常写法，报了就是噪音"""
+        self.assertNotIn("implicit_cast", self.codes("SELECT 1 FROM users WHERE created_at > '2024-01-01'"))
+
+    def test_schema_rules_are_skipped_without_index(self):
+        codes = self.codes("SELECT id FROM nope WHERE nope = 1", index=None)
+        for code in ("unknown_table", "unknown_column", "implicit_cast", "join_key_type_mismatch"):
+            self.assertNotIn(code, codes)
+
+
+class TypeFamilyTests(SimpleTestCase):
+    """
+    类型归族：只比族不比具体类型，避免把 varchar(64) 与 text 这种同族差异也报出来
+    """
+
+    def test_length_and_precision_are_stripped(self):
+        self.assertEqual(type_family("varchar(64)"), "string")
+        self.assertEqual(type_family("numeric(10,2)"), "numeric")
+        self.assertEqual(type_family("  INTEGER  "), "numeric")
+
+    def test_known_families(self):
+        self.assertEqual(type_family("text"), "string")
+        self.assertEqual(type_family("timestamp with time zone"), "temporal")
+        self.assertEqual(type_family("jsonb"), "json")
+        self.assertEqual(type_family("bytea"), "binary")
+
+    def test_unknown_types_are_marked_unknown(self):
+        self.assertEqual(type_family(""), "unknown")
+        self.assertEqual(type_family("some_custom_type"), "unknown")
+        self.assertEqual(type_family("integer[]"), "array")
+
+    def test_conflicts_only_for_cross_family_candidates(self):
+        self.assertTrue(families_conflict("numeric", "string"))
+        self.assertFalse(families_conflict("string", "string"))
+        self.assertFalse(families_conflict("string", "temporal"), "时间与字符串比较是常见写法")
+        self.assertFalse(families_conflict("unknown", "string"), "认不出来的类型不该报")
+        self.assertFalse(families_conflict("numeric", "json"))
+
+
+class SchemaUnavailableTests(SimpleTestCase):
+    """
+    三种「拿不到表结构」的情形各自给出可读原因——未做结构校验必须说明为什么
+    """
+
+    def test_no_datasource(self):
+        with self.assertRaises(SchemaUnavailable) as ctx:
+            schema.load_schema_index(None)
+        self.assertIn("未指定数据源", str(ctx.exception))
+
+    def test_datasource_not_found(self):
+        with (
+            mock.patch.object(schema.datasource_services, "datasource_brief", return_value=None),
+            self.assertRaises(SchemaUnavailable) as ctx,
+        ):
+            schema.load_schema_index(7)
+        self.assertIn("不存在", str(ctx.exception))
+
+    def test_datasource_not_collected(self):
+        with (
+            mock.patch.object(schema.datasource_services, "datasource_brief", return_value={"id": 7, "name": "本地库"}),
+            mock.patch.object(schema.datasource_services, "list_snapshot_tables", return_value=[]),
+            self.assertRaises(SchemaUnavailable) as ctx,
+        ):
+            schema.load_schema_index(7)
+        self.assertIn("尚未采集", str(ctx.exception))
+
+    def test_loads_index_when_available(self):
+        with (
+            mock.patch.object(schema.datasource_services, "datasource_brief", return_value={"id": 7, "name": "本地库"}),
+            mock.patch.object(
+                schema.datasource_services,
+                "list_snapshot_tables",
+                return_value=[_table("users", ("id", "integer"))],
+            ),
+        ):
+            index = schema.load_schema_index(7)
+        self.assertEqual(index.column_type("users", "id"), "integer")
