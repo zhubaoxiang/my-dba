@@ -72,7 +72,7 @@
 
 ## 7. 配置迁移与文档（依赖 3）
 
-- [ ] 7.1 `src/config/conf.ini` 移除 4 个分析阈值项（`big_table_rows` / `big_table_size_mb` / `varchar_max_length` / `unused_index_min_rows`），保留 `connect_timeout` / `statement_timeout` / `exact_count`
+- [x] 7.1 `src/config/conf.ini` 移除 4 个分析阈值项（`big_table_rows` / `big_table_size_mb` / `varchar_max_length` / `unused_index_min_rows`），保留 `connect_timeout` / `statement_timeout` / `exact_count`
 - [x] 7.2 确认代码声明里的默认阈值等于被移除的 conf.ini 原值（`10000000` / `10240` / `2000` / `10000`），**行为不回归**
 - [x] 7.3 确认 `analyzer.py` 的 `load_thresholds()` 与 `_int_config` 已无引用后删除
 - [x] 7.4 更新 `README.md`：规则注册表说明、规则管理接口、阈值迁移说明（原配置项 → 规则注册表）
@@ -84,8 +84,8 @@
 - [x] 8.2 `python manage.py test apps.datasource` 全绿；确认新增单测覆盖 3.8 / 5.4 列出的场景
 - [x] 8.3 `ruff check` 与 `ruff format --check` 通过
 - [x] 8.4 `npm run build` 通过
-- [ ] 8.5 真实库端到端：重新采集一次，比对重构前后同一份快照的问题集合一致（仅表现形式由 `issue_type` 变为 `rule_code`）
-- [ ] 8.6 真实库端到端：停用一条规则 → 重新采集 → 确认该规则不再产出；恢复 → 再采集 → 确认恢复产出
+- [x] 8.5 真实库端到端：重新采集一次，比对重构前后同一份快照的问题集合一致（仅表现形式由 `issue_type` 变为 `rule_code`）
+- [x] 8.6 真实库端到端：停用一条规则 → 重新采集 → 确认该规则不再产出；恢复 → 再采集 → 确认恢复产出
 - [x] 8.7 对照 `.ai-harness/rules/` 逐条自查（模型继承、ViewSet 基类、响应格式、分页、软删除、枚举、路由注册、db_table、Serializer 类型、DDL 管理）
 
 ## 依赖关系说明

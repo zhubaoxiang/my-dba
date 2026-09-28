@@ -84,8 +84,13 @@ class EffectiveRule:
 
 def _level_or_default(raw, default):
     """
-    库里的级别值非法时退回代码声明的默认级别，不让一条脏数据打断整轮分析
+    取库中的级别；无覆盖项时静默退回代码默认值
+
+    空值走的是**正常路径**（库里没有该规则的记录），不该记日志——否则每轮分析都会
+    为每条未同步的规则刷一条警告，把真正需要排查的脏数据淹掉。
     """
+    if raw is None or raw == "":
+        return default
     try:
         return custom_enum.IssueLevelEnum(int(raw))
     except (TypeError, ValueError):

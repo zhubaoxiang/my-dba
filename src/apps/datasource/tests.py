@@ -412,6 +412,21 @@ class RuleRegistryTests(SimpleTestCase):
         effective = registry.load_effective_rules({"not_a_real_rule": {"enabled": False}})
         self.assertEqual([item.code for item in effective], registry.rule_codes())
 
+    def test_missing_override_does_not_log_a_warning(self):
+        """
+        「库里没有该规则的记录」是正常路径，不该每轮分析都为每条规则刷一条警告——
+        那会把真正需要排查的脏数据淹掉
+        """
+        with mock.patch.object(registry.LOGGER, "warning") as warning:
+            registry.load_effective_rules({})
+        warning.assert_not_called()
+
+    def test_invalid_level_logs_a_warning(self):
+        """有值但不合法才是要排查的情况，必须留痕"""
+        with mock.patch.object(registry.LOGGER, "warning") as warning:
+            registry.load_effective_rules({"big_table": {"level": "高"}})
+        warning.assert_called_once()
+
     def test_issue_coarser_than_declared_level_is_skipped(self):
         """
         规则产出比声明更粗的层级，说明声明写错了：记日志并跳过该条，
