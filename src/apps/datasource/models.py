@@ -42,6 +42,9 @@ class MetadataSnapshot(AbstractTimeFiledModel):
     collect_time = models.DateTimeField(verbose_name="采集时间")
     raw_data = models.JSONField(default=dict, verbose_name="原始采集结果")
     unavailable = models.JSONField(default=list, verbose_name="未采集到的项")
+    # 本次分析实际参与评估的规则 code。存下来才能察觉「规则集在采集之后被改过」——
+    # 只比对库中当前的启用项是看不出来的（design.md D3 的运维可察觉性）
+    evaluated_rules = models.JSONField(default=list, verbose_name="本次参与评估的规则")
 
     class Meta:
         db_table = "metadata_snapshot"

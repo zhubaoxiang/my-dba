@@ -33,6 +33,12 @@ const routes = [
         meta: { title: '问题清单', icon: 'Warning', showInMenu: true }
       },
       {
+        path: 'datasource/rules',
+        name: 'AnalysisRules',
+        component: () => import('@/views/datasource/rules.vue'),
+        meta: { title: '分析规则', icon: 'SetUp', showInMenu: true }
+      },
+      {
         path: 'knowledge/qa',
         name: 'KnowledgeQa',
         component: () => import('@/views/knowledge/qa.vue'),

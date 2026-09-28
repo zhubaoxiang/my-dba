@@ -31,7 +31,7 @@
 | **知识问答**（RAG） | 「这个报错 / 概念 / 用法是什么？」 | ✅ 已实现（[文档](docs/knowledge-qa.md)） |
 | **分析 SQL** | 「我这条 SQL 写得对吗？会不会慢？」 | ⬜ 未开始 |
 | **自然语言转建表语句 / SQL** | 「按我说的建张表 / 写条查询」 | ⬜ 未开始 |
-| 分析规则注册表（支撑） | 让分析规则可配置、可开关 | 🚧 进行中（[文档](docs/datasource.md#进行中的分析规则注册表)） |
+| 分析规则注册表（支撑） | 让分析规则可配置、可开关 | 🚧 进行中（[文档](docs/datasource.md#分析规则注册表)） |
 
 已确定的技术选型：数据源支持 PostgreSQL + MySQL；RAG 向量存储用独立的 Qdrant 服务；LLM 走公有云 API。
 
@@ -114,6 +114,4 @@ my-dba/
 | [docs/knowledge-qa.md](docs/knowledge-qa.md) | 知识问答：**架构与数据流**、摄入链路、问答链路、关键设计决策、数据模型、API、配置、实测踩坑 |
 | [docs/development.md](docs/development.md) | 开发规范：新增模块、Model/ViewSet/Serializer/URL、日志、SQL、代码风格、测试与质量检查、已知问题 |
 | [docs/deployment.md](docs/deployment.md) | 部署：镜像构建、compose 编排的两个坑、数据库初始化、生产运行方式、平台化部署备查 |
-
-配套约定：开发硬性约束在 [`.ai-harness/rules/`](.ai-harness/rules/)（**违反即阻断**）；变更流程走 [`openspec/`](openspec/)（`/openspec:proposal` → `/openspec:apply` → `/openspec:archive`）。
 

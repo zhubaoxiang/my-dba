@@ -13,7 +13,12 @@ class RuleContext:
     单条规则的执行上下文
     """
 
-    def __init__(self, snapshot_data: dict, rule, thresholds: dict = None):
+    def __init__(self, snapshot_data: dict, rule, thresholds: dict = None, level=None):
+        """
+        :param thresholds: 生效阈值（来自规则注册表）；留空时用代码声明的默认阈值
+        :param level: 生效的严重级别（来自规则注册表）；留空时用代码声明的默认级别。
+            规则内部有级别细分时，仍可在 `issue()` 里显式覆盖
+        """
         data = snapshot_data or {}
         self.data = data
         self.tables = data.get("tables") or []
@@ -24,7 +29,7 @@ class RuleContext:
         self.rule_code = rule.code
         self.rule_name = rule.name
         self.object_level = rule.object_level
-        self.default_level = rule.default_level
+        self.default_level = level if level is not None else rule.default_level
         self.thresholds = rule.default_thresholds if thresholds is None else thresholds
 
     def issue(

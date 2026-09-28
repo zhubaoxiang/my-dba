@@ -88,6 +88,7 @@
 - **URL 前缀**：`SYS_NAME`（定义在 `src/config/urls.py`）是系统的对外路径前缀，当前为 `my-dba`。约定 ViewSet 路由为 `{SYS_NAME}/v1/{module}`，函数视图为 `{SYS_NAME}/api/{name}`
 - **知识问答**：文档摄入 → 切分 → 嵌入 → 存 Qdrant；提问时先检索、再交给单 agent 作答。**正文留在业务库内**（唯一事实来源），Qdrant 只是可重建的索引。对话模型与嵌入模型**分开配置**、各自独立选生效
 - **向量维度**：必须与嵌入模型的实际输出、Qdrant 集合的 size 三方一致，写在 `apps/knowledge/models.py` 的 `EMBEDDING_DIMENSIONS`。换嵌入模型须改这里、重建集合、重新摄入
+- **分析规则由规则注册表驱动**：规则清单与默认值来自代码声明（`apps/datasource/rules/`），`analysis_rule` 表只存运行时可改的启用开关、严重级别与阈值；**分析阈值不在 `conf.ini`**（那里只留采集侧参数）。`catalog_issue` 以稳定字符串 `rule_code` 标识规则，并快照 `rule_name` 以支持历史问题的渲染
 - **响应封装**：所有接口返回 `{code, message, data}`。2000 成功、4000 参数错误、4003 无权限、4004 不存在、4017 业务条件未满足、5000 服务端错误
 - **认证载体**：JWT Token 通过自定义请求头 `Token` 传递，**不是**标准的 `Authorization: Bearer`
 

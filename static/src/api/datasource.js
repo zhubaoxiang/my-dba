@@ -40,6 +40,26 @@ export const datasourceApi = {
   }
 }
 
+// 分析规则注册表 API
+export const analysisRuleApi = {
+  // 规则清单（分页）
+  list(params) {
+    return request.get('/v1/analysis-rule', { params })
+  },
+  // 修改启用开关 / 严重级别 / 阈值
+  update(id, data) {
+    return request.put(`/v1/analysis-rule/${id}`, data)
+  },
+  // 把可覆盖项恢复为代码声明的默认值
+  reset(id) {
+    return request.post(`/v1/analysis-rule/${id}/reset`)
+  },
+  // 从代码声明同步规则清单（不覆盖已改过的开关、级别与阈值）
+  sync() {
+    return request.post('/v1/analysis-rule/sync')
+  }
+}
+
 // 元数据查询 API
 export const catalogApi = {
   // 快照列表

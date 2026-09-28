@@ -31,62 +31,62 @@
 
 ## 3. 规则注册表加载与覆盖合并（依赖 1、2）
 
-- [ ] 3.1 `registry.py` 增加 `load_effective_rules()`：以代码声明为全集，`analysis_rule` 为覆盖层，返回每条规则生效的 `enabled` / `level` / `thresholds`
-- [ ] 3.2 库中无对应 `code` 时用代码默认值；查询时一次性取全部规则，避免逐条查库
-- [ ] 3.3 `analyzer.py` 的 `analyze()` 改为遍历生效规则并调用其 `handler`，替换现有 7 行硬编码调用
-- [ ] 3.4 停用的规则直接跳过，不调用 handler
-- [ ] 3.5 校验产出的 issue 层级与规则声明的 `object_level` 一致；不一致时记日志并跳过该条 issue（不静默接受）
-- [ ] 3.6 `CatalogAnalyzer` 记录本次实际参与评估的规则 `code` 列表，供总览统计返回
-- [ ] 3.7 `services.py` 写库时填充 `rule_code` / `rule_name` / `object_level` / `schema_name`
-- [ ] 3.8 验证：单测覆盖「停用规则不产出」「库中无记录走默认值」「阈值按规则独立」「层级不一致被跳过」
+- [x] 3.1 `registry.py` 增加 `load_effective_rules()`：以代码声明为全集，`analysis_rule` 为覆盖层，返回每条规则生效的 `enabled` / `level` / `thresholds`
+- [x] 3.2 库中无对应 `code` 时用代码默认值；查询时一次性取全部规则，避免逐条查库
+- [x] 3.3 `analyzer.py` 的 `analyze()` 改为遍历生效规则并调用其 `handler`，替换现有 7 行硬编码调用
+- [x] 3.4 停用的规则直接跳过，不调用 handler
+- [x] 3.5 校验产出的 issue 层级与规则声明的 `object_level` 一致；不一致时记日志并跳过该条 issue（不静默接受）
+- [x] 3.6 `CatalogAnalyzer` 记录本次实际参与评估的规则 `code` 列表，供总览统计返回
+- [x] 3.7 `services.py` 写库时填充 `rule_code` / `rule_name` / `object_level` / `schema_name`
+- [x] 3.8 验证：单测覆盖「停用规则不产出」「库中无记录走默认值」「阈值按规则独立」「层级不一致被跳过」
 
 ## 4. 规则管理 API（依赖 3）
 
-- [ ] 4.1 `serializers.py` 新增 `AnalysisRuleSerializer`（`ModelSerializer`，查询用）
-- [ ] 4.2 `serializers.py` 新增 `AnalysisRuleUpdateSerializer`（普通 `Serializer` + `validate()`：级别须为合法枚举值、阈值须为对象结构）
-- [ ] 4.3 `views.py` 新增 `AnalysisRuleView`（继承 `baseviews.AnyLogin`，与基线一致）：`list`（分页）、`partial_update`（启用/级别/阈值）
-- [ ] 4.4 实现 `sync` action：按 `code` 幂等 upsert，只更新 `name` / `description` / `object_level`
-- [ ] 4.5 实现 `reset` action（detail）：把单条规则的可覆盖项恢复为代码默认值
-- [ ] 4.6 不存在的 `code` 返回 4004；非法级别/阈值返回 4000
-- [ ] 4.7 `CatalogView.summary` 返回值增加本次参与评估的规则数与规则 `code` 列表
-- [ ] 4.8 `src/config/urls.py` 注册 `rf"{SYS_NAME}/v1/analysis-rule"`
-- [ ] 4.9 验证：真实请求跑通清单/停用/改级别/改阈值/恢复默认/同步；同步不覆盖人工修改；同步幂等（连续两次结果一致）
+- [x] 4.1 `serializers.py` 新增 `AnalysisRuleSerializer`（`ModelSerializer`，查询用）
+- [x] 4.2 `serializers.py` 新增 `AnalysisRuleUpdateSerializer`（普通 `Serializer` + `validate()`：级别须为合法枚举值、阈值须为对象结构）
+- [x] 4.3 `views.py` 新增 `AnalysisRuleView`（继承 `baseviews.AnyLogin`，与基线一致）：`list`（分页）、`partial_update`（启用/级别/阈值）
+- [x] 4.4 实现 `sync` action：按 `code` 幂等 upsert，只更新 `name` / `description` / `object_level`
+- [x] 4.5 实现 `reset` action（detail）：把单条规则的可覆盖项恢复为代码默认值
+- [x] 4.6 不存在的 `code` 返回 4004；非法级别/阈值返回 4000
+- [x] 4.7 `CatalogView.summary` 返回值增加本次参与评估的规则数与规则 `code` 列表
+- [x] 4.8 `src/config/urls.py` 注册 `rf"{SYS_NAME}/v1/analysis-rule"`
+- [x] 4.9 验证：真实请求跑通清单/停用/改级别/改阈值/恢复默认/同步；同步不覆盖人工修改；同步幂等（连续两次结果一致）
 
 ## 5. 问题清单接口适配（依赖 3、4）
 
-- [ ] 5.1 `CatalogIssueSerializer` 改为输出 `rule_code` / `rule_name` / `object_level`，移除 `issue_type` / `issue_type_label`
-- [ ] 5.2 `CatalogView.issues` 增加按 `rule_code` 筛选参数
-- [ ] 5.3 保持按 `issue_level` 筛选与排序行为不变
-- [ ] 5.4 验证：历史问题在规则停用/改名后仍能正确展示名称
+- [x] 5.1 `CatalogIssueSerializer` 改为输出 `rule_code` / `rule_name` / `object_level`，移除 `issue_type` / `issue_type_label`
+- [x] 5.2 `CatalogView.issues` 增加按 `rule_code` 筛选参数
+- [x] 5.3 保持按 `issue_level` 筛选与排序行为不变
+- [x] 5.4 验证：历史问题在规则停用/改名后仍能正确展示名称
 
 ## 6. 前端（依赖 4、5）
 
-- [ ] 6.1 `static/src/api/datasource.js` 增加规则清单、修改、恢复默认、同步四个接口
-- [ ] 6.2 新增 `static/src/views/datasource/rules.vue`：规则清单 + 启用开关 + 级别调整 + 阈值编辑 + 恢复默认 + 触发同步
-- [ ] 6.3 问题清单页 `issues.vue`：`issue_type_label` → `rule_name`；增加「问题类型」筛选下拉（选项来自规则清单接口）
-- [ ] 6.4 `issues.vue` 与 `tables.vue` 中硬编码的 1/2/3 **保持不动**（级别仍为三档）
-- [ ] 6.5 库表分析页 `tables.vue` 展示「本次参与评估的规则数 / 启用规则数」，规则集变化可被察觉
-- [ ] 6.6 `static/src/router/index.js` 注册规则管理路由（配置 `meta.title`、`meta.icon`）
-- [ ] 6.7 `src/right_config.json` 的 `children` 增加规则管理菜单项
-- [ ] 6.8 验证：`npm run build` 通过
+- [x] 6.1 `static/src/api/datasource.js` 增加规则清单、修改、恢复默认、同步四个接口
+- [x] 6.2 新增 `static/src/views/datasource/rules.vue`：规则清单 + 启用开关 + 级别调整 + 阈值编辑 + 恢复默认 + 触发同步
+- [x] 6.3 问题清单页 `issues.vue`：`issue_type_label` → `rule_name`；增加「问题类型」筛选下拉（选项来自规则清单接口）
+- [x] 6.4 `issues.vue` 与 `tables.vue` 中硬编码的 1/2/3 **保持不动**（级别仍为三档）
+- [x] 6.5 库表分析页 `tables.vue` 展示「本次参与评估的规则数 / 启用规则数」，规则集变化可被察觉
+- [x] 6.6 `static/src/router/index.js` 注册规则管理路由（配置 `meta.title`、`meta.icon`）
+- [x] 6.7 `src/right_config.json` 的 `children` 增加规则管理菜单项
+- [x] 6.8 验证：`npm run build` 通过
 
 ## 7. 配置迁移与文档（依赖 3）
 
 - [ ] 7.1 `src/config/conf.ini` 移除 4 个分析阈值项（`big_table_rows` / `big_table_size_mb` / `varchar_max_length` / `unused_index_min_rows`），保留 `connect_timeout` / `statement_timeout` / `exact_count`
-- [ ] 7.2 确认代码声明里的默认阈值等于被移除的 conf.ini 原值（`10000000` / `10240` / `2000` / `10000`），**行为不回归**
-- [ ] 7.3 确认 `analyzer.py` 的 `load_thresholds()` 与 `_int_config` 已无引用后删除
-- [ ] 7.4 更新 `README.md`：规则注册表说明、规则管理接口、阈值迁移说明（原配置项 → 规则注册表）
-- [ ] 7.5 更新 `openspec/project.md`：Domain Context 或约束中补充「分析规则由规则注册表驱动，阈值不在 conf.ini」
+- [x] 7.2 确认代码声明里的默认阈值等于被移除的 conf.ini 原值（`10000000` / `10240` / `2000` / `10000`），**行为不回归**
+- [x] 7.3 确认 `analyzer.py` 的 `load_thresholds()` 与 `_int_config` 已无引用后删除
+- [x] 7.4 更新 `README.md`：规则注册表说明、规则管理接口、阈值迁移说明（原配置项 → 规则注册表）
+- [x] 7.5 更新 `openspec/project.md`：Domain Context 或约束中补充「分析规则由规则注册表驱动，阈值不在 conf.ini」
 
 ## 8. 整体验证
 
-- [ ] 8.1 `python ../.ci/custom-checks/scaffold_check.py` 通过
-- [ ] 8.2 `python manage.py test apps.datasource` 全绿；确认新增单测覆盖 3.8 / 5.4 列出的场景
-- [ ] 8.3 `ruff check` 与 `ruff format --check` 通过
-- [ ] 8.4 `npm run build` 通过
+- [x] 8.1 `python ../.ci/custom-checks/scaffold_check.py` 通过
+- [x] 8.2 `python manage.py test apps.datasource` 全绿；确认新增单测覆盖 3.8 / 5.4 列出的场景
+- [x] 8.3 `ruff check` 与 `ruff format --check` 通过
+- [x] 8.4 `npm run build` 通过
 - [ ] 8.5 真实库端到端：重新采集一次，比对重构前后同一份快照的问题集合一致（仅表现形式由 `issue_type` 变为 `rule_code`）
 - [ ] 8.6 真实库端到端：停用一条规则 → 重新采集 → 确认该规则不再产出；恢复 → 再采集 → 确认恢复产出
-- [ ] 8.7 对照 `.ai-harness/rules/` 逐条自查（模型继承、ViewSet 基类、响应格式、分页、软删除、枚举、路由注册、db_table、Serializer 类型、DDL 管理）
+- [x] 8.7 对照 `.ai-harness/rules/` 逐条自查（模型继承、ViewSet 基类、响应格式、分页、软删除、枚举、路由注册、db_table、Serializer 类型、DDL 管理）
 
 ## 依赖关系说明
 

@@ -86,6 +86,13 @@
           "key": "datasource_issues",
           "link": "/WebApi/peafowls_my-dba/static/dist/#/route/datasource/issues",
           "children": []
+        },
+        {
+          "fix": [],
+          "name": "分析规则",
+          "key": "datasource_rules",
+          "link": "/WebApi/peafowls_my-dba/static/dist/#/route/datasource/rules",
+          "children": []
         }
       ]
     }

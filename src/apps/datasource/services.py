@@ -95,8 +95,10 @@ def run_collect_task(task_id: int):
 
     try:
         data = get_collector(datasource, load_collect_config()).collect()
-        snapshot = _save_snapshot(datasource, data, task.creator)
-        issues = analyzer.CatalogAnalyzer(data).analyze()
+        # 先分析再落快照：快照要记下本次实际参与评估的规则，否则「规则集在采集之后被改过」无从察觉
+        runner = analyzer.CatalogAnalyzer(data)
+        issues = runner.analyze()
+        snapshot = _save_snapshot(datasource, data, runner.evaluated_rules, task.creator)
         _save_issues(datasource, snapshot, issues, task.creator)
         task.snapshot_id = snapshot.id
         _finish(task, custom_enum.CollectTaskStatusEnum.SUCCESS, "")
@@ -119,7 +121,7 @@ def _finish(task: models.CollectTask, status, fail_reason: str):
     task.save(update_fields=["status", "fail_reason", "end_time", "snapshot_id", "update_time"])
 
 
-def _save_snapshot(datasource, data: dict, creator: str) -> models.MetadataSnapshot:
+def _save_snapshot(datasource, data: dict, evaluated_rules: list, creator: str) -> models.MetadataSnapshot:
     return models.MetadataSnapshot.objects.create(
         datasource_id=datasource.id,
         database_version=data.get("database_version", ""),
@@ -128,6 +130,7 @@ def _save_snapshot(datasource, data: dict, creator: str) -> models.MetadataSnaps
         collect_time=datetime.now(),
         raw_data=data,
         unavailable=data.get("unavailable") or [],
+        evaluated_rules=list(evaluated_rules or []),
         creator=creator,
     )
 

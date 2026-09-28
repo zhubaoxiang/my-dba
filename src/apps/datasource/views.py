@@ -7,6 +7,7 @@ from rest_framework.decorators import action
 from apps.base import baseviews
 from apps.datasource import differ, models, serializers, services
 from apps.datasource.collectors import get_collector
+from apps.datasource.rules import registry
 from utils import common, crypto, custom_enum, pagination
 from utils.logger import get_logger
 
@@ -289,6 +290,10 @@ class CatalogView(baseviews.AnyLogin):
         issue_level = _to_int(request.query_params.get("issue_level"))
         if issue_level is not None:
             queryset = queryset.filter(issue_level=issue_level)
+        # 按规则筛选（前端的「问题类型」下拉用它）。规则以稳定 code 标识，不受改名影响
+        rule_code = (request.query_params.get("rule_code") or "").strip()
+        if rule_code:
+            queryset = queryset.filter(rule_code=rule_code)
         queryset = queryset.order_by("issue_level", "rule_code", "id")
         self.serializer_class = serializers.CatalogIssueSerializer
         return baseviews.ResponseOK(pagination.paginate(self, queryset))
@@ -320,6 +325,11 @@ class CatalogView(baseviews.AnyLogin):
                 "issue_counts": counts,
                 "issue_total": sum(counts.values()),
                 "unavailable": snapshot.unavailable,
+                # 本次采集时实际参与评估的规则。与 enabled_rule_count 不一致，
+                # 即说明规则集在采集之后被改过——否则「停用了一条规则」不会被察觉
+                "evaluated_rules": snapshot.evaluated_rules,
+                "evaluated_rule_count": len(snapshot.evaluated_rules or []),
+                "enabled_rule_count": sum(1 for item in registry.load_effective_rules() if item.enabled),
             }
         )
 
@@ -337,3 +347,120 @@ class CatalogView(baseviews.AnyLogin):
         if base is None or target is None:
             return baseviews.ResponseNotFound("快照不存在")
         return baseviews.ResponseOK(differ.diff_snapshots(base.raw_data, target.raw_data))
+
+
+class AnalysisRuleView(baseviews.AnyLogin):
+    """
+    分析规则注册表
+
+    规则清单与默认值来自代码声明（`apps/datasource/rules/`），本接口只暴露**运行时可改**的部分：
+    启用开关、严重级别、阈值。名称与适用层级随同步更新，不接受直接修改。
+
+    同基线：不做应用层鉴权，访问控制依赖网络隔离。
+    """
+
+    queryset = models.AnalysisRule.objects.all()
+    serializer_class = serializers.AnalysisRuleSerializer
+    pagination_class = pagination.StandardPagination
+
+    @staticmethod
+    def _creator(request) -> str:
+        return getattr(getattr(request, "user", None), "username", "") or ""
+
+    def _get_instance(self, kwargs):
+        return models.AnalysisRule.objects.filter(is_deleted=False, id=kwargs.get("pk")).first()
+
+    def list(self, request, **kwargs):
+        queryset = self.get_queryset().filter(is_deleted=False).order_by("object_level", "code")
+        return baseviews.ResponseOK(pagination.paginate(self, queryset))
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self._get_instance(kwargs)
+        if instance is None:
+            return baseviews.ResponseNotFound("规则不存在")
+        return baseviews.ResponseOK(self.get_serializer(instance).data)
+
+    def update(self, request, *args, **kwargs):
+        """
+        修改启用开关、级别或阈值。PUT 与 PATCH 同义——三项都是可选的
+        """
+        instance = self._get_instance(kwargs)
+        if instance is None:
+            return baseviews.ResponseNotFound("规则不存在")
+        serializer = serializers.AnalysisRuleUpdateSerializer(
+            data=request.data, context={"rule": registry.get_rule(instance.code)}
+        )
+        if not serializer.is_valid():
+            return baseviews.ResponseBadRequest(common.ToolUtil.format_drf_error(serializer.errors))
+        data = serializer.validated_data
+        for field in ("enabled", "level", "thresholds"):
+            if field in data:
+                setattr(instance, field, data[field])
+        instance.save()
+        return baseviews.ResponseOK(self.get_serializer(instance).data)
+
+    def partial_update(self, request, *args, **kwargs):
+        return self.update(request, *args, **kwargs)
+
+    def create(self, request, **kwargs):
+        # 凭空建一条库记录没有对应的代码实现，分析时会被忽略，不如明确拒绝
+        return baseviews.ResponseBadRequest("规则来自代码声明，请调用同步接口，而不是新建")
+
+    def destroy(self, request, *args, **kwargs):
+        # 删掉库记录只会退回代码默认值，达不到「删除规则」的效果
+        return baseviews.ResponseBadRequest("规则来自代码声明，不支持删除；如需停用请改启用开关")
+
+    @action(detail=False, methods=["POST"], url_path="sync")
+    def sync(self, request):
+        """
+        从代码声明同步规则清单
+
+        按 `code` 幂等 upsert，**只更新** name / description / object_level。
+        enabled / level / thresholds 由使用者调整，同步不碰——否则一次部署就会冲掉调过的开关。
+        """
+        creator = self._creator(request)
+        existing = {row.code: row for row in models.AnalysisRule.objects.filter(is_deleted=False)}
+        created = updated = 0
+        for rule in registry.all_rules():
+            row = existing.get(rule.code)
+            if row is None:
+                models.AnalysisRule.objects.create(
+                    code=rule.code,
+                    name=rule.name,
+                    description=rule.description,
+                    level=rule.default_level.value,
+                    object_level=rule.object_level.value,
+                    enabled=True,
+                    thresholds=dict(rule.default_thresholds),
+                    creator=creator,
+                )
+                created += 1
+                continue
+            if (
+                row.name != rule.name
+                or row.description != rule.description
+                or row.object_level != rule.object_level.value
+            ):
+                row.name = rule.name
+                row.description = rule.description
+                row.object_level = rule.object_level.value
+                row.save(update_fields=["name", "description", "object_level", "update_time"])
+                updated += 1
+        return baseviews.ResponseOK({"created": created, "updated": updated, "total": len(registry.all_rules())})
+
+    @action(detail=True, methods=["POST"], url_path="reset")
+    def reset(self, request, **kwargs):
+        """
+        把可覆盖项恢复为代码声明的默认值
+        """
+        instance = self._get_instance(kwargs)
+        if instance is None:
+            return baseviews.ResponseNotFound("规则不存在")
+        declared = registry.get_rule(instance.code)
+        if declared is None:
+            return baseviews.ResponseExpectationFailed(f"规则 {instance.code} 已不在代码声明中，无法恢复默认值")
+        instance.enabled = True
+        instance.level = declared.default_level.value
+        instance.thresholds = dict(declared.default_thresholds)
+        instance.save(update_fields=["enabled", "level", "thresholds", "update_time"])
+        return baseviews.ResponseOK(self.get_serializer(instance).data)

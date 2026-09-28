@@ -45,6 +45,15 @@
         </el-row>
 
         <el-alert
+          v-if="rulesChanged"
+          class="unavailable-alert"
+          type="warning"
+          :closable="false"
+          show-icon
+          :title="`规则集在本次采集之后被改过：本次参与评估 ${summary.evaluated_rule_count} 条，当前启用 ${summary.enabled_rule_count} 条。重新采集后问题清单才会反映当前规则集`"
+        />
+
+        <el-alert
           v-if="(summary.unavailable || []).length"
           class="unavailable-alert"
           type="info"
@@ -64,7 +73,8 @@
           />
           <el-button type="primary" @click="search">搜索</el-button>
           <span class="meta">
-            快照 #{{ snapshot.id }} · {{ snapshot.collect_time }} · 数据库版本 {{ summary.database_version || '未知' }}
+            快照 #{{ snapshot.id }} · {{ snapshot.collect_time }} · 数据库版本 {{ summary.database_version || '未知' }} ·
+            本次参与评估 {{ summary.evaluated_rule_count ?? 0 }} 条规则
           </span>
         </div>
 
@@ -103,7 +113,7 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { catalogApi, datasourceApi } from '@/api/datasource'
 import { formatBytes, formatRows } from '@/utils/format'
@@ -115,6 +125,15 @@ const datasources = ref([])
 const datasourceId = ref(null)
 const snapshot = ref(null)
 const summary = ref({})
+
+// 本次参与评估的规则数与当前启用数不一致，说明规则集在采集之后被改过——
+// 只比对当前配置是看不出来的，必须靠快照里记下的那份清单
+const rulesChanged = computed(
+  () =>
+    summary.value.evaluated_rule_count !== undefined &&
+    summary.value.enabled_rule_count !== undefined &&
+    summary.value.evaluated_rule_count !== summary.value.enabled_rule_count
+)
 const rows = ref([])
 const total = ref(0)
 const loading = ref(false)

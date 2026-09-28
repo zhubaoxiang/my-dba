@@ -13,6 +13,9 @@
               <el-option :value="2" label="中" />
               <el-option :value="3" label="低" />
             </el-select>
+            <el-select v-model="ruleCode" placeholder="全部规则" clearable style="width: 190px" @change="reload">
+              <el-option v-for="item in rules" :key="item.code" :value="item.code" :label="item.name" />
+            </el-select>
             <el-button @click="reload" :disabled="!datasourceId">刷新</el-button>
           </div>
         </div>
@@ -28,7 +31,7 @@
               <el-tag :type="levelTagType(row.issue_level)" size="small">{{ row.issue_level_label }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="issue_type_label" label="问题类型" width="150" />
+          <el-table-column prop="rule_name" label="问题类型" width="150" />
           <el-table-column prop="target" label="对象" min-width="220" show-overflow-tooltip />
           <el-table-column prop="description" label="说明" min-width="280" show-overflow-tooltip />
           <el-table-column prop="suggestion" label="建议" min-width="240" show-overflow-tooltip />
@@ -58,7 +61,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { catalogApi, datasourceApi } from '@/api/datasource'
+import { analysisRuleApi, catalogApi, datasourceApi } from '@/api/datasource'
 
 const route = useRoute()
 const router = useRouter()
@@ -66,6 +69,8 @@ const router = useRouter()
 const datasources = ref([])
 const datasourceId = ref(null)
 const issueLevel = ref(null)
+const rules = ref([])
+const ruleCode = ref(null)
 const rows = ref([])
 const total = ref(0)
 const loading = ref(false)
@@ -96,6 +101,7 @@ async function loadIssues() {
   try {
     const params = { datasource_id: datasourceId.value, page: query.page, page_size: query.page_size }
     if (issueLevel.value) params.issue_level = issueLevel.value
+    if (ruleCode.value) params.rule_code = ruleCode.value
     const data = await catalogApi.issues(params)
     rows.value = data.results || []
     total.value = data.total || 0
@@ -136,7 +142,16 @@ function openTable(row) {
   router.push({ path: '/datasource/tables', query: { datasource_id: datasourceId.value, table: row.table_name } })
 }
 
-onMounted(loadDatasources)
+// 规则选项来自规则注册表。未同步过时清单为空，只影响筛选项，不影响问题展示
+async function loadRules() {
+  const data = await analysisRuleApi.list({ page: 1, page_size: 200 })
+  rules.value = data.results || []
+}
+
+onMounted(async () => {
+  await loadRules()
+  await loadDatasources()
+})
 </script>
 
 <style scoped>

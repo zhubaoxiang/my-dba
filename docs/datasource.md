@@ -100,19 +100,58 @@ DDL 见 `src/sql/pg_struct.sql`（全量）与 `src/sql/patch.sql`（增量）�
 - **快照没有保留策略**：每次采集整份复制，长期运行会持续占用存储
 - MySQL 采集器尚未在真实 MySQL 上验证过（PostgreSQL 分支已端到端验证）
 
-## 进行中的分析规则注册表
+## 分析规则注册表
 
-对应 `openspec/changes/add-analysis-rule-registry`（18/59 任务）。目标：让规则的**启用开关、严重级别、阈值**运行时可调、无需改代码发版，并支持规则作用于库/模式/表/列不同层级。
+规则的**启用开关、严重级别、阈值**运行时可调，不用改代码发版。
 
-设计边界：**规则判定逻辑仍是代码**（不引入表达式引擎），只有元数据可配置。
+**规则判定逻辑仍是代码**（不引入表达式引擎），只有元数据可配置：
 
-代码侧已完成（声明式规则、`analysis_rule` 模型、`catalog_issue` 以 `rule_code` 取代 `issue_type`），**库结构补丁已在开发库（`dba` / `test`）执行**。其余环境的落地步骤：
-
-```bash
-# 已有数据的库执行增量补丁（新库直接执行 pg_struct.sql 即可）
-psql "postgresql://<用户>:<密码>@<主机>:<端口>/<库名>" -f src/sql/patch.sql
+```
+代码声明（apps/datasource/rules/definitions.py）
+  ├─ 规则清单与默认值的唯一来源
+  └─ 是「全集」——即使一条库记录都没有，规则照样生效
+        ↑ 覆盖
+analysis_rule 表
+  └─ 只存运行时改的三项：enabled / level / thresholds
 ```
 
-补丁会给 `catalog_issue` 补 `rule_code` / `rule_name` / `object_level` / `schema_name` 并删除 `issue_type`。旧行因 `rule_code` 为空属失效数据，确认可清空后手动执行 `DELETE FROM catalog_issue;`（该语句只写在 `patch.sql` 注释里，不会自动执行）。
+**没有同步过也不影响功能**：库里没有某个 `code` 的记录时，分析用代码默认值。同步只负责让规则出现在管理界面上。
 
-**剩余工作**：规则注册表的加载与覆盖合并（代码声明为全集、库为覆盖层）、规则管理 API、前端规则页、阈值从 `conf.ini` 迁出。SQL 分析能力（`add-sql-analysis`）排在本变更之后，届时会给注册表增加 scope 维度以承载语句级规则。
+### 规则管理接口
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/analysis-rule` | 规则清单（分页），带级别/层级标签与「是否被调整过」 |
+| PUT | `/analysis-rule/{id}` | 修改 `enabled` / `level` / `thresholds`（PUT 与 PATCH 同义） |
+| POST | `/analysis-rule/{id}/reset` | 恢复为代码声明的默认值 |
+| POST | `/analysis-rule/sync` | 从代码声明同步清单，**幂等** |
+
+两条刻意的约束：
+
+- **同步不覆盖使用者的改动**——它只更新名称、说明与适用层级，不碰 `enabled` / `level` / `thresholds`，否则一次部署就把运维调过的开关冲掉了
+- **不接受新建与删除**——规则来自代码声明，凭空建一条库记录没有对应实现；删掉库记录只会退回默认值，达不到「删除规则」的效果。要停用请改开关
+
+### 规则集变化可被察觉
+
+`metadata_snapshot.evaluated_rules` 记下**本次分析实际参与评估**的规则。与「当前启用数」不一致，即说明规则集在采集之后被改过——只比对当前配置是看不出来的。库表分析页会在两者不一致时给出提示。
+
+> 停用一条规则**不影响历史数据**：已有快照及其问题清单保持不变，历史问题用自身行里快照下来的 `rule_name` 渲染，规则改名或停用后仍能正确展示。
+
+### 阈值
+
+阈值随规则走，存在 `analysis_rule.thresholds`（JSONB）。代码声明里的默认值与原先 `conf.ini` 的取值**逐一相同**（`10000000` / `10240` / `2000` / `10000`），行为不回归。
+
+职责划分：采集参数是运行时基础设施配置，改完重启可以接受；分析阈值是业务策略，必须能运行时调整且可审计。
+
+> **待办**：`conf.ini` 的 4 个分析阈值项尚未删除（`big_table_rows` / `big_table_size_mb` / `varchar_max_length` / `unused_index_min_rows`）。代码已不再读取它们，但留着会形成「改了不生效」的双源陷阱。
+
+> **待办**：库结构补丁需要执行——`metadata_snapshot` 的 `evaluated_rules` 列尚未应用到 `dba` / `test`。执行方式：
+>
+> ```bash
+> # 已有数据的库执行增量补丁（新库直接执行 pg_struct.sql 即可）
+> psql "postgresql://<用户>:<密码>@<主机>:<端口>/<库名>" -f src/sql/patch.sql
+> ```
+>
+> 补丁会给 `catalog_issue` 补 `rule_code` / `rule_name` / `object_level` / `schema_name` 并删除 `issue_type`，给 `metadata_snapshot` 补 `evaluated_rules`。旧问题行因 `rule_code` 为空属失效数据，确认可清空后手动执行 `DELETE FROM catalog_issue;`（该语句只写在 `patch.sql` 注释里，不会自动执行）。
+
+> SQL 分析能力（`add-sql-analysis`）排在本变更之后，届时会给注册表增加 scope 维度，使同一个管理页承载语句级规则。

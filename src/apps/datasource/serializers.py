@@ -5,6 +5,7 @@
 from rest_framework import serializers
 
 from apps.datasource import models
+from apps.datasource.rules import registry
 from utils import custom_enum
 
 
@@ -124,6 +125,73 @@ class CatalogIssueSerializer(serializers.ModelSerializer):
 
     def get_object_level_label(self, obj):
         return custom_enum.ObjectLevelEnum(obj.object_level).label
+
+
+class AnalysisRuleSerializer(serializers.ModelSerializer):
+    """
+    规则查询序列化
+
+    级别与层级同时给出值、标签与「是否与代码声明不一致」，前端不必再维护一份枚举映射，
+    也能据此判断「恢复默认」是否有意义。
+    """
+
+    create_time = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S")
+    level_label = serializers.SerializerMethodField(label="严重级别")
+    object_level_label = serializers.SerializerMethodField(label="适用层级")
+    is_overridden = serializers.SerializerMethodField(label="可覆盖项是否被改过")
+
+    class Meta:
+        model = models.AnalysisRule
+        exclude = ["update_time"]
+
+    def get_level_label(self, obj):
+        return custom_enum.IssueLevelEnum(obj.level).label
+
+    def get_object_level_label(self, obj):
+        return custom_enum.ObjectLevelEnum(obj.object_level).label
+
+    def get_is_overridden(self, obj):
+        declared = registry.get_rule(obj.code)
+        if declared is None:
+            return False
+        return (
+            not obj.enabled
+            or obj.level != declared.default_level.value
+            or (obj.thresholds or {}) != declared.default_thresholds
+        )
+
+
+class AnalysisRuleUpdateSerializer(serializers.Serializer):
+    """
+    修改规则的可覆盖项
+
+    只接受**启用、级别、阈值**三项。名称、说明与适用层级来自代码声明——在库里改它们
+    会让声明与库长期不一致，且下一次同步就被覆盖回来，不如不给改。
+    """
+
+    enabled = serializers.BooleanField(required=False)
+    level = serializers.ChoiceField(choices=custom_enum.IssueLevelEnum.choices, required=False)
+    thresholds = serializers.DictField(required=False)
+
+    def validate_thresholds(self, value):
+        """
+        阈值必须落在该规则声明的键上且为数字
+
+        写错键名不会报错、只会静默不生效，是这类配置最难排查的一类问题，故在此拦下。
+        """
+        declared = self.context.get("rule")
+        defaults = declared.default_thresholds if declared is not None else {}
+        for key, raw in value.items():
+            if defaults and key not in defaults:
+                raise serializers.ValidationError(f"未知的阈值项：{key}")
+            if isinstance(raw, bool) or not isinstance(raw, int | float):
+                raise serializers.ValidationError(f"阈值 {key} 必须是数字")
+        return value
+
+    def validate(self, attrs):
+        if not attrs:
+            raise serializers.ValidationError("至少要提供 enabled、level、thresholds 之一")
+        return attrs
 
 
 class CatalogTableSerializer(serializers.Serializer):

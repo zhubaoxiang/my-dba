@@ -1,13 +1,20 @@
 """
 规则注册表
 
-对外暴露全部规则声明。规则清单的唯一来源是 definitions.RULES；
-后续接入 analysis_rule 表后，由本模块负责把库中的覆盖项合并到代码声明之上。
+对外暴露全部规则声明，并负责把 `analysis_rule` 表中的覆盖项合并到代码声明之上。
+
+**代码声明是全集与默认值来源，库是覆盖层**（design.md D3）：库里没有某个 `code` 的记录时
+用代码默认值；有则取库里的启用开关、级别与阈值。这样「还没同步过」不影响功能，
+一次部署也不会冲掉运维改过的开关。
 """
+
+import dataclasses
 
 from apps.datasource.rules.definitions import RULES
 from utils import custom_enum
-from utils.configure import CONF_ATTR
+from utils.logger import get_logger
+
+LOGGER = get_logger("datasource.log")
 
 
 def all_rules() -> tuple:
@@ -45,20 +52,80 @@ def allowed_levels(rule) -> set:
     return {level.value for level in custom_enum.ObjectLevelEnum if level.value >= declared}
 
 
-def resolve_thresholds(rule, override: dict = None) -> dict:
+@dataclasses.dataclass(frozen=True)
+class EffectiveRule:
     """
-    该规则生效的阈值，优先级：显式覆盖 > 配置文件 > 声明默认值
+    一条规则的**生效形态**：代码声明 + 覆盖项
 
-    过渡实现：阈值仍由 conf.ini 提供（键名 `datasource_<阈值键>`）。
-    接入规则注册表后，本函数改为合并库中的覆盖项，配置读取随之移除。
+    `definition` 保留代码声明（handler 与默认值的来源），其余三项是本次分析实际使用的值。
     """
-    if override:
-        return override
 
-    resolved = {}
-    for key, default in rule.default_thresholds.items():
-        try:
-            resolved[key] = int(CONF_ATTR.get(f"datasource_{key}"))
-        except (TypeError, ValueError):
-            resolved[key] = default
-    return resolved
+    definition: object
+    enabled: bool
+    level: "custom_enum.IssueLevelEnum"
+    thresholds: dict
+
+    @property
+    def code(self) -> str:
+        return self.definition.code
+
+    @property
+    def name(self) -> str:
+        return self.definition.name
+
+    @property
+    def object_level(self):
+        return self.definition.object_level
+
+    @property
+    def handler(self):
+        return self.definition.handler
+
+
+def _level_or_default(raw, default):
+    """
+    库里的级别值非法时退回代码声明的默认级别，不让一条脏数据打断整轮分析
+    """
+    try:
+        return custom_enum.IssueLevelEnum(int(raw))
+    except (TypeError, ValueError):
+        LOGGER.warning("规则级别取值非法，退回默认级别 raw=%r", raw)
+        return default
+
+
+def _load_overrides_from_db() -> dict:
+    """
+    一次取全部覆盖项，不逐条查库
+    """
+    from apps.datasource.models import AnalysisRule
+
+    return {
+        row.code: {"enabled": row.enabled, "level": row.level, "thresholds": row.thresholds or {}}
+        for row in AnalysisRule.objects.filter(is_deleted=False)
+    }
+
+
+def load_effective_rules(injected: dict = None) -> list:
+    """
+    本次分析生效的规则清单
+
+    :param injected: 按 `code` 的覆盖项 `{code: {"enabled"/"level"/"thresholds"}}`。
+        传 `None`（默认）表示从 `analysis_rule` 表读；传字典则**完全不查库**——
+        分析器的既有测试是 `SimpleTestCase`（不碰数据库），靠它注入；将来的「规则试运行」
+        也用同一入口预览改动后的效果。
+    """
+    overrides = _load_overrides_from_db() if injected is None else injected
+
+    effective = []
+    for rule in RULES:
+        row = overrides.get(rule.code) or {}
+        effective.append(
+            EffectiveRule(
+                definition=rule,
+                enabled=bool(row.get("enabled", True)),
+                level=_level_or_default(row.get("level"), rule.default_level),
+                # 库中的阈值按键覆盖代码默认值：漏配的键仍取默认值，不会因少写一项而失效
+                thresholds={**rule.default_thresholds, **(row.get("thresholds") or {})},
+            )
+        )
+    return effective

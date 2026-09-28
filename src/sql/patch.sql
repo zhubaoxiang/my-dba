@@ -228,3 +228,13 @@ CREATE INDEX IF NOT EXISTS idx_qa_message_session ON qa_message (session_id, id)
 ALTER TABLE qa_message ADD COLUMN IF NOT EXISTS is_complete boolean NOT NULL DEFAULT true;
 
 COMMENT ON COLUMN qa_message.is_complete IS '回答是否生成完整；流式生成被中止或断连时为 false';
+
+-- ============================================================
+-- 规则注册表：快照记录本次参与评估的规则（openspec: add-analysis-rule-registry）
+-- ============================================================
+
+-- 用于察觉「规则集在采集之后被改过」：只比对库中当前的启用项是看不出来的。
+-- 旧快照该列为空数组，属正常的「当时未记录」，不影响既有展示。
+ALTER TABLE metadata_snapshot ADD COLUMN IF NOT EXISTS evaluated_rules jsonb NOT NULL DEFAULT '[]'::jsonb;
+
+COMMENT ON COLUMN metadata_snapshot.evaluated_rules IS '本次分析实际参与评估的规则 code，用于察觉规则集在采集之后被改过';
