@@ -29,22 +29,38 @@ _VERDICT = {
 }
 
 
-def verdict_of(issues: list) -> dict:
+def verdict_of(issues: list, parsed: bool = True, skipped_rules: int = 0) -> dict:
     """
     确定性结论，**不依赖模型**
 
     模型解读可能不可用（未配置 / 调用失败 / 输出解析不了），但「这条 SQL 有没有明显问题」
     必须任何时候都能回答——那是使用者最想知道的一件事。
+
+    :param parsed: 是否解析成功。**解析失败时规则一条都没跑**，那时的问题清单为空是
+        「没能分析」而不是「没有问题」——把两者混为一谈会给出最误导人的结论
+    :param skipped_rules: 因缺少表结构被跳过的规则数。同理，「没跑」不等于「没问题」
     """
+    if not parsed:
+        return {
+            "level": _HIGH.value,
+            "label": "无法执行",
+            "text": "SQL 解析失败，规则一条都没能运行——请先按上方的错误位置修正语法。",
+        }
+
     counts = {}
     for item in issues:
         counts[item["issue_level"]] = counts.get(item["issue_level"], 0) + 1
 
+    # 没跑过的规则不能算「没问题」，否则使用者会以为表名列名已经验证过了
+    skipped_note = (
+        f"另有 {skipped_rules} 条规则因缺少表结构被跳过，表名与列名是否存在尚未验证。" if skipped_rules else ""
+    )
+
     if not issues:
         return {
             "level": 0,
-            "label": "未见明显问题",
-            "text": "规则未判出问题。结构校验与执行计划可作进一步参考。",
+            "label": "未见明显问题（未完整校验）" if skipped_rules else "未见明显问题",
+            "text": f"规则未判出问题。{skipped_note or '结构校验与执行计划可作进一步参考。'}",
         }
 
     parts = [
@@ -56,7 +72,7 @@ def verdict_of(issues: list) -> dict:
     return {
         "level": level,
         "label": _VERDICT[level],
-        "text": f"共发现 {len(issues)} 个问题：{'、'.join(parts)}。详见下方清单。",
+        "text": f"共发现 {len(issues)} 个问题：{'、'.join(parts)}。{skipped_note}详见下方清单。",
     }
 
 

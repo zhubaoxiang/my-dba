@@ -91,11 +91,13 @@ class SqlAnalysisView(baseviews.StatelessView):
         result = parse.parse_sql(sql, dialect)
         issues = []
         runner = None
+        skipped_rules = 0
 
         if result.ok:
             index, skipped = self._load_index(datasource_id)
             runner = analyzer.SqlAnalyzer(result, sql=sql, dialect=dialect, schema=index)
             issues = runner.analyze()
+            skipped_rules = len(runner.skipped_rules)
             schema_check = self._schema_check(index, skipped)
         else:
             # 解析不了，规则一条都跑不了；但模型对语法错误往往最有帮助，解读照常进行
@@ -114,8 +116,9 @@ class SqlAnalysisView(baseviews.StatelessView):
                 "formatted": formatting.format_sql(sql, dialect),
                 "syntax": self._syntax(result),
                 # 结论由后端按规则产出算出来，**不依赖模型**——「有没有明显问题」
-                # 任何时候都要有答案
-                "verdict": analyzer.verdict_of(issues),
+                # 任何时候都要有答案。解析失败与规则被跳过都要如实反映：
+                # 「没能分析」与「没有问题」是两回事
+                "verdict": analyzer.verdict_of(issues, parsed=result.ok, skipped_rules=skipped_rules),
                 "issues": issues,
                 "schema_check": schema_check,
                 "interpretation": interpret.interpret(sql, issues, dialect, context_note=context_note),

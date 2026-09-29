@@ -983,6 +983,22 @@ class SqlAnalysisApiTests(TestCase):
         self.assertEqual(data["verdict"]["level"], 0)
         self.assertIn("未判出问题", data["verdict"]["text"])
 
+    def test_verdict_on_a_syntax_error_is_not_clean(self):
+        """
+        实测踩到过：SQL 有语法错误，结论却是「未见明显问题」——
+        那时规则一条都没跑，空清单是「没能分析」而不是「没有问题」
+        """
+        data = self.post("analyze", {"sql": "SELECT id,\n  FROM users\nWHERE"})["data"]
+        self.assertEqual(data["verdict"]["level"], custom_enum.IssueLevelEnum.HIGH.value)
+        self.assertNotIn("未见明显问题", data["verdict"]["label"])
+        self.assertIn("解析失败", data["verdict"]["text"])
+
+    def test_verdict_discloses_skipped_rules(self):
+        """未绑数据源时结构类规则没跑过，结论不能说得像已经校验过了"""
+        data = self.post("analyze", {"sql": "SELECT id FROM users WHERE id = 1 LIMIT 1"})["data"]
+        self.assertIn("未完整校验", data["verdict"]["label"])
+        self.assertIn("尚未验证", data["verdict"]["text"])
+
     def test_analyze_rejects_empty_sql(self):
         self.assertEqual(self.post("analyze", {"sql": "   "})["code"], 4000)
 
@@ -1072,3 +1088,41 @@ class VerdictTests(SimpleTestCase):
         self.assertIn("1 个高危", text)
         self.assertIn("2 个中危", text)
         self.assertNotIn("低危", text)
+
+
+class VerdictHonestyTests(SimpleTestCase):
+    """
+    结论必须区分「没能分析」与「没有问题」
+
+    `issues` 为空有两种截然不同的成因：真的没判出问题，或规则压根没跑（解析失败、
+    或因缺快照被跳过）。把后者说成「未见明显问题」，会给出最误导人的结论——
+    实测踩到过：SQL 有语法错误，结论却是「未见明显问题」。
+    """
+
+    def test_parse_failure_is_not_reported_as_clean(self):
+        verdict = analyzer.verdict_of([], parsed=False)
+        self.assertEqual(verdict["level"], custom_enum.IssueLevelEnum.HIGH.value)
+        self.assertNotIn("未见明显问题", verdict["label"])
+        self.assertIn("解析失败", verdict["text"])
+
+    def test_parse_failure_outranks_everything(self):
+        """语法错误是最严重的一类：连解析都过不去"""
+        self.assertEqual(analyzer.verdict_of([], parsed=False)["level"], custom_enum.IssueLevelEnum.HIGH.value)
+
+    def test_skipped_rules_are_disclosed_when_nothing_found(self):
+        verdict = analyzer.verdict_of([], parsed=True, skipped_rules=5)
+        self.assertIn("未完整校验", verdict["label"])
+        self.assertIn("5 条规则", verdict["text"])
+        self.assertIn("尚未验证", verdict["text"])
+
+    def test_skipped_rules_are_disclosed_even_when_issues_exist(self):
+        """有问题时也不能不提——使用者会以为表名列名已经验证过了"""
+        issues = [{"rule_code": "x", "issue_level": custom_enum.IssueLevelEnum.MEDIUM.value}]
+        verdict = analyzer.verdict_of(issues, parsed=True, skipped_rules=5)
+        self.assertIn("5 条规则", verdict["text"])
+
+    def test_clean_and_fully_checked_says_nothing_extra(self):
+        verdict = analyzer.verdict_of([], parsed=True, skipped_rules=0)
+        self.assertEqual(verdict["label"], "未见明显问题")
+        self.assertNotIn("未完整校验", verdict["label"])
+        self.assertNotIn("跳过", verdict["text"])
