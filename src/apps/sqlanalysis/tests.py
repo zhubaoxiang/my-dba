@@ -402,6 +402,22 @@ class SchemaRuleTests(SimpleTestCase):
         self.assertIn("unknown_column", self.codes("SELECT u.nope FROM users u"))
         self.assertNotIn("unknown_column", self.codes("SELECT u.name FROM users u"))
 
+    def test_order_by_a_select_alias_is_not_an_unknown_column(self):
+        """
+        `SELECT count(*) AS cnt ... ORDER BY cnt` 里的 cnt 是**输出别名**，
+        SQL 里合法地允许在 ORDER BY / GROUP BY 里引用它——它不是表里的列。
+        实测在真实 SQL 上误报过（`GROUP BY event_id ORDER BY domain_cnt`）。
+        """
+        sql = "SELECT name, count(*) AS cnt FROM users GROUP BY name ORDER BY cnt DESC"
+        self.assertNotIn("unknown_column", self.codes(sql))
+
+    def test_group_by_a_select_alias_is_not_an_unknown_column(self):
+        self.assertNotIn("unknown_column", self.codes("SELECT name AS n, count(*) FROM users GROUP BY n"))
+
+    def test_unknown_column_in_order_by_is_still_reported(self):
+        """别把误报修成漏报：ORDER BY 里真正不存在的列仍要报出"""
+        self.assertIn("unknown_column", self.codes("SELECT name FROM users ORDER BY nope"))
+
     def test_unknown_column_not_judged_when_ambiguous(self):
         """多表且未限定列名时无法确定它属于哪张表，宁可不报"""
         sql = "SELECT name FROM users u JOIN orders o ON u.id = o.user_id"
@@ -1156,3 +1172,46 @@ class VerdictHonestyTests(SimpleTestCase):
         self.assertEqual(verdict["label"], "未见明显问题")
         self.assertNotIn("未完整校验", verdict["label"])
         self.assertNotIn("跳过", verdict["text"])
+
+
+class NoFalsePositiveTests(SimpleTestCase):
+    """
+    一组**本来就正确**的真实写法，规则不该对它们报任何问题
+
+    连续三个误报都是同一类成因：规则只看语法表象，没理解 SQL 语义——
+    `count(*)` 里的星号被当成 `SELECT *`、`ORDER BY` 里的输出别名被当成表里的列、
+    `GROUP BY` 里的别名同理。与其逐个等使用者踩到，不如把常见正确写法固化成一张网。
+    """
+
+    CLEAN_SQL = (
+        # 聚合别名，并在 ORDER BY / GROUP BY 里引用它（实测误报过两次）
+        "SELECT name, count(*) AS cnt FROM users GROUP BY name ORDER BY cnt DESC LIMIT 10",
+        "SELECT name AS n, count(*) FROM users GROUP BY n ORDER BY n",
+        # count(*) 不是 SELECT *（实测误报过）
+        "SELECT count(*) FROM users",
+        "SELECT count(*) AS total FROM users WHERE id > 0",
+        # 子查询与 CTE 的别名不是真实表
+        "WITH recent AS (SELECT id FROM users) SELECT id FROM recent WHERE id = 1",
+        "SELECT x.id FROM (SELECT id FROM users) x WHERE x.id = 1",
+        # 表别名限定
+        "SELECT u.name FROM users u WHERE u.id = 1",
+        "SELECT u.name, o.code FROM users u JOIN orders o ON u.id = o.user_id WHERE u.id = 1",
+        "SELECT 1 FROM users JOIN orders USING (id) WHERE id = 1",
+        # 时间列比字符串是正常写法
+        "SELECT 1 FROM users WHERE created_at > '2024-01-01'",
+        # 前缀匹配的 LIKE 用得上索引
+        "SELECT 1 FROM users WHERE name LIKE 'abc%'",
+        # 有 WHERE 也有 LIMIT
+        "SELECT id FROM users WHERE id = 1 LIMIT 5",
+    )
+
+    def test_clean_sql_produces_no_issues(self):
+        for sql in self.CLEAN_SQL:
+            result = parse.parse_sql(sql)
+            self.assertTrue(result.ok, f"用例本身要能解析：{sql} -> {result.errors}")
+            issues = analyzer.SqlAnalyzer(result, sql=sql, schema=_TEST_INDEX).analyze()
+            self.assertEqual(
+                [f"{item['rule_code']}@{item['target']}" for item in issues],
+                [],
+                f"这条 SQL 是正确的，不该报问题：{sql}",
+            )

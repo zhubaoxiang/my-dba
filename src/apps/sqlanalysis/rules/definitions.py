@@ -234,6 +234,11 @@ def _check_group_by_missing_column(ctx):
             for item in select.expressions:
                 if _has_aggregate(item):
                     continue
+                # 有别名时，别名本身就是它在 GROUP BY 里可能出现的形式：
+                # `SELECT name AS n ... GROUP BY n` 完全合法，不该报
+                alias = (item.alias or "").strip().lower() if isinstance(item, exp.Alias) else ""
+                if alias and alias in grouped:
+                    continue
                 for column in item.find_all(exp.Column):
                     if column.name.lower() in grouped:
                         continue
@@ -349,15 +354,34 @@ def _check_ddl_locks_table(ctx):
     return issues
 
 
+def _is_nested(select) -> bool:
+    """
+    该 SELECT 是否嵌在子查询或 CTE 里
+
+    嵌在里面的不是使用者最终要看的结果集，对它报「会返回整张表」是噪音——
+    真正该看的是最外层那条。实测在含 CTE 的正确 SQL 上误报过。
+    """
+    node = select.parent
+    while node is not None:
+        if isinstance(node, exp.Subquery | exp.CTE):
+            return True
+        node = node.parent
+    return False
+
+
 def _check_no_limit(ctx):
     """
     既无 WHERE 又无 LIMIT 的查询会返回整表
 
     只在两者都缺时报出：有 WHERE 的查询未必需要 LIMIT，单看 LIMIT 会产生大量噪音。
+    每条语句**只报一次**：`SELECT ... UNION SELECT ...` 两个分支都无过滤时，
+    那是同一件事，报两遍只是噪音。
     """
     issues = []
     for statement in ctx.statements:
         for select in statement.expression.find_all(exp.Select):
+            if _is_nested(select):
+                continue
             if select.args.get("limit") is not None or select.args.get("where") is not None:
                 continue
             if _has_aggregate(select):
@@ -370,6 +394,7 @@ def _check_no_limit(ctx):
                     target="",
                 )
             )
+            break  # 每条语句只报一次
     return issues
 
 
@@ -426,6 +451,22 @@ def _alias_map(statement) -> dict:
             continue
         mapping[(table.alias_or_name or name).lower()] = (name, table.db or None)
     return mapping
+
+
+def _select_aliases(statement) -> set:
+    """
+    语句里 SELECT 起的输出别名
+
+    这些名字可以合法地出现在 `ORDER BY` / `GROUP BY` 里：
+    `SELECT count(*) AS cnt ... ORDER BY cnt`。它们**不是表里的列**，不能拿去快照里找——
+    实测在真实 SQL 上误报过（`GROUP BY event_id ORDER BY domain_cnt` 把 domain_cnt 报成不存在的列）。
+    """
+    names = set()
+    for alias in statement.expression.find_all(exp.Alias):
+        name = (alias.alias or "").strip()
+        if name:
+            names.add(name.lower())
+    return names
 
 
 def _single_target(statement, aliases):
@@ -505,7 +546,10 @@ def _check_unknown_column(ctx):
         if not aliases:
             continue
         single = _single_target(statement, aliases)
+        output_aliases = _select_aliases(statement)
         for column in statement.expression.find_all(exp.Column):
+            if column.name.lower() in output_aliases:
+                continue  # 引用的是 SELECT 的输出别名，不是表里的列
             qualifier = (column.table or "").lower()
             target = aliases.get(qualifier) if qualifier else single
             if target is None:
