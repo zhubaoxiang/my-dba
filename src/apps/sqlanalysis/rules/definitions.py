@@ -276,12 +276,26 @@ def _check_function_on_column(ctx):
     return issues
 
 
+def _has_top_level_star(select) -> bool:
+    """
+    只看投影列表本身，不看嵌在函数里的星号
+
+    `SELECT count(*)` 是完全正常的写法。若用 `find_all(Star)` 一扫到底，会把它也报成
+    「用了 SELECT *」——这类误报最伤使用者对问题清单的信任，实测在真实库上就踩到了。
+    """
+    for item in select.expressions:
+        if isinstance(item, exp.Star):
+            return True
+        if isinstance(item, exp.Column) and isinstance(item.this, exp.Star):
+            return True
+    return False
+
+
 def _check_select_star(ctx):
     issues = []
     for statement in ctx.statements:
         for select in statement.expression.find_all(exp.Select):
-            stars = list(select.find_all(exp.Star))
-            if not stars:
+            if not _has_top_level_star(select):
                 continue
             issues.append(
                 ctx.issue(

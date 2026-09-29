@@ -23,6 +23,7 @@
 | langchain / langchain-openai / langgraph | 1.4.2 / 1.6.4 / 1.2.12 | 问答 agent 与模型接入 |
 | langchain-qdrant / qdrant-client | 1.1.0 / 1.19.1 | 向量库客户端 |
 | pypdf / beautifulsoup4 | 6.19.0 / 4.15.0 | 文档解析（PDF / HTML） |
+| sqlglot | 30.20.0 | SQL 解析与格式化（方言感知的语法树） |
 
 > `requests` 与 `urllib3` 因 langchain 生态顶替而跨大版本升级（`urllib3` 1.x → 2.x）。旧版只被 `utils/bsa.py` 引用，而该文件**当前无调用方**（见 [deployment.md](deployment.md) 附录），升级不触碰活代码。
 
@@ -105,6 +106,15 @@ src/                          # 后端代码根目录
 │   │   ├── qa/               #   langgraph 单 agent 与工具
 │   │   ├── serializers.py / views.py
 │   │   └── tests.py
+│   ├── sqlanalysis/          # SQL 规范与性能分析 → docs/sql-analysis.md
+│   │   ├── parse.py          #   按方言解析、语句分类（只读 / DML / DDL / 其他）
+│   │   ├── formatting.py     #   从语法树重新生成排版
+│   │   ├── rules/            #   18 条规则的声明与判定
+│   │   ├── schema.py         #   表结构内存索引、类型归族
+│   │   ├── analyzer.py       #   遍历规则、汇总产出
+│   │   ├── explain.py        #   试运行与执行计划
+│   │   ├── interpret.py      #   模型解读（与规则判定分区）
+│   │   └── views.py          #   SqlAnalysisView（stateless，不落库）
 │   └── test/                 # 脚手架示例模块（见 development.md 附录）
 │
 ├── utils/                    # 通用能力（扁平结构，禁止业务模块自建工具类）
@@ -191,6 +201,9 @@ ViewSet 基类（`apps/base/baseviews.py`）按权限分三档：
 | `AnyLogin` | 无认证、无权限 | **本项目统一采用**（原因见下） |
 | `BaseView` / `OperatorView` | `IsAuthenticated` | 常规业务接口 |
 | `SuperUserView` | `IsAdminUser` | 系统管理接口 |
+| `StatelessView` | 无认证、无权限 | **不承载资源**、只有自定义 action 的接口（如 SQL 分析） |
+
+> `StatelessView` 是无模型的 ViewSet 基类。既有的四个基类都是 `ModelViewSet` 子类，继承它们会连同带上一套用不了的 list / detail / create 路由——路由注册了但访问即 500。不落库的接口用它。
 
 > ⚠️ **本项目所有接口继承 `AnyLogin`，系统内不做任何认证与角色校验。**
 >

@@ -39,6 +39,12 @@ const routes = [
         meta: { title: '分析规则', icon: 'SetUp', showInMenu: true }
       },
       {
+        path: 'sqlanalysis',
+        name: 'SqlAnalysis',
+        component: () => import('@/views/sqlanalysis/index.vue'),
+        meta: { title: 'SQL 分析', icon: 'MagicStick', showInMenu: true }
+      },
+      {
         path: 'knowledge/qa',
         name: 'KnowledgeQa',
         component: () => import('@/views/knowledge/qa.vue'),

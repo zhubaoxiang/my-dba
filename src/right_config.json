@@ -95,6 +95,13 @@
           "children": []
         }
       ]
+    },
+    {
+      "fix": [],
+      "name": "SQL 分析",
+      "key": "sqlanalysis",
+      "link": "/WebApi/peafowls_my-dba/static/dist/#/route/sqlanalysis",
+      "children": []
     }
   ]
 }

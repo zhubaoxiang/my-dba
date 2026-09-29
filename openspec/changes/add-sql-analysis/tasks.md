@@ -34,7 +34,7 @@
 - [x] 4.3 规则 `incomparable_types`：列类型是否可比较/可运算
 - [x] 4.4 未指定数据源、数据源未采集、快照为空三种情况的**明确说明**（不得静默跳过）
 - [x] 4.5 单测：mock 快照覆盖命中、缺表、缺列、类型不匹配、JOIN 键类型不匹配与三种跳过情形
-- [ ] 4.6 人工验证：对一个已采集的真实数据源跑若干语句
+- [x] 4.6 人工验证：对一个已采集的真实数据源跑若干语句
 
 ## 5. 执行层：只读试运行与执行计划
 
@@ -65,26 +65,26 @@
 
 ## 8. 前端
 
-- [ ] 8.1 `api/sqlAnalysis.js`：`analyze()` 与 `execute()` 封装
-- [ ] 8.2 页面：SQL 输入、方言与数据源选择、分析按钮
-- [ ] 8.3 展示格式化结果并提供**复制**
-- [ ] 8.4 问题清单按级别分组，展示成因与建议
-- [ ] 8.5 结构校验结果展示，跳过时显示原因
-- [ ] 8.6 「试运行」按钮（**显式触发**）与执行计划 / 行数耗时展示
-- [ ] 8.7 解读区与「模型推测」区**视觉分区**，推测带标注
-- [ ] 8.8 路由与菜单注册
+- [x] 8.1 `api/sqlAnalysis.js`：`analyze()` 与 `execute()` 封装
+- [x] 8.2 页面：SQL 输入、方言与数据源选择、分析按钮
+- [x] 8.3 展示格式化结果并提供**复制**
+- [x] 8.4 问题清单按级别分组，展示成因与建议
+- [x] 8.5 结构校验结果展示，跳过时显示原因
+- [x] 8.6 「试运行」按钮（**显式触发**）与执行计划 / 行数耗时展示
+- [x] 8.7 解读区与「模型推测」区**视觉分区**，推测带标注
+- [x] 8.8 路由与菜单注册
 
 ## 9. 文档
 
-- [ ] 9.1 新增 `docs/sql-analysis.md`：能力说明、接口、规则清单、执行边界（只读真跑 / DML 只 EXPLAIN 的理由）、已知限制
-- [ ] 9.2 `README.md`：路线图该能力状态改为已实现，文档索引补入
-- [ ] 9.3 `docs/architecture.md`：技术栈补 sqlglot；如新增了无模型基类，在「代码分层」处说明
-- [ ] 9.4 `docs/development.md`：如新增依赖或基类，补入核心文件表
+- [x] 9.1 新增 `docs/sql-analysis.md`：能力说明、接口、规则清单、执行边界（只读真跑 / DML 只 EXPLAIN 的理由）、已知限制
+- [x] 9.2 `README.md`：路线图该能力状态改为已实现，文档索引补入
+- [x] 9.3 `docs/architecture.md`：技术栈补 sqlglot；如新增了无模型基类，在「代码分层」处说明
+- [x] 9.4 `docs/development.md`：如新增依赖或基类，补入核心文件表
 
 ## 10. 校验
 
-- [ ] 10.1 `python .ci/custom-checks/scaffold_check.py`
-- [ ] 10.2 `ruff check src/ --config .ci/lint-rules/ruff.toml` 与 `ruff format --check`
-- [ ] 10.3 `cd static && npm run build`
-- [ ] 10.4 `ENV_TYPE=test python manage.py test apps.sqlanalysis apps.datasource apps.knowledge`
-- [ ] 10.5 `openspec validate add-sql-analysis --strict --no-interactive`
+- [x] 10.1 `python .ci/custom-checks/scaffold_check.py`
+- [x] 10.2 `ruff check src/ --config .ci/lint-rules/ruff.toml` 与 `ruff format --check`
+- [x] 10.3 `cd static && npm run build`
+- [x] 10.4 `ENV_TYPE=test python manage.py test apps.sqlanalysis apps.datasource apps.knowledge`
+- [x] 10.5 `openspec validate add-sql-analysis --strict --no-interactive`

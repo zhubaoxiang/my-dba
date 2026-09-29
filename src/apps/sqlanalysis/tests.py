@@ -271,7 +271,16 @@ class RuleTests(SimpleTestCase):
     def test_select_star(self):
         self.assertIn("select_star", self.codes("SELECT * FROM t"))
         self.assertIn("select_star", self.codes("SELECT t.* FROM t"))
+        self.assertIn("select_star", self.codes("SELECT id, * FROM t"))
         self.assertNotIn("select_star", self.codes("SELECT id, name FROM t"))
+
+    def test_count_star_is_not_select_star(self):
+        """
+        `SELECT count(*)` 是正常写法。实测在真实库上，用 find_all(Star) 一扫到底会把它
+        报成「用了 SELECT *」——这类误报最伤使用者对问题清单的信任
+        """
+        self.assertNotIn("select_star", self.codes("SELECT count(*) FROM t"))
+        self.assertNotIn("select_star", self.codes("SELECT count(*) AS n FROM t WHERE id = 1"))
 
     def test_insert_without_column_list(self):
         self.assertIn("insert_without_column_list", self.codes("INSERT INTO t VALUES (1, 2)"))

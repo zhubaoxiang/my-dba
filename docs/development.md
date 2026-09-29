@@ -48,7 +48,9 @@ class YourEnum(models.IntegerChoices):
 
 ### ViewSet 规范
 
-基类按权限选，本项目统一用 `AnyLogin`（原因见 [architecture.md 的「认证与鉴权」](architecture.md#认证与鉴权)）：
+基类按权限选，本项目统一用 `AnyLogin`（原因见 [architecture.md 的「认证与鉴权」](architecture.md#认证与鉴权)）。
+
+> **不落库、只有自定义 action 的接口用 `StatelessView`**，不要继承 `AnyLogin`——后者是 `ModelViewSet` 子类，会连同带上一套用不了的 list / detail 路由，访问即 500。见 [architecture.md 的「认证与鉴权」](architecture.md#认证与鉴权) 的基类表。
 
 ```python
 from apps.base import baseviews
