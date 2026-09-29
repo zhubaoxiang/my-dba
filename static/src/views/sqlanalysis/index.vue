@@ -37,165 +37,154 @@
       </div>
     </el-card>
 
-    <!-- 左右分栏：确定性的结果在左，耗时的模型解读在右并保持可见，
-         省得为了看解读一路滚到底 -->
-    <el-row :gutter="16" class="split">
-      <el-col :xs="24" :lg="15">
-        <el-card v-if="formatted" shadow="never" class="section">
-          <template #header>
-            <div class="card-header">
-              <span>格式化结果</span>
-              <el-button link type="primary" size="small" @click="copyFormatted">复制</el-button>
-            </div>
-          </template>
+    <!-- 格式化是独立动作，结果也独立呈现，不参与分析的两栏 -->
+    <el-card v-if="formatted" shadow="never" class="section">
+      <template #header>
+        <div class="card-header">
+          <span>格式化结果</span>
+          <el-button link type="primary" size="small" @click="copyFormatted">复制</el-button>
+        </div>
+      </template>
+      <el-alert
+        v-if="formatted.syntax && !formatted.syntax.ok"
+        class="format-warning"
+        type="warning"
+        :closable="false"
+        show-icon
+        title="SQL 未能解析，以下是原样返回的内容——请先修正语法"
+      />
+      <pre class="code">{{ formatted.formatted }}</pre>
+    </el-card>
+
+    <!-- 分析后才有两栏：确定性的规则分析在左、耗时的 AI 解读在右。
+         两者同时出现、同时消失，不会出现一边有内容一边空着 -->
+    <el-row v-if="result" :gutter="16" class="split">
+      <el-col :xs="24" :lg="12">
+        <el-card shadow="never" class="column-card">
+          <template #header><span>规则分析</span></template>
+
           <el-alert
-            v-if="formatted.syntax && !formatted.syntax.ok"
-            class="format-warning"
-            type="warning"
+            :type="verdictType(result.verdict.level)"
             :closable="false"
             show-icon
-            title="SQL 未能解析，以下是原样返回的内容——请先修正语法"
+            :title="`${result.verdict.label}：${result.verdict.text}`"
           />
-          <pre class="code">{{ formatted.formatted }}</pre>
-        </el-card>
 
-        <template v-if="result">
-          <el-card shadow="never" class="section">
+          <el-divider content-position="left">语法</el-divider>
+          <el-alert
+            v-if="result.syntax.ok"
+            type="success"
+            :closable="false"
+            show-icon
+            :title="`解析通过，共 ${result.syntax.statement_count} 条语句：${kindSummary}`"
+          />
+          <el-alert v-else type="error" :closable="false" show-icon title="解析失败">
+            <div v-for="(err, i) in result.syntax.errors" :key="i" class="error-line">
+              <span v-if="err.line">第 {{ err.line }} 行第 {{ err.col }} 列：</span>{{ err.description }}
+            </div>
+          </el-alert>
+
+          <el-divider content-position="left">问题清单（{{ result.issues.length }}）</el-divider>
+          <div class="muted section-hint">
+            结构校验：{{
+              result.schema_check.performed
+                ? `已进行，快照含 ${result.schema_check.table_count} 张表`
+                : result.schema_check.note
+            }}
+          </div>
+
+          <el-empty v-if="!result.issues.length" description="规则未判出问题" :image-size="60" />
+          <el-table v-else :data="result.issues" border size="small">
+            <el-table-column label="级别" width="70">
+              <template #default="{ row }">
+                <el-tag :type="levelTagType(row.issue_level)" size="small">{{ levelLabel(row.issue_level) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="rule_name" label="规则" width="150" />
+            <el-table-column prop="target" label="对象" min-width="120" show-overflow-tooltip />
+            <el-table-column prop="description" label="说明" min-width="200" show-overflow-tooltip />
+            <el-table-column prop="suggestion" label="建议" min-width="180" show-overflow-tooltip />
+          </el-table>
+
+          <div v-if="result.skipped_rules.length" class="muted skipped">
+            因缺少表结构而跳过的规则：{{ result.skipped_rules.join('、') }}
+          </div>
+
+          <template v-if="execution">
+            <el-divider content-position="left">试运行</el-divider>
             <el-alert
-              :type="verdictType(result.verdict.level)"
+              v-if="execution.note"
+              type="warning"
               :closable="false"
               show-icon
-              :title="`${result.verdict.label}：${result.verdict.text}`"
+              :title="execution.note"
             />
-            <div v-if="interpretation && interpretation.summary" class="verdict-summary">
-              <span class="summary-label">总体判断</span>
-              {{ interpretation.summary }}
+            <div class="execution-meta">
+              <el-tag v-if="execution.executed" type="success" size="small">
+                已执行 · {{ execution.row_count }} 行 · {{ execution.duration_ms }}ms
+              </el-tag>
+              <el-tag v-else type="warning" size="small">未执行</el-tag>
             </div>
-          </el-card>
-
-          <el-card shadow="never" class="section">
-            <template #header><span>语法</span></template>
-            <el-alert
-              v-if="result.syntax.ok"
-              type="success"
-              :closable="false"
-              show-icon
-              :title="`解析通过，共 ${result.syntax.statement_count} 条语句：${kindSummary}`"
-            />
-            <el-alert v-else type="error" :closable="false" show-icon title="解析失败">
-              <div v-for="(err, i) in result.syntax.errors" :key="i" class="error-line">
-                <span v-if="err.line">第 {{ err.line }} 行第 {{ err.col }} 列：</span>{{ err.description }}
-              </div>
-            </el-alert>
-          </el-card>
-
-          <el-card shadow="never" class="section">
-            <template #header>
-              <div class="card-header">
-                <span>问题清单（{{ result.issues.length }}）</span>
-                <span class="muted">
-                  结构校验：{{
-                    result.schema_check.performed
-                      ? `已进行，快照含 ${result.schema_check.table_count} 张表`
-                      : result.schema_check.note
-                  }}
-                </span>
-              </div>
-            </template>
-
-            <el-empty v-if="!result.issues.length" description="规则未判出问题" :image-size="60" />
-            <el-table v-else :data="result.issues" border>
-              <el-table-column label="级别" width="80">
-                <template #default="{ row }">
-                  <el-tag :type="levelTagType(row.issue_level)" size="small">{{ levelLabel(row.issue_level) }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column prop="rule_name" label="规则" width="170" />
-              <el-table-column label="位置" width="110">
-                <template #default="{ row }">
-                  <span v-if="row.statement_index">第 {{ row.statement_index }} 条</span>
-                  <span v-else class="muted">整条 SQL</span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="target" label="对象" min-width="130" show-overflow-tooltip />
-              <el-table-column prop="description" label="说明" min-width="240" show-overflow-tooltip />
-              <el-table-column prop="suggestion" label="建议" min-width="220" show-overflow-tooltip />
-            </el-table>
-
-            <div v-if="result.skipped_rules.length" class="muted skipped">
-              因缺少表结构而跳过的规则：{{ result.skipped_rules.join('、') }}
-            </div>
-          </el-card>
-
-          <el-card v-if="execution" shadow="never" class="section">
-            <template #header>
-              <div class="card-header">
-                <span>试运行</span>
-                <el-tag v-if="execution.executed" type="success" size="small">
-                  已执行 · {{ execution.row_count }} 行 · {{ execution.duration_ms }}ms
-                </el-tag>
-                <el-tag v-else type="warning" size="small">未执行</el-tag>
-              </div>
-            </template>
-            <el-alert v-if="execution.note" type="warning" :closable="false" show-icon :title="execution.note" />
             <pre v-if="execution.plan" class="code plan">{{ execution.plan }}</pre>
-          </el-card>
-        </template>
+          </template>
+        </el-card>
       </el-col>
 
-      <el-col :xs="24" :lg="9">
-        <div class="interpret-column">
-          <el-card shadow="never">
-            <template #header>
-              <div class="card-header">
-                <span>模型解读</span>
-                <el-tag v-if="interpreting" type="warning" size="small" effect="plain">进行中</el-tag>
+      <el-col :xs="24" :lg="12">
+        <el-card shadow="never" class="column-card">
+          <template #header>
+            <div class="card-header">
+              <span>AI 解读</span>
+              <el-tag v-if="interpreting" type="warning" size="small" effect="plain">进行中</el-tag>
+            </div>
+          </template>
+
+          <template v-if="interpreting">
+            <div class="interpreting">
+              <el-icon class="interpreting-icon is-loading"><Loading /></el-icon>
+              <div>
+                <div class="interpreting-title">正在调用大模型解读…</div>
+                <div class="interpreting-hint">规则分析已经完成，左侧可先查看，不受影响</div>
               </div>
-            </template>
+            </div>
+            <el-skeleton :rows="6" animated />
+          </template>
 
-            <el-empty v-if="!result" description="分析后这里会显示模型解读" :image-size="60" />
+          <el-alert
+            v-else-if="interpretation && !interpretation.available"
+            type="info"
+            :closable="false"
+            show-icon
+            :title="interpretation.note || '本次没有 AI 解读'"
+          />
 
-            <template v-else-if="interpreting">
-              <div class="interpreting">
-                <el-icon class="interpreting-icon is-loading"><Loading /></el-icon>
-                <div>
-                  <div class="interpreting-title">正在调用大模型解读…</div>
-                  <div class="interpreting-hint">规则判定与问题清单已就绪，左侧可先查看，不受影响</div>
-                </div>
-              </div>
-              <el-skeleton class="interpreting-skeleton" :rows="5" animated />
-            </template>
+          <template v-else-if="interpretation">
+            <div v-if="interpretation.summary" class="summary-block">
+              <span class="summary-label">总体判断</span>
+              <div class="summary-text">{{ interpretation.summary }}</div>
+            </div>
 
-            <el-alert
-              v-else-if="interpretation && !interpretation.available"
-              type="info"
-              :closable="false"
-              show-icon
-              :title="interpretation.note || '本次没有大模型解读'"
+            <el-empty
+              v-if="!interpretation.explanations.length && !interpretation.observations.length"
+              :description="emptyExplanationText"
+              :image-size="60"
             />
 
-            <template v-else-if="interpretation">
-              <el-empty
-                v-if="!interpretation.explanations.length"
-                :description="emptyExplanationText"
-                :image-size="60"
-              />
-              <div v-else class="explanations">
-                <div v-for="(item, i) in interpretation.explanations" :key="i" class="explanation">
-                  <el-tag size="small" type="info">{{ ruleName(item.rule_code) }}</el-tag>
-                  <span class="explanation-text">{{ item.text }}</span>
-                </div>
+            <div v-else class="explanations">
+              <div v-for="(item, i) in interpretation.explanations" :key="i" class="explanation">
+                <el-tag size="small" type="info">{{ ruleName(item.rule_code) }}</el-tag>
+                <span class="explanation-text">{{ item.text }}</span>
               </div>
+            </div>
 
-              <div v-if="interpretation.observations.length" class="observations">
-                <el-alert type="warning" :closable="false" show-icon :title="interpretation.observations_note" />
-                <ul class="observation-list">
-                  <li v-for="(text, i) in interpretation.observations" :key="i">{{ text }}</li>
-                </ul>
-              </div>
-            </template>
-          </el-card>
-        </div>
+            <div v-if="interpretation.observations.length" class="observations">
+              <el-alert type="warning" :closable="false" show-icon :title="interpretation.observations_note" />
+              <ul class="observation-list">
+                <li v-for="(text, i) in interpretation.observations" :key="i">{{ text }}</li>
+              </ul>
+            </div>
+          </template>
+        </el-card>
       </el-col>
     </el-row>
   </div>
@@ -388,13 +377,24 @@ onMounted(loadDatasources)
 }
 
 .section {
-  margin-bottom: 16px;
+  margin-top: 16px;
 }
 
-/* 解读列保持可见：省得为了看解读一路滚到底。窄屏下退化为普通上下排列 */
-.interpret-column {
-  position: sticky;
-  top: 16px;
+.column-card {
+  height: 100%;
+}
+
+/* 标题与首个分区之间不必再空一格 */
+.column-card :deep(.el-divider:first-of-type) {
+  margin-top: 8px;
+}
+
+.section-hint {
+  margin-bottom: 8px;
+}
+
+.execution-meta {
+  margin-bottom: 8px;
 }
 
 .code {
@@ -412,7 +412,7 @@ onMounted(loadDatasources)
 }
 
 .plan {
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .format-warning {
@@ -427,19 +427,27 @@ onMounted(loadDatasources)
   margin-top: 10px;
 }
 
-.verdict-summary {
-  margin-top: 12px;
+/* AI 的总体判断放在这一栏的顶部，与左侧的规则结论形成对照 */
+.summary-block {
+  margin-bottom: 16px;
+  padding: 12px;
+  border-radius: 4px;
+  background: #f5f7fa;
   line-height: 1.7;
 }
 
 .summary-label {
   display: inline-block;
-  margin-right: 8px;
+  margin-bottom: 6px;
   padding: 1px 8px;
   border-radius: 3px;
   background: #ecf5ff;
   color: #409eff;
   font-size: 12px;
+}
+
+.summary-text {
+  color: #303133;
 }
 
 /* 解读中的等待态：明确告诉使用者「还在跑」而不是「已经完了」 */
@@ -466,10 +474,6 @@ onMounted(loadDatasources)
   font-size: 12px;
   color: #909399;
   line-height: 1.6;
-}
-
-.interpreting-skeleton {
-  margin-top: 4px;
 }
 
 .explanations {
