@@ -6,7 +6,11 @@ import request from './request'
 // - analyze  只读采集快照与内存计算，可以随用随调
 // - execute  会在**真实的、可能是生产的**库上执行语句，必须由使用者显式触发
 export const sqlAnalysisApi = {
-  // 解析 + 格式化 + 规则 + 结构校验 + 模型解读
+  // 只做格式化：独立接口，不会顺带触发规则判定与模型调用
+  format(data) {
+    return request.post('/v1/sql-analysis/format', data)
+  },
+  // 解析 + 规则 + 结构校验 + 模型解读
   analyze(data) {
     return request.post('/v1/sql-analysis/analyze', data)
   },

@@ -936,8 +936,8 @@ class SqlAnalysisApiTests(TestCase):
         for key in (
             "sql",
             "dialect",
-            "formatted",
             "syntax",
+            "verdict",
             "issues",
             "schema_check",
             "interpretation",
@@ -954,10 +954,40 @@ class SqlAnalysisApiTests(TestCase):
         self.assertIn("未指定数据源", data["schema_check"]["note"])
         self.assertIn("unknown_table", data["skipped_rules"], "跳过的规则要能解释")
 
-    def test_analyze_formats_the_sql(self):
-        data = self.post("analyze", {"sql": "select id from users where id=1 limit 1"})["data"]
+    def test_format_returns_pretty_sql(self):
+        data = self.post("format", {"sql": "select id from users where id=1 limit 1"})["data"]
         self.assertIn("SELECT", data["formatted"])
-        self.assertIn("\n", data["formatted"])
+        self.assertIn("\n", data["formatted"], "美化后应当有换行")
+
+    def test_format_accepts_a_dialect(self):
+        data = self.post("format", {"sql": "SELECT `id` FROM `t`", "dialect": 2})["data"]
+        self.assertEqual(data["dialect"], 2)
+
+    def test_format_returns_unparseable_sql_as_is(self):
+        data = self.post("format", {"sql": "SELECT id,\n  FROM users\nWHERE"})["data"]
+        self.assertFalse(data["syntax"]["ok"])
+        self.assertIn("FROM users", data["formatted"], "解析不了就原样返回")
+
+    def test_format_rejects_empty_sql(self):
+        self.assertEqual(self.post("format", {"sql": "   "})["code"], 4000)
+
+    def test_format_does_not_run_the_rules_or_the_model(self):
+        """
+        格式化是独立动作：不该顺带跑规则判定与模型调用——那既慢又费额度，
+        而这正是把它与分析拆开的理由
+        """
+        with (
+            mock.patch.object(views.analyzer.SqlAnalyzer, "analyze") as run_rules,
+            mock.patch.object(views.interpret, "interpret") as run_model,
+        ):
+            self.post("format", {"sql": "SELECT * FROM users"})
+        run_rules.assert_not_called()
+        run_model.assert_not_called()
+
+    def test_analyze_no_longer_returns_formatted(self):
+        """格式化已拆成独立接口，分析结果里不再带它——两者不该绑在一起"""
+        data = self.post("analyze", {"sql": "SELECT 1"})["data"]
+        self.assertNotIn("formatted", data)
 
     def test_analyze_reports_the_dialect(self):
         self.assertEqual(self.post("analyze", {"sql": "SELECT 1", "dialect": 2})["data"]["dialect"], 2)

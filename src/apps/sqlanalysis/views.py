@@ -67,6 +67,31 @@ class SqlAnalysisView(baseviews.StatelessView):
         except schema.SchemaUnavailable as exc:
             return None, str(exc)
 
+    @action(detail=False, methods=["POST"], url_path="format")
+    def format_sql(self, request):
+        """
+        只做格式化
+
+        与分析分开：格式化是独立动作，不该顺带触发规则判定与模型调用——那既慢又费额度。
+        解析不了时原样返回，由调用方按 `syntax.ok` 决定怎么提示。
+        """
+        serializer = serializers.SqlTextSerializer(data=request.data)
+        if not serializer.is_valid():
+            return baseviews.ResponseBadRequest(common.ToolUtil.format_drf_error(serializer.errors))
+        data = serializer.validated_data
+
+        sql = data["sql"]
+        dialect = data.get("dialect")
+        result = parse.parse_sql(sql, dialect)
+        return baseviews.ResponseOK(
+            {
+                "sql": sql,
+                "dialect": dialect or "",
+                "formatted": formatting.format_sql(sql, dialect),
+                "syntax": self._syntax(result),
+            }
+        )
+
     @action(detail=False, methods=["POST"], url_path="analyze")
     def analyze(self, request):
         """
@@ -113,7 +138,8 @@ class SqlAnalysisView(baseviews.StatelessView):
             {
                 "sql": sql,
                 "dialect": dialect or "",
-                "formatted": formatting.format_sql(sql, dialect),
+                # 格式化已拆成独立接口（format），这里不再返回——
+                # 分析回答「有没有问题」，格式化是另一件事
                 "syntax": self._syntax(result),
                 # 结论由后端按规则产出算出来，**不依赖模型**——「有没有明显问题」
                 # 任何时候都要有答案。解析失败与规则被跳过都要如实反映：

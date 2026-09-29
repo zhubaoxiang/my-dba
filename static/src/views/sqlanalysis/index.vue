@@ -28,6 +28,7 @@
       />
 
       <div class="actions">
+        <el-button :loading="formatting" :disabled="!sql.trim()" @click="formatSql">格式化</el-button>
         <el-button type="primary" :loading="analyzing" :disabled="!sql.trim()" @click="analyze">分析</el-button>
         <el-tooltip
           content="只读语句会在目标库上真实执行；DML / DDL 只出执行计划，不会被执行"
@@ -43,6 +44,24 @@
         </el-tooltip>
         <span v-if="!datasourceId" class="muted">试运行需要先选择数据源</span>
       </div>
+    </el-card>
+
+    <el-card v-if="formatted" shadow="never" class="section">
+      <template #header>
+        <div class="card-header">
+          <span>格式化结果</span>
+          <el-button link type="primary" size="small" @click="copyFormatted">复制</el-button>
+        </div>
+      </template>
+      <el-alert
+        v-if="formatted.syntax && !formatted.syntax.ok"
+        class="format-warning"
+        type="warning"
+        :closable="false"
+        show-icon
+        title="SQL 未能解析，以下是原样返回的内容——请先修正语法"
+      />
+      <pre class="code">{{ formatted.formatted }}</pre>
     </el-card>
 
     <template v-if="result">
@@ -68,16 +87,6 @@
             <span v-if="err.line">第 {{ err.line }} 行第 {{ err.col }} 列：</span>{{ err.description }}
           </div>
         </el-alert>
-      </el-card>
-
-      <el-card shadow="never" class="section">
-        <template #header>
-          <div class="card-header">
-            <span>格式化</span>
-            <el-button link type="primary" size="small" @click="copyFormatted">复制</el-button>
-          </div>
-        </template>
-        <pre class="code">{{ result.formatted }}</pre>
       </el-card>
 
       <el-card shadow="never" class="section">
@@ -179,6 +188,8 @@ const datasourceId = ref(null)
 const datasources = ref([])
 const result = ref(null)
 const execution = ref(null)
+const formatted = ref(null)
+const formatting = ref(false)
 const analyzing = ref(false)
 const executing = ref(false)
 
@@ -233,10 +244,25 @@ async function loadDatasources() {
   datasources.value = data.results || []
 }
 
+async function formatSql() {
+  if (!sql.value.trim()) return
+  formatting.value = true
+  try {
+    formatted.value = await sqlAnalysisApi.format({
+      sql: sql.value,
+      dialect: dialect.value || undefined
+    })
+  } finally {
+    formatting.value = false
+  }
+}
+
 async function analyze() {
   if (!sql.value.trim()) return
   analyzing.value = true
-  execution.value = null // 换了输入或重新分析，旧的试运行结果不再对应当前 SQL
+  // 换了输入或重新分析，旧的格式化与试运行结果都不再对应当前 SQL
+  formatted.value = null
+  execution.value = null
   try {
     result.value = await sqlAnalysisApi.analyze({
       sql: sql.value,
@@ -262,7 +288,7 @@ async function runExecute() {
 }
 
 async function copyFormatted() {
-  const text = result.value?.formatted || ''
+  const text = formatted.value?.formatted || ''
   if (!text) return
   try {
     await navigator.clipboard.writeText(text)
@@ -341,6 +367,10 @@ onMounted(loadDatasources)
 
 .plan {
   margin-top: 10px;
+}
+
+.format-warning {
+  margin-bottom: 10px;
 }
 
 .error-line {
