@@ -956,7 +956,6 @@ class SqlAnalysisApiTests(TestCase):
             "verdict",
             "issues",
             "schema_check",
-            "interpretation",
             "evaluated_rules",
             "skipped_rules",
         ):
@@ -1000,10 +999,37 @@ class SqlAnalysisApiTests(TestCase):
         run_rules.assert_not_called()
         run_model.assert_not_called()
 
-    def test_analyze_no_longer_returns_formatted(self):
-        """格式化已拆成独立接口，分析结果里不再带它——两者不该绑在一起"""
+    def test_analyze_returns_neither_formatted_nor_interpretation(self):
+        """格式化与模型解读都已拆成独立接口，分析结果里不再带它们"""
         data = self.post("analyze", {"sql": "SELECT 1"})["data"]
         self.assertNotIn("formatted", data)
+        self.assertNotIn("interpretation", data)
+
+    def test_analyze_does_not_wait_for_the_model(self):
+        """
+        模型解读是十几秒的外部调用，不该拖住毫秒级的规则判定——
+        实测撞过前端 15 秒超时，而后端允许模型跑 60 秒
+        """
+        with mock.patch.object(views.interpret, "interpret") as run_model:
+            self.post("analyze", {"sql": "SELECT * FROM users"})
+        run_model.assert_not_called()
+
+    def test_interpret_endpoint_returns_the_interpretation(self):
+        payload = self.post("interpret", {"sql": "SELECT * FROM users"})
+        self.assertEqual(payload["code"], 2000)
+        self.assertIn("available", payload["data"])
+
+    def test_interpret_reruns_the_rules(self):
+        """解读要重新跑一遍规则，才能保证只接受对应本次问题清单的解读"""
+        with mock.patch.object(views.analyzer.SqlAnalyzer, "analyze", return_value=[]) as run_rules:
+            self.post("interpret", {"sql": "SELECT * FROM users"})
+        run_rules.assert_called_once()
+
+    def test_interpret_rejects_empty_sql(self):
+        self.assertEqual(self.post("interpret", {"sql": "   "})["code"], 4000)
+
+    def test_interpret_rejects_unknown_datasource(self):
+        self.assertEqual(self.post("interpret", {"sql": "SELECT 1", "datasource_id": 999999})["code"], 4004)
 
     def test_analyze_reports_the_dialect(self):
         self.assertEqual(self.post("analyze", {"sql": "SELECT 1", "dialect": 2})["data"]["dialect"], 2)

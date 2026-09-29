@@ -72,9 +72,9 @@
           show-icon
           :title="`${result.verdict.label}：${result.verdict.text}`"
         />
-        <div v-if="result.interpretation.summary" class="verdict-summary">
+        <div v-if="interpretation && interpretation.summary" class="verdict-summary">
           <span class="summary-label">总体判断</span>
-          {{ result.interpretation.summary }}
+          {{ interpretation.summary }}
         </div>
       </el-card>
 
@@ -138,34 +138,41 @@
       </el-card>
 
       <el-card shadow="never" class="section">
-        <template #header><span>解读</span></template>
+        <template #header>
+          <div class="card-header">
+            <span>解读</span>
+            <span v-if="interpreting" class="muted">模型解读中…（结论与清单已可查看）</span>
+          </div>
+        </template>
+
+        <el-skeleton v-if="interpreting && !interpretation" :rows="3" animated />
 
         <el-alert
-          v-if="!result.interpretation.available"
+          v-else-if="interpretation && !interpretation.available"
           type="info"
           :closable="false"
           show-icon
-          :title="result.interpretation.note || '本次没有大模型解读'"
+          :title="interpretation.note || '本次没有大模型解读'"
         />
 
-        <template v-else>
-          <el-empty v-if="!result.interpretation.explanations.length" :description="emptyExplanationText" :image-size="50" />
+        <template v-else-if="interpretation">
+          <el-empty v-if="!interpretation.explanations.length" :description="emptyExplanationText" :image-size="50" />
           <div v-else class="explanations">
-            <div v-for="(item, i) in result.interpretation.explanations" :key="i" class="explanation">
+            <div v-for="(item, i) in interpretation.explanations" :key="i" class="explanation">
               <el-tag size="small" type="info">{{ ruleName(item.rule_code) }}</el-tag>
               <span class="explanation-text">{{ item.text }}</span>
             </div>
           </div>
 
-          <div v-if="result.interpretation.observations.length" class="observations">
+          <div v-if="interpretation.observations.length" class="observations">
             <el-alert
               type="warning"
               :closable="false"
               show-icon
-              :title="result.interpretation.observations_note"
+              :title="interpretation.observations_note"
             />
             <ul class="observation-list">
-              <li v-for="(text, i) in result.interpretation.observations" :key="i">{{ text }}</li>
+              <li v-for="(text, i) in interpretation.observations" :key="i">{{ text }}</li>
             </ul>
           </div>
         </template>
@@ -187,11 +194,15 @@ const dialect = ref(null)
 const datasourceId = ref(null)
 const datasources = ref([])
 const result = ref(null)
+const interpretation = ref(null)
 const execution = ref(null)
 const formatted = ref(null)
 const formatting = ref(false)
 const analyzing = ref(false)
+const interpreting = ref(false)
 const executing = ref(false)
+// 请求序号：解读是慢调用，期间若又发起了新的分析，旧结果必须丢弃
+let interpretToken = 0
 
 const kindSummary = computed(() => {
   const items = result.value?.syntax?.statements || []
@@ -208,11 +219,11 @@ const kindSummary = computed(() => {
 // 「规则没判出问题」与「模型有输出但没对上」是两回事，文案不能混——
 // 用前者的说法去描述后者，等于把故障盖住了
 const emptyExplanationText = computed(() => {
-  const interpretation = result.value?.interpretation
-  if (!interpretation) return ''
-  if (!result.value.issues.length) return '规则未判出问题，没有可解读的条目'
-  if (interpretation.dropped_explanations) {
-    return `模型给出了 ${interpretation.dropped_explanations} 条解读，但都没能与本次问题清单对应上，已丢弃`
+  const data = interpretation.value
+  if (!data) return ''
+  if (!result.value?.issues.length) return '规则未判出问题，没有可解读的条目'
+  if (data.dropped_explanations) {
+    return `模型给出了 ${data.dropped_explanations} 条解读，但都没能与本次问题清单对应上，已丢弃`
   }
   return '模型本次没有给出逐条解读'
 })
@@ -260,8 +271,9 @@ async function formatSql() {
 async function analyze() {
   if (!sql.value.trim()) return
   analyzing.value = true
-  // 换了输入或重新分析，旧的格式化与试运行结果都不再对应当前 SQL
+  // 换了输入或重新分析，旧的格式化、解读与试运行结果都不再对应当前 SQL
   formatted.value = null
+  interpretation.value = null
   execution.value = null
   try {
     result.value = await sqlAnalysisApi.analyze({
@@ -271,6 +283,25 @@ async function analyze() {
     })
   } finally {
     analyzing.value = false
+  }
+  // 解读单独请求：它是十几秒的外部调用，不该拖住上面那份已经出来的结论与清单
+  loadInterpretation()
+}
+
+async function loadInterpretation() {
+  const token = ++interpretToken
+  interpreting.value = true
+  try {
+    const data = await sqlAnalysisApi.interpret({
+      sql: sql.value,
+      dialect: dialect.value || undefined,
+      datasource_id: datasourceId.value || undefined
+    })
+    if (token === interpretToken) interpretation.value = data
+  } catch {
+    // 解读失败不该影响已经出来的结论与清单；拦截器已提示过
+  } finally {
+    if (token === interpretToken) interpreting.value = false
   }
 }
 

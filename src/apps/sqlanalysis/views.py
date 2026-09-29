@@ -48,6 +48,19 @@ class SqlAnalysisView(baseviews.StatelessView):
         }
 
     @staticmethod
+    def _syntax_note(result) -> str:
+        """
+        解析失败时给模型的补充信息
+
+        规则一条都跑不了，而模型对语法错误往往**最有帮助**，所以哪怕没判出问题也要把位置告诉它。
+        """
+        if result.ok or not result.errors:
+            return ""
+        first = result.errors[0]
+        where = f"第 {first['line']} 行第 {first['col']} 列" if first.get("line") else "位置未知"
+        return f"该 SQL 解析失败（{where}）：{first['description']}"
+
+    @staticmethod
     def _schema_check(index, skipped_reason: str = "") -> dict:
         """
         结构校验的结果说明
@@ -128,12 +141,6 @@ class SqlAnalysisView(baseviews.StatelessView):
             # 解析不了，规则一条都跑不了；但模型对语法错误往往最有帮助，解读照常进行
             schema_check = self._schema_check(None, "SQL 未能解析，本次未做结构校验。")
 
-        context_note = ""
-        if not result.ok:
-            first = result.errors[0]
-            where = f"第 {first['line']} 行第 {first['col']} 列" if first.get("line") else "位置未知"
-            context_note = f"该 SQL 解析失败（{where}）：{first['description']}"
-
         return baseviews.ResponseOK(
             {
                 "sql": sql,
@@ -147,11 +154,45 @@ class SqlAnalysisView(baseviews.StatelessView):
                 "verdict": analyzer.verdict_of(issues, parsed=result.ok, skipped_rules=skipped_rules),
                 "issues": issues,
                 "schema_check": schema_check,
-                "interpretation": interpret.interpret(sql, issues, dialect, context_note=context_note),
+                # 模型解读不在这里返回：它是十几秒的外部调用，与毫秒级的规则判定绑在一个
+                # 请求里会让前者拖住后者，前端也会先超时。改由 interpret 接口单独请求
                 "evaluated_rules": list(runner.evaluated_rules) if runner else [],
                 "skipped_rules": list(runner.skipped_rules) if runner else [],
             }
         )
+
+    @action(detail=False, methods=["POST"], url_path="interpret")
+    def interpret_sql(self, request):
+        """
+        只做模型解读
+
+        与 analyze 分开的理由是**耗时差了几个数量级**：规则判定是毫秒级的纯计算，模型调用是
+        十几秒的外部服务。绑在一起时使用者要等模型才看得到问题清单，前端的超时也卡不住
+        （实测撞过 15 秒超时）。
+
+        入参与 analyze 相同：这里**重新跑一遍解析与规则**，保证解读对应的就是规则判出的那批问题，
+        也免去把问题清单在前后端之间来回传。
+        """
+        serializer = serializers.SqlAnalyzeSerializer(data=request.data)
+        if not serializer.is_valid():
+            return baseviews.ResponseBadRequest(common.ToolUtil.format_drf_error(serializer.errors))
+        data = serializer.validated_data
+
+        datasource_id = data.get("datasource_id")
+        brief, _ = self._resolve_datasource(datasource_id)
+        if datasource_id and brief is None:
+            return baseviews.ResponseNotFound("数据源不存在")
+
+        dialect = data.get("dialect") or (brief or {}).get("db_type")
+        sql = data["sql"]
+        result = parse.parse_sql(sql, dialect)
+
+        issues = []
+        if result.ok:
+            index, _ = self._load_index(datasource_id)
+            issues = analyzer.SqlAnalyzer(result, sql=sql, dialect=dialect, schema=index).analyze()
+
+        return baseviews.ResponseOK(interpret.interpret(sql, issues, dialect, context_note=self._syntax_note(result)))
 
     @action(detail=False, methods=["POST"], url_path="execute")
     def execute(self, request):
