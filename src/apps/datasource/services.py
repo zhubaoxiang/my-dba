@@ -13,6 +13,7 @@ from datetime import datetime
 
 import psycopg2
 import pymysql
+from django.db.models import Count
 
 from apps.datasource import analyzer, models
 from apps.datasource.collectors import get_collector
@@ -360,7 +361,7 @@ def list_datasource_status() -> list:
         rows = (
             models.CatalogIssue.objects.filter(is_deleted=False, snapshot_id__in=snapshot_ids)
             .values("snapshot_id", "issue_level")
-            .annotate(total=models.Count("id"))
+            .annotate(total=Count("id"))
         )
         counts = {(row["snapshot_id"], row["issue_level"]): row["total"] for row in rows}
 

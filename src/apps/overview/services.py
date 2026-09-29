@@ -36,15 +36,18 @@ def _readiness() -> dict:
         missing.append({"item": "对话模型", "affected": _CHAT_AFFECTED})
     if llm.active_embedding_provider() is None:
         missing.append({"item": "嵌入模型", "affected": _EMBEDDING_AFFECTED})
-    return {"available": True, "ready": not missing, "missing": missing}
+    return {"ready": not missing, "missing": missing}
 
 
 def _block(name: str, loader, unavailable: dict) -> dict:
     """
     逐块取数：失败只影响这一块，并记日志便于定位
+
+    各块的 `loader` 返回**同样形状的字典**，本函数只负责补上 `available`——
+    不能假定各块都是列表：就绪状态是个对象，硬塞进 `items` 会让前端取不到它。
     """
     try:
-        return {"available": True, "items": loader()}
+        return {"available": True, **loader()}
     except Exception as exc:  # noqa: BLE001 外部模块的查询失败不该拖垮整个首页
         LOGGER.error("首页总览取数失败 block=%s err=%s", name, exc)
         return unavailable
@@ -58,12 +61,12 @@ def build_overview() -> dict:
         "readiness": _block("readiness", _readiness, {"available": False, "ready": False, "missing": []}),
         "datasources": _block(
             "datasources",
-            datasource_services.list_datasource_status,
+            lambda: {"items": datasource_services.list_datasource_status()},
             {"available": False, "items": []},
         ),
         "knowledge_bases": _block(
             "knowledge_bases",
-            knowledge_services.list_knowledge_base_status,
+            lambda: {"items": knowledge_services.list_knowledge_base_status()},
             {"available": False, "items": []},
         ),
     }
