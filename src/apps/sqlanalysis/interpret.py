@@ -38,7 +38,21 @@ _LEVEL_LABEL = {
     custom_enum.IssueLevelEnum.LOW.value: "低",
 }
 
+# 方言标签：喂给模型，避免它拿另一种方言的规则来评判（实测踩到过）
+_DIALECT_LABEL = {
+    custom_enum.DbTypeEnum.POSTGRESQL.value: "PostgreSQL",
+    custom_enum.DbTypeEnum.MYSQL.value: "MySQL",
+}
+
 _SYSTEM_PROMPT = """你是数据库专家，负责解读 SQL 静态分析的结果。
+
+**必须按用户给出的目标数据库方言来评判**，不要把另一种方言的写法套过来。最容易搞错的几处：
+- 标识符引用：PostgreSQL 用双引号 "col"，MySQL 用反引号 `col`；用错的那个在对方方言里
+  根本不是合法语法，不要建议使用者改成另一种
+- 字符串字面量一律用单引号，两种方言都一样
+- 分页：PostgreSQL 用 LIMIT/OFFSET，MySQL 用 LIMIT offset, size
+
+如果某处写法在**目标方言下本来就是正确的**，就不要把它说成问题。
 
 严格按下面两件事做：
 1. 对给出的**每一条**问题，用一两句话说明「为什么是问题」以及「具体怎么改」，放进 explanations。
@@ -120,7 +134,17 @@ def _normalize(payload: dict, known_codes: set) -> tuple:
     return explanations, observations
 
 
-def _build_messages(sql: str, issues: list, context_note: str = "") -> list:
+def _dialect_label(dialect) -> str:
+    """
+    方言标签；认不出来就说「未知」，并让模型别乱套另一种方言的规则
+    """
+    try:
+        return _DIALECT_LABEL.get(int(dialect), "") if dialect is not None else ""
+    except (TypeError, ValueError):
+        return ""
+
+
+def _build_messages(sql: str, issues: list, context_note: str = "", dialect_label: str = "") -> list:
     from langchain_core.messages import HumanMessage, SystemMessage
 
     lines = [
@@ -129,10 +153,13 @@ def _build_messages(sql: str, issues: list, context_note: str = "") -> list:
         for item in issues
     ]
     body = "规则命中的问题：\n" + ("\n".join(lines) if lines else "（无，规则未判出问题）")
+    # 方言必须告诉模型：不说的话它会自己猜，实测猜成 MySQL 后把 PostgreSQL 里完全正确的
+    # 双引号标识符说成「错误写法」，并建议改成 PG 根本不支持的反引号
+    header = f"目标数据库：{dialect_label}\n\n" if dialect_label else ""
     extra = f"\n\n补充信息：{context_note}" if context_note else ""
     return [
         SystemMessage(content=_SYSTEM_PROMPT),
-        HumanMessage(content=f"SQL：\n{sql}\n\n{body}{extra}"),
+        HumanMessage(content=f"{header}SQL：\n{sql}\n\n{body}{extra}"),
     ]
 
 
@@ -160,7 +187,9 @@ def interpret(sql: str, issues: list, dialect=None, context_note: str = "") -> d
         return _unavailable(NO_CHAT_MODEL_MESSAGE)
 
     try:
-        reply = llm.build_chat_model(provider).invoke(_build_messages(sql, issues, context_note))
+        reply = llm.build_chat_model(provider).invoke(
+            _build_messages(sql, issues, context_note, _dialect_label(dialect))
+        )
         payload = _extract_json(_reply_text(reply))
         explanations, observations = _normalize(payload, {item["rule_code"] for item in issues})
     except InterpretError as exc:

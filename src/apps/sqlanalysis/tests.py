@@ -699,9 +699,11 @@ class _StubChat:
         self.reply_text = reply_text
         self.raises = raises
         self.calls = 0
+        self.messages = []
 
     def invoke(self, messages, **kwargs):
         self.calls += 1
+        self.messages = messages
         if self.raises is not None:
             raise self.raises
         from langchain_core.messages import AIMessage
@@ -805,6 +807,38 @@ class InterpretTests(SimpleTestCase):
         result, _ = self.run_interpret(payload, issues=[])
         self.assertTrue(result["available"])
         self.assertEqual(result["observations"], ["建议确认该表的锁竞争"])
+
+    def interpret_with_dialect(self, dialect, sql="SELECT 1"):
+        chat = _StubChat(json.dumps({"explanations": [], "observations": []}))
+        with (
+            mock.patch.object(interpret.llm, "active_chat_provider", return_value=object()),
+            mock.patch.object(interpret.llm, "build_chat_model", return_value=chat),
+        ):
+            interpret.interpret(sql, [], dialect)
+        return "\n".join(str(getattr(m, "content", "")) for m in chat.messages)
+
+    def test_dialect_is_told_to_the_model(self):
+        """
+        实测踩到过：不把方言告诉模型，它会自己猜——把 PostgreSQL 里完全正确的双引号标识符
+        （"create_time"）说成「错误写法」，还建议改成 PostgreSQL 根本不支持的反引号。
+        那不只是无用建议，照着改会把对的 SQL 改坏。
+        """
+        prompt = self.interpret_with_dialect(custom_enum.DbTypeEnum.POSTGRESQL.value)
+        self.assertIn("PostgreSQL", prompt)
+
+    def test_mysql_dialect_is_labelled_too(self):
+        prompt = self.interpret_with_dialect(custom_enum.DbTypeEnum.MYSQL.value)
+        self.assertIn("MySQL", prompt)
+
+    def test_system_prompt_warns_about_cross_dialect_quoting(self):
+        """标识符引用是最容易跨方言搞错的一处，系统提示里必须点名"""
+        self.assertIn("双引号", interpret._SYSTEM_PROMPT)
+        self.assertIn("反引号", interpret._SYSTEM_PROMPT)
+
+    def test_unknown_dialect_omits_the_header_rather_than_guessing(self):
+        """方言认不出来时不要写一个错的进去——那比不说更糟"""
+        self.assertEqual(interpret._dialect_label(None), "")
+        self.assertEqual(interpret._dialect_label("whatever"), "")
 
     def test_degraded_result_keeps_the_same_shape(self):
         """降级结果与正常结果的字段必须一致，前端才不用到处判空"""
