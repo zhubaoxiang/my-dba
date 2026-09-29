@@ -330,3 +330,87 @@ def list_snapshot_tables(datasource_id: int, keyword: str = "") -> list:
             }
         )
     return result
+
+
+def list_datasource_status() -> list:
+    """
+    每个数据源的采集状态与**最近快照**的问题分级统计
+
+    **跨模块请调用本函数**（architecture.md）：调用方不要自己查
+    `Datasource` / `MetadataSnapshot` / `CollectTask` / `CatalogIssue`。
+
+    问题数**只统计最近一次快照**，不累计历史——同一处问题每次采集都会重新产出，
+    累加会让数字随采集次数虚增、且不指向任何动作（首页提案的 D4）。
+    """
+    datasources = models.Datasource.objects.filter(is_deleted=False).order_by("id")
+
+    latest_snapshot = {}
+    for snapshot in models.MetadataSnapshot.objects.filter(is_deleted=False).order_by(
+        "datasource_id", "-collect_time", "-id"
+    ):
+        latest_snapshot.setdefault(snapshot.datasource_id, snapshot)
+
+    latest_task = {}
+    for task in models.CollectTask.objects.filter(is_deleted=False).order_by("datasource_id", "-id"):
+        latest_task.setdefault(task.datasource_id, task)
+
+    counts = {}
+    snapshot_ids = [snapshot.id for snapshot in latest_snapshot.values()]
+    if snapshot_ids:
+        rows = (
+            models.CatalogIssue.objects.filter(is_deleted=False, snapshot_id__in=snapshot_ids)
+            .values("snapshot_id", "issue_level")
+            .annotate(total=models.Count("id"))
+        )
+        counts = {(row["snapshot_id"], row["issue_level"]): row["total"] for row in rows}
+
+    items = []
+    for datasource in datasources:
+        snapshot = latest_snapshot.get(datasource.id)
+        task = latest_task.get(datasource.id)
+        issue_counts = {level.value: 0 for level in custom_enum.IssueLevelEnum}
+        if snapshot is not None:
+            for level in custom_enum.IssueLevelEnum:
+                issue_counts[level.value] = counts.get((snapshot.id, level.value), 0)
+
+        items.append(
+            {
+                "id": datasource.id,
+                "name": datasource.name,
+                "db_type": datasource.db_type,
+                "is_enabled": datasource.is_enabled,
+                "collect_status": _collect_status(snapshot, task),
+                "table_count": snapshot.table_count if snapshot is not None else 0,
+                "collect_time": snapshot.collect_time.strftime("%Y-%m-%d %H:%M:%S") if snapshot else "",
+                # 没有快照时问题数一律为 0，并由调用方按 collect_status 决定**不展示**它们——
+                # 「还没有数据」不能让使用者读成「没有问题」
+                "issue_counts": issue_counts if snapshot is not None else {},
+                "fail_reason": (
+                    task.fail_reason if task and task.status == custom_enum.CollectTaskStatusEnum.FAILED.value else ""
+                ),
+            }
+        )
+
+    # 把需要处理的浮上来：这个列表的用途是回答「我该关注哪个库」
+    items.sort(
+        key=lambda item: (_STATUS_RANK.get(item["collect_status"], 9), -item["issue_counts"].get(1, 0), item["name"])
+    )
+    return items
+
+
+def _collect_status(snapshot, task) -> str:
+    """
+    采集状态。有快照就算「已采集」——即便最近一次采集失败，旧数据仍然可用，
+    失败通过 `fail_reason` 单独带出，不必让状态本身变得含糊
+    """
+    if task is not None and task.status == custom_enum.CollectTaskStatusEnum.RUNNING.value:
+        return "running"
+    if snapshot is not None:
+        return "collected"
+    if task is not None and task.status == custom_enum.CollectTaskStatusEnum.FAILED.value:
+        return "failed"
+    return "never"
+
+
+# 排序权重：需要处理的在前
+_STATUS_RANK = {"failed": 0, "never": 1, "running": 2, "collected": 3}

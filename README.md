@@ -109,6 +109,7 @@ my-dba/
 
 | 文档 | 内容 |
 |------|------|
+| [docs/overview.md](docs/overview.md) | 首页：定位与页面结构、**取数口径**（问题数取最新快照、没有数据 ≠ 没有问题）、就绪检查的边界、排序与分块兜底 |
 | [docs/architecture.md](docs/architecture.md) | 技术栈与依赖、配置层级、**模块注册机制**、代码分层、接口约定（统一响应 / 分页）、认证与鉴权、后台任务 |
 | [docs/datasource.md](docs/datasource.md) | 分析数据库表：元数据采集、健康分析规则、API、配置、安全说明、已知限制 |
 | [docs/knowledge-qa.md](docs/knowledge-qa.md) | 知识问答：**架构与数据流**、摄入链路、问答链路、关键设计决策、数据模型、API、配置、实测踩坑 |

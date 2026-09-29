@@ -106,6 +106,9 @@ src/                          # 后端代码根目录
 │   │   ├── qa/               #   langgraph 单 agent 与工具
 │   │   ├── serializers.py / views.py
 │   │   └── tests.py
+│   ├── overview/             # 首页状态总览（跨模块只读聚合，无模型）→ docs/overview.md
+│   │   ├── services.py       #   聚合三块数据 + 分块兜底
+│   │   └── views.py          #   GET /v1/overview（StatelessView）
 │   ├── sqlanalysis/          # SQL 规范与性能分析 → docs/sql-analysis.md
 │   │   ├── parse.py          #   按方言解析、语句分类（只读 / DML / DDL / 其他）
 │   │   ├── formatting.py     #   从语法树重新生成排版
