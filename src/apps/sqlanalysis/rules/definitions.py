@@ -217,20 +217,28 @@ def _check_group_by_missing_column(ctx):
     """
     SELECT 里的非聚合列必须出现在 GROUP BY 中
 
-    PostgreSQL 会直接报错，MySQL 在关闭 ONLY_FULL_GROUP_BY 时会**静默返回随机值**——
-    后者才是真正危险的情况，因此这条对两种方言都有价值。
+    **没有 GROUP BY 时每一个非聚合列都算遗漏**——这不是更宽松的情况，而是更严重的：
+    PostgreSQL 会直接报错（column must appear in the GROUP BY clause），
+    MySQL 在关闭 ONLY_FULL_GROUP_BY 时会**静默返回随机值**。
+
+    每条 SELECT 只报一条（把所有遗漏的列列在一起）：它们对应的是同一个修法。
     """
     issues = []
     for statement in ctx.statements:
         for select in statement.expression.find_all(exp.Select):
             group = select.args.get("group")
             if group is None:
-                continue
-            group_columns = list(group.expressions)
-            # GROUP BY 1 这类位置引用没法与列名比对，宁可不报也不误报
-            if any(not isinstance(item, exp.Column) for item in group_columns):
-                continue
-            grouped = {item.name.lower() for item in group_columns}
+                if not _has_aggregate(select):
+                    continue  # 没有聚合就谈不上分组
+                grouped = set()
+            else:
+                group_columns = list(group.expressions)
+                # GROUP BY 1 这类位置引用没法与列名比对，宁可不报也不误报
+                if any(not isinstance(item, exp.Column) for item in group_columns):
+                    continue
+                grouped = {item.name.lower() for item in group_columns}
+
+            missing, seen = [], set()
             for item in select.expressions:
                 if _has_aggregate(item):
                     continue
@@ -240,17 +248,31 @@ def _check_group_by_missing_column(ctx):
                 if alias and alias in grouped:
                     continue
                 for column in item.find_all(exp.Column):
-                    if column.name.lower() in grouped:
+                    key = column.name.lower()
+                    if key in grouped or key in seen:
                         continue
-                    issues.append(
-                        ctx.issue(
-                            description=f"SELECT 中的列 {column.name} 未出现在 GROUP BY 里，也不是聚合结果，"
-                            f"它的取值不确定（MySQL 关闭 ONLY_FULL_GROUP_BY 时会静默返回任意一行的值）。",
-                            suggestion=f"把 {column.name} 加入 GROUP BY，或对它套一个聚合函数。",
-                            statement=statement,
-                            target=column.name,
-                        )
-                    )
+                    seen.add(key)
+                    missing.append(column.name)
+            if not missing:
+                continue
+
+            columns = "、".join(missing)
+            if group is None:
+                description = (
+                    f"这条 SELECT 里既有聚合函数、又有未聚合的列（{columns}），却没有 GROUP BY，"
+                    f"两者的组合是无效的——PostgreSQL 会直接报错，"
+                    f"MySQL 在关闭 ONLY_FULL_GROUP_BY 时会静默返回任意一行的值。"
+                )
+                suggestion = f"补上 GROUP BY 并把这些列都列进去（GROUP BY {columns}），或对它们套聚合函数。"
+            else:
+                description = (
+                    f"SELECT 中的列 {columns} 未出现在 GROUP BY 里，也不是聚合结果，"
+                    f"它们的取值不确定（MySQL 关闭 ONLY_FULL_GROUP_BY 时会静默返回任意一行的值）。"
+                )
+                suggestion = f"把 {columns} 加入 GROUP BY，或对它们套一个聚合函数。"
+            issues.append(
+                ctx.issue(description=description, suggestion=suggestion, statement=statement, target=columns)
+            )
     return issues
 
 

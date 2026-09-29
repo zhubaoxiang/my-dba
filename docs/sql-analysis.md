@@ -92,7 +92,7 @@ observations[]  模型推测      规则没覆盖到的观察，**未经规则�
 | `drop_column` | 删除列 | 高 |
 | `truncate_table` | 清空表 | 高 |
 | `join_without_condition` | 无连接条件的 JOIN | 高 |
-| `group_by_missing_column` | GROUP BY 遗漏非聚合列 | 中 |
+| `group_by_missing_column` | 非聚合列未参与分组（含**完全没有 GROUP BY**） | 中 |
 | `function_on_column` | 列上套了函数或转换 | 中 |
 | `select_star` | 使用 SELECT * | 中 |
 | `insert_without_column_list` | INSERT 未列出列名 | 中 |
@@ -135,6 +135,10 @@ observations[]  模型推测      规则没覆盖到的观察，**未经规则�
 **方言**：显式指定 > 按数据源的库类型推断 > 默认 PostgreSQL。
 
 **解析失败不是整体失败**：仍返回语法错误位置与原始语句，规则与结构校验标记为「未进行」并说明；**模型解读照常进行**，并把语法错误一并交给模型——不能解析恰恰是最需要帮助的时候。
+
+> **语法错误与语义错误是两回事。** 解析器只负责前者：`SELECT a, count(*) FROM t`（没有 `GROUP BY`）**语法合法**，解析能通过；PostgreSQL 拒绝它是在**语义分析**阶段（`column "a" must appear in the GROUP BY clause`）。
+>
+> 所以「解析通过」不等于「这条 SQL 能跑」——那类问题只能靠规则判出来。这也是为什么问题清单里会有 `group_by_missing_column` 这类条目。
 
 ## 配置
 

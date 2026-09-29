@@ -248,6 +248,37 @@ class RuleTests(SimpleTestCase):
         bad = "SELECT dept, name, count(*) FROM emp GROUP BY dept"
         self.assertIn("group_by_missing_column", self.codes(bad))
 
+    def test_aggregate_without_group_by_is_reported(self):
+        """
+        有聚合函数、又有未聚合的列，却没有 GROUP BY——实测使用者报过这条漏判。
+        它不是语法错误（解析器接受），PostgreSQL 在**语义分析**阶段才拒绝它，
+        所以只能靠规则判出来。
+        """
+        sql = "SELECT event_id, tag_type, count(*) AS cnt FROM events WHERE tag_name = 'x'"
+        codes = self.codes(sql)
+        self.assertIn("group_by_missing_column", codes)
+        issue = next(item for item in self.analyze(sql) if item["rule_code"] == "group_by_missing_column")
+        self.assertIn("没有 GROUP BY", issue["description"])
+        self.assertIn("event_id", issue["target"])
+        self.assertIn("tag_type", issue["target"])
+
+    def test_aggregate_only_without_group_by_is_accepted(self):
+        """只有聚合、没有非聚合列时，没有 GROUP BY 是完全合法的"""
+        self.assertNotIn("group_by_missing_column", self.codes("SELECT count(*) FROM t"))
+        self.assertNotIn("group_by_missing_column", self.codes("SELECT count(*), max(id) FROM t"))
+
+    def test_plain_select_without_group_by_is_accepted(self):
+        """没有聚合函数就谈不上分组，别把普通查询也报了"""
+        self.assertNotIn("group_by_missing_column", self.codes("SELECT id, name FROM t"))
+        self.assertNotIn("group_by_missing_column", self.codes("SELECT now(), id FROM t"))
+
+    def test_group_by_missing_column_is_reported_once_per_select(self):
+        """遗漏的列对应同一个修法，每条 SELECT 只报一条"""
+        sql = "SELECT dept, name, count(*) FROM emp GROUP BY dept"
+        issues = [item for item in self.analyze(sql) if item["rule_code"] == "group_by_missing_column"]
+        self.assertEqual(len(issues), 1)
+        self.assertIn("name", issues[0]["target"])
+
     def test_group_by_with_aggregate_only_is_accepted(self):
         self.assertNotIn("group_by_missing_column", self.codes("SELECT count(*) FROM emp GROUP BY dept"))
 
