@@ -54,14 +54,16 @@ _SYSTEM_PROMPT = """你是数据库专家，负责解读 SQL 静态分析的结�
 
 如果某处写法在**目标方言下本来就是正确的**，就不要把它说成问题。
 
-严格按下面两件事做：
-1. 对给出的**每一条**问题，用一两句话说明「为什么是问题」以及「具体怎么改」，放进 explanations。
-   rule_code 必须与给出的一字不差。
-2. 如果你发现了规则**没有覆盖到**的其他风险，放进 observations；没有就留空数组。
+严格按下面三件事做：
+1. **先给总体判断**，放进 summary：这条 SQL 有没有明显问题、能不能直接执行、优先改哪一处。
+   两三句话，直接给结论，**不要复述问题清单**；没问题就直说没问题。
+2. 对给出的**每一条**问题，用一两句话说明「为什么是问题」以及「具体怎么改」，放进 explanations。
+   rule_code 用给出的规则标识（也可用规则名）。
+3. 如果你发现了规则**没有覆盖到**的其他风险，放进 observations；没有就留空数组。
    不要为了凑数而编造。
 
 只输出 JSON，不要任何解释性文字、不要代码块之外的任何内容。格式：
-{"explanations": [{"rule_code": "规则code", "text": "解读"}], "observations": ["观察"]}
+{"summary": "总体判断与建议", "explanations": [{"rule_code": "规则标识", "text": "解读"}], "observations": ["观察"]}
 """
 
 
@@ -110,28 +112,61 @@ def _extract_json(text: str) -> dict:
         raise InterpretError(f"模型输出的 JSON 无法解析：{exc}") from exc
 
 
-def _normalize(payload: dict, known_codes: set) -> tuple:
+def _code_index(issues: list) -> dict:
     """
-    规整模型输出
+    本次问题清单里可接受的「指代」→ 规则 code
 
-    **只接受 rule_code 落在本次问题清单里的解读**——模型若报了一个不存在的规则，
-    那就是编造的出处，与知识问答里「来源必须对得上实际检索结果」是同一条约束。
+    **code 与规则名都认**：提示词里两者都出现了（`- [中] select_star（使用 SELECT *）`），
+    模型回显中文名是完全合理的，只认 code 会把它的解读整批丢掉。
     """
-    explanations = []
-    for item in payload.get("explanations") or []:
+    index = {}
+    for item in issues:
+        code = str(item["rule_code"]).strip()
+        index[code.lower()] = code
+        name = str(item.get("rule_name") or "").strip()
+        if name:
+            index.setdefault(name.lower(), code)
+    return index
+
+
+def _normalize(payload: dict, issues: list) -> tuple:
+    """
+    规整模型输出，返回 (解读, 推测, 被丢弃的解读条数)
+
+    **只接受能对应到本次问题清单的解读**——模型若报了一个不存在的规则，那就是编造的出处，
+    与知识问答里「来源必须对得上实际检索结果」是同一条约束。
+
+    「丢弃」要计数并回传：界面上必须能区分「规则没判出问题」与「模型有输出但没对上」，
+    否则前者的话术会把后者的故障盖住。
+    """
+    index = _code_index(issues)
+    raw_items = payload.get("explanations")
+    # 兼容模型把 explanations 写成 {code: text} 的字典形式
+    if isinstance(raw_items, dict):
+        raw_items = [{"rule_code": key, "text": value} for key, value in raw_items.items()]
+
+    explanations, dropped, seen = [], 0, set()
+    for item in raw_items or []:
         if not isinstance(item, dict):
+            dropped += 1
             continue
-        code = str(item.get("rule_code") or "").strip()
-        text = str(item.get("text") or "").strip()
-        if code in known_codes and text:
-            explanations.append({"rule_code": code, "text": text})
+        key = str(item.get("rule_code") or item.get("code") or item.get("rule") or "").strip()
+        text = str(item.get("text") or item.get("explanation") or "").strip()
+        code = index.get(key.lower())
+        if not code or not text or code in seen:
+            dropped += 1
+            continue
+        seen.add(code)
+        explanations.append({"rule_code": code, "text": text})
 
     observations = []
     for item in payload.get("observations") or []:
         text = str(item).strip()
         if text:
             observations.append(text)
-    return explanations, observations
+
+    summary = str(payload.get("summary") or "").strip()
+    return explanations, observations, dropped, summary
 
 
 def _dialect_label(dialect) -> str:
@@ -164,12 +199,17 @@ def _build_messages(sql: str, issues: list, context_note: str = "", dialect_labe
 
 
 def _unavailable(note: str) -> dict:
+    """
+    降级结果。字段与正常返回**完全一致**，前端不必到处判空
+    """
     return {
         "available": False,
         "note": note,
+        "summary": "",
         "explanations": [],
         "observations": [],
         "observations_note": "",
+        "dropped_explanations": 0,
     }
 
 
@@ -191,7 +231,10 @@ def interpret(sql: str, issues: list, dialect=None, context_note: str = "") -> d
             _build_messages(sql, issues, context_note, _dialect_label(dialect))
         )
         payload = _extract_json(_reply_text(reply))
-        explanations, observations = _normalize(payload, {item["rule_code"] for item in issues})
+        explanations, observations, dropped, summary = _normalize(payload, issues)
+        if dropped:
+            # 回原始输出便于定位：模型用了什么键名、写了什么指代，只有原文能说清
+            LOGGER.warning("模型解读有 %s 条无法对应到问题清单，原始输出：%s", dropped, _reply_text(reply)[:1000])
     except InterpretError as exc:
         LOGGER.warning("模型解读输出异常: %s", exc)
         return _unavailable(f"大模型解读未能完成：{exc}")
@@ -202,8 +245,11 @@ def interpret(sql: str, issues: list, dialect=None, context_note: str = "") -> d
     return {
         "available": True,
         "note": "",
+        "summary": summary,
         "explanations": explanations,
         "observations": observations,
         # 只要给出了推测就带上标注；没有推测则不必显示
         "observations_note": OBSERVATIONS_NOTE if observations else "",
+        # 让界面能区分「规则没判出问题」与「模型有输出但没对上」
+        "dropped_explanations": dropped,
     }

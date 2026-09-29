@@ -113,6 +113,9 @@ class SqlAnalysisView(baseviews.StatelessView):
                 "dialect": dialect or "",
                 "formatted": formatting.format_sql(sql, dialect),
                 "syntax": self._syntax(result),
+                # 结论由后端按规则产出算出来，**不依赖模型**——「有没有明显问题」
+                # 任何时候都要有答案
+                "verdict": analyzer.verdict_of(issues),
                 "issues": issues,
                 "schema_check": schema_check,
                 "interpretation": interpret.interpret(sql, issues, dialect, context_note=context_note),

@@ -46,6 +46,19 @@
     </el-card>
 
     <template v-if="result">
+      <el-card shadow="never" class="section verdict-card">
+        <el-alert
+          :type="verdictType(result.verdict.level)"
+          :closable="false"
+          show-icon
+          :title="`${result.verdict.label}：${result.verdict.text}`"
+        />
+        <div v-if="result.interpretation.summary" class="verdict-summary">
+          <span class="summary-label">总体判断</span>
+          {{ result.interpretation.summary }}
+        </div>
+      </el-card>
+
       <el-card shadow="never" class="section">
         <template #header><span>语法</span></template>
         <el-alert v-if="result.syntax.ok" type="success" :closable="false" show-icon
@@ -127,7 +140,7 @@
         />
 
         <template v-else>
-          <el-empty v-if="!result.interpretation.explanations.length" description="规则未判出问题，没有可解读的条目" :image-size="50" />
+          <el-empty v-if="!result.interpretation.explanations.length" :description="emptyExplanationText" :image-size="50" />
           <div v-else class="explanations">
             <div v-for="(item, i) in result.interpretation.explanations" :key="i" class="explanation">
               <el-tag size="small" type="info">{{ ruleName(item.rule_code) }}</el-tag>
@@ -180,6 +193,25 @@ const kindSummary = computed(() => {
     .map(([label, n]) => `${label} ${n} 条`)
     .join('、')
 })
+
+// 「规则没判出问题」与「模型有输出但没对上」是两回事，文案不能混——
+// 用前者的说法去描述后者，等于把故障盖住了
+const emptyExplanationText = computed(() => {
+  const interpretation = result.value?.interpretation
+  if (!interpretation) return ''
+  if (!result.value.issues.length) return '规则未判出问题，没有可解读的条目'
+  if (interpretation.dropped_explanations) {
+    return `模型给出了 ${interpretation.dropped_explanations} 条解读，但都没能与本次问题清单对应上，已丢弃`
+  }
+  return '模型本次没有给出逐条解读'
+})
+
+function verdictType(level) {
+  if (level === 1) return 'error'
+  if (level === 2) return 'warning'
+  if (level === 3) return 'info'
+  return 'success'
+}
 
 function levelLabel(level) {
   return LEVELS[level] || '?'
@@ -276,6 +308,21 @@ onMounted(loadDatasources)
 
 .section {
   margin-top: 16px;
+}
+
+.verdict-summary {
+  margin-top: 12px;
+  line-height: 1.7;
+}
+
+.summary-label {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 8px;
+  border-radius: 3px;
+  background: #ecf5ff;
+  color: #409eff;
+  font-size: 12px;
 }
 
 .code {

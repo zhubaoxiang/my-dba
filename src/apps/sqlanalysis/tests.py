@@ -719,9 +719,11 @@ class InterpretTests(SimpleTestCase):
     使用者必须能分辨哪些是规则判定的确定结论、哪些是模型的推测。
     """
 
+    # 与真实问题项同形：`ctx.issue()` 会同时填 rule_code 与 rule_name
     ISSUES = [
         {
             "rule_code": "delete_without_where",
+            "rule_name": "无条件的 DELETE",
             "issue_level": custom_enum.IssueLevelEnum.HIGH.value,
             "target": "users",
             "description": "这条 DELETE 没有 WHERE 条件",
@@ -840,6 +842,49 @@ class InterpretTests(SimpleTestCase):
         self.assertEqual(interpret._dialect_label(None), "")
         self.assertEqual(interpret._dialect_label("whatever"), "")
 
+    def test_summary_is_returned(self):
+        payload = json.dumps({"summary": "这条 SQL 会删光整表，不能直接执行。", "explanations": [], "observations": []})
+        result, _ = self.run_interpret(payload)
+        self.assertEqual(result["summary"], "这条 SQL 会删光整表，不能直接执行。")
+
+    def test_rule_name_is_accepted_as_the_reference(self):
+        """
+        提示词里 code 与规则名都出现了，模型回显中文名是完全合理的。
+        只认 code 会把它的解读整批丢掉——实测踩到过，界面因此显示「没有可解读的条目」。
+        """
+        payload = json.dumps({"explanations": [{"rule_code": "无条件的 DELETE", "text": "会删光整表"}]})
+        result, _ = self.run_interpret(payload)
+        self.assertEqual([item["rule_code"] for item in result["explanations"]], ["delete_without_where"])
+        self.assertEqual(result["dropped_explanations"], 0)
+
+    def test_dict_form_explanations_are_accepted(self):
+        payload = json.dumps({"explanations": {"delete_without_where": "会删光整表"}})
+        result, _ = self.run_interpret(payload)
+        self.assertEqual(len(result["explanations"]), 1)
+
+    def test_dropped_entries_are_counted(self):
+        """
+        丢弃要计数并回传：界面必须能区分「规则没判出问题」与「模型有输出但没对上」，
+        否则前者的说法会把后者的故障盖住
+        """
+        payload = json.dumps(
+            {
+                "explanations": [
+                    {"rule_code": "made_up", "text": "编的"},
+                    {"rule_code": "another_made_up", "text": "也是编的"},
+                ]
+            }
+        )
+        result, _ = self.run_interpret(payload)
+        self.assertEqual(result["explanations"], [])
+        self.assertEqual(result["dropped_explanations"], 2)
+
+    def test_observations_do_not_count_as_dropped_explanations(self):
+        """只给了观察、没给逐条解读，不该被算成「丢弃」"""
+        payload = json.dumps({"explanations": [], "observations": ["建议确认锁竞争"]})
+        result, _ = self.run_interpret(payload)
+        self.assertEqual(result["dropped_explanations"], 0)
+
     def test_degraded_result_keeps_the_same_shape(self):
         """降级结果与正常结果的字段必须一致，前端才不用到处判空"""
         degraded, _ = self.run_interpret(with_provider=False)
@@ -927,6 +972,17 @@ class SqlAnalysisApiTests(TestCase):
         self.assertIn("未能解析", data["schema_check"]["note"])
         self.assertEqual(data["evaluated_rules"], [])
 
+    def test_analyze_returns_a_verdict(self):
+        """结论由规则产出算出来，**不依赖模型**——测试里模型是替身，结论照常有"""
+        data = self.post("analyze", {"sql": "DELETE FROM users"})["data"]
+        self.assertEqual(data["verdict"]["level"], custom_enum.IssueLevelEnum.HIGH.value)
+        self.assertIn("有明显问题", data["verdict"]["label"])
+
+    def test_verdict_says_clean_when_nothing_is_found(self):
+        data = self.post("analyze", {"sql": "SELECT id FROM users WHERE id = 1 LIMIT 1"})["data"]
+        self.assertEqual(data["verdict"]["level"], 0)
+        self.assertIn("未判出问题", data["verdict"]["text"])
+
     def test_analyze_rejects_empty_sql(self):
         self.assertEqual(self.post("analyze", {"sql": "   "})["code"], 4000)
 
@@ -969,3 +1025,50 @@ class SqlAnalysisApiTests(TestCase):
             data = self.post("execute", {"sql": "SELECT id FROM users", "datasource_id": datasource.id})["data"]
         self.assertTrue(data["executed"])
         self.assertEqual(data["row_count"], 2)
+
+
+class VerdictTests(SimpleTestCase):
+    """
+    结论：**不依赖模型**
+
+    模型可能没配、调用失败或输出解析不了，但「这条 SQL 有没有明显问题」是使用者
+    最想知道的一件事，任何时候都要有答案。
+    """
+
+    def issue(self, level, code="some_rule"):
+        return {"rule_code": code, "issue_level": level, "target": "", "description": ""}
+
+    def test_no_issues(self):
+        verdict = analyzer.verdict_of([])
+        self.assertEqual(verdict["level"], 0)
+        self.assertIn("未判出问题", verdict["text"])
+
+    def test_high_dominates_the_verdict(self):
+        """一条无 WHERE 的 DELETE 就足以让语句不能直接执行，不该被十条低危问题淹掉"""
+        issues = [self.issue(custom_enum.IssueLevelEnum.HIGH.value)] + [
+            self.issue(custom_enum.IssueLevelEnum.LOW.value) for _ in range(10)
+        ]
+        verdict = analyzer.verdict_of(issues)
+        self.assertEqual(verdict["level"], custom_enum.IssueLevelEnum.HIGH.value)
+        self.assertIn("有明显问题", verdict["label"])
+
+    def test_medium_only(self):
+        verdict = analyzer.verdict_of([self.issue(custom_enum.IssueLevelEnum.MEDIUM.value)])
+        self.assertEqual(verdict["level"], custom_enum.IssueLevelEnum.MEDIUM.value)
+
+    def test_low_only(self):
+        verdict = analyzer.verdict_of([self.issue(custom_enum.IssueLevelEnum.LOW.value)])
+        self.assertEqual(verdict["level"], custom_enum.IssueLevelEnum.LOW.value)
+        self.assertIn("轻微", verdict["label"])
+
+    def test_text_counts_each_level(self):
+        issues = [
+            self.issue(custom_enum.IssueLevelEnum.HIGH.value),
+            self.issue(custom_enum.IssueLevelEnum.MEDIUM.value),
+            self.issue(custom_enum.IssueLevelEnum.MEDIUM.value),
+        ]
+        text = analyzer.verdict_of(issues)["text"]
+        self.assertIn("3 个问题", text)
+        self.assertIn("1 个高危", text)
+        self.assertIn("2 个中危", text)
+        self.assertNotIn("低危", text)

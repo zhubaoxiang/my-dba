@@ -11,9 +11,53 @@ SQL 规则分析
 
 from apps.sqlanalysis.rules import registry
 from apps.sqlanalysis.rules.context import SqlRuleContext
+from utils import custom_enum
 from utils.logger import get_logger
 
 LOGGER = get_logger("sqlanalysis.log")
+
+_HIGH = custom_enum.IssueLevelEnum.HIGH
+_MEDIUM = custom_enum.IssueLevelEnum.MEDIUM
+_LOW = custom_enum.IssueLevelEnum.LOW
+
+# 结论文案按「最严重的那一档」定调，而不是按问题总数——一条无 WHERE 的 DELETE
+# 就足以让整条语句不能直接执行，被十条「LIKE 前缀通配」淹掉是不对的
+_VERDICT = {
+    _HIGH.value: "有明显问题",
+    _MEDIUM.value: "有值得注意的问题",
+    _LOW.value: "仅有轻微问题",
+}
+
+
+def verdict_of(issues: list) -> dict:
+    """
+    确定性结论，**不依赖模型**
+
+    模型解读可能不可用（未配置 / 调用失败 / 输出解析不了），但「这条 SQL 有没有明显问题」
+    必须任何时候都能回答——那是使用者最想知道的一件事。
+    """
+    counts = {}
+    for item in issues:
+        counts[item["issue_level"]] = counts.get(item["issue_level"], 0) + 1
+
+    if not issues:
+        return {
+            "level": 0,
+            "label": "未见明显问题",
+            "text": "规则未判出问题。结构校验与执行计划可作进一步参考。",
+        }
+
+    parts = [
+        f"{counts[level.value]} 个{label}"
+        for level, label in ((_HIGH, "高危"), (_MEDIUM, "中危"), (_LOW, "低危"))
+        if counts.get(level.value)
+    ]
+    level = _HIGH.value if counts.get(_HIGH.value) else (_MEDIUM.value if counts.get(_MEDIUM.value) else _LOW.value)
+    return {
+        "level": level,
+        "label": _VERDICT[level],
+        "text": f"共发现 {len(issues)} 个问题：{'、'.join(parts)}。详见下方清单。",
+    }
 
 
 class SqlAnalyzer:
