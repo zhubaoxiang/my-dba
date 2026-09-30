@@ -13,6 +13,7 @@
 from apps.datasource import services as datasource_services
 from apps.knowledge import llm
 from apps.knowledge import services as knowledge_services
+from utils import custom_enum
 from utils.logger import get_logger
 
 LOGGER = get_logger("overview.log")
@@ -53,20 +54,66 @@ def _block(name: str, loader, unavailable: dict) -> dict:
         return unavailable
 
 
+def _summary(datasources: dict, metrics: dict, knowledge_bases: dict) -> dict:
+    """
+    顶部总览数字：由**已经取回的块**算出来，不额外查库
+
+    这样它与下面的卡片必然一致——分别取数的话，两次查询之间的变化会让
+    「在线 2/3」和卡片上的状态对不上。
+
+    取不到的项记 `None`（前端显示占位符），**不是 0**：0 是「数过了，一个也没有」，
+    与「没数成」是两回事。
+    """
+    datasource_items = datasources["items"] if datasources["available"] else None
+    knowledge_items = knowledge_bases["items"] if knowledge_bases["available"] else None
+
+    issue_total = issue_high_total = None
+    if datasource_items is not None:
+        # 没有快照的库 issue_counts 是空字典，不会被算进去——「还没有数据」不是「没有问题」
+        counts = [item["issue_counts"] or {} for item in datasource_items]
+        issue_total = sum(sum(bucket.values()) for bucket in counts)
+        issue_high_total = sum(bucket.get(custom_enum.IssueLevelEnum.HIGH.value, 0) for bucket in counts)
+
+    return {
+        "datasource_total": len(datasource_items) if datasource_items is not None else None,
+        # 指标取不到时线上数量是未知的，不能当成 0 个在线
+        "online_total": (sum(1 for item in metrics["items"] if item["is_online"]) if metrics["available"] else None),
+        "issue_total": issue_total,
+        "issue_high_total": issue_high_total,
+        "knowledge_base_total": len(knowledge_items) if knowledge_items is not None else None,
+        "document_total": (
+            sum(item["document_count"] for item in knowledge_items) if knowledge_items is not None else None
+        ),
+    }
+
+
 def build_overview() -> dict:
     """
     组装首页所需的全部数据
+
+    各块先分别取，再算总览数字——总览数字是它们的汇总，必须排在后面。
     """
+    readiness = _block("readiness", _readiness, {"available": False, "ready": False, "missing": []})
+    datasources = _block(
+        "datasources",
+        lambda: {"items": datasource_services.list_datasource_status()},
+        {"available": False, "items": []},
+    )
+    metrics = _block(
+        "metrics",
+        datasource_services.list_datasource_metrics,
+        {"available": False, "items": []},
+    )
+    knowledge_bases = _block(
+        "knowledge_bases",
+        lambda: {"items": knowledge_services.list_knowledge_base_status()},
+        {"available": False, "items": []},
+    )
+
     return {
-        "readiness": _block("readiness", _readiness, {"available": False, "ready": False, "missing": []}),
-        "datasources": _block(
-            "datasources",
-            lambda: {"items": datasource_services.list_datasource_status()},
-            {"available": False, "items": []},
-        ),
-        "knowledge_bases": _block(
-            "knowledge_bases",
-            lambda: {"items": knowledge_services.list_knowledge_base_status()},
-            {"available": False, "items": []},
-        ),
+        "readiness": readiness,
+        "summary": _summary(datasources, metrics, knowledge_bases),
+        "datasources": datasources,
+        "metrics": metrics,
+        "knowledge_bases": knowledge_bases,
     }

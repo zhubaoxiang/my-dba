@@ -268,4 +268,9 @@ COMMENT ON TABLE datasource_metric IS '数据源指标探测记录，一行 = �
 COMMENT ON COLUMN datasource_metric.cache_hit_count IS '缓存命中计数；比率由相邻两次采样差值算，故存原始计数';
 COMMENT ON COLUMN datasource_metric.unavailable IS '本次未能采集到的指标项（如 PG 16 以下没有 pg_stat_io）';
 
+-- 取「每库最新一条」走这条：ORDER BY datasource_id, create_time DESC 与索引同序
 CREATE INDEX IF NOT EXISTS idx_datasource_metric_ds ON datasource_metric (datasource_id, create_time DESC);
+
+-- 取「最近 24 小时趋势」要单独一条：那条查询跨全部数据源按时间过滤，首列是
+-- datasource_id 的复合索引带不动它，实测会退化成全表扫描（130k 行 → 72 个堆块）
+CREATE INDEX IF NOT EXISTS idx_datasource_metric_time ON datasource_metric (create_time DESC);

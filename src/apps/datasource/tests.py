@@ -14,6 +14,7 @@ from rest_framework.test import APIClient
 
 from apps.datasource import analyzer, differ, models, serializers, services
 from apps.datasource import metrics as ds_metrics
+from apps.datasource import services as ds_services
 from apps.datasource.rules import registry
 from utils import crypto, custom_enum
 
@@ -859,9 +860,7 @@ class MetricProbeTests(SimpleTestCase):
 
     def test_connection_failure_is_reported_without_metrics(self):
         """连不上时只记原因，**不记任何指标**——记 0 会让人以为「连上了只是没负载」"""
-        with mock.patch.object(
-            services, "open_readonly_connection", side_effect=RuntimeError("连接被拒绝")
-        ):
+        with mock.patch.object(services, "open_readonly_connection", side_effect=RuntimeError("连接被拒绝")):
             result = ds_metrics.probe(1)
         self.assertFalse(result["is_online"])
         self.assertIn("连接被拒绝", result["fail_reason"])
@@ -971,3 +970,123 @@ class MetricCollectTests(TestCase):
         with mock.patch.object(ds_metrics, "probe") as probe:
             ds_metrics.collect_all()
         probe.assert_not_called()
+
+
+class DownsampleTests(SimpleTestCase):
+    """
+    趋势降采样是纯函数，单测盯住它的两个要害：点数受控、**末尾一点不丢**
+    """
+
+    def test_short_series_is_returned_as_is(self):
+        self.assertEqual(ds_services._downsample([1, 2, 3]), [1, 2, 3])
+
+    def test_long_series_is_capped(self):
+        self.assertEqual(len(ds_services._downsample(list(range(288)))), 48)
+
+    def test_last_point_is_always_kept(self):
+        """末尾是最新的值，丢了就看不到「刚刚发生了什么」"""
+        self.assertEqual(ds_services._downsample(list(range(288)))[-1], 287)
+
+    def test_order_is_preserved(self):
+        picked = ds_services._downsample(list(range(288)))
+        self.assertEqual(picked, sorted(picked))
+
+
+class MetricQueryTests(TestCase):
+    """
+    指标查询契约：最新值、趋势只算在线点、区间命中率
+    """
+
+    def make(self, name="m"):
+        return models.Datasource.objects.create(
+            name=name,
+            db_type=custom_enum.DbTypeEnum.POSTGRESQL.value,
+            host="127.0.0.1",
+            port=5432,
+            db_name="d",
+            username="u",
+            password="p",
+            creator="test",
+        )
+
+    def add(self, datasource, minutes_ago=0, **kwargs):
+        fields = {"is_online": True, "creator": "t", **kwargs}
+        row = models.DatasourceMetric.objects.create(datasource_id=datasource.id, **fields)
+        if minutes_ago:
+            models.DatasourceMetric.objects.filter(id=row.id).update(
+                create_time=datetime.now() - timedelta(minutes=minutes_ago)
+            )
+            row.refresh_from_db()
+        return row
+
+    def item(self, datasource_id):
+        return next(
+            item for item in services.list_datasource_metrics()["items"] if item["datasource_id"] == datasource_id
+        )
+
+    def test_latest_sample_wins(self):
+        datasource = self.make()
+        self.add(datasource, minutes_ago=30, connection_count=3)
+        self.add(datasource, minutes_ago=1, connection_count=17)
+        self.assertEqual(self.item(datasource.id)["connection_count"], 17)
+
+    def test_trend_excludes_offline_samples(self):
+        """离线那几轮没有连接数可言，混进趋势会把线画歪"""
+        datasource = self.make()
+        self.add(datasource, minutes_ago=20, connection_count=5)
+        self.add(datasource, minutes_ago=10, connection_count=None, is_online=False)
+        self.add(datasource, minutes_ago=1, connection_count=7)
+        self.assertEqual(self.item(datasource.id)["trend"], [5, 7])
+
+    def test_trend_excludes_old_samples(self):
+        datasource = self.make()
+        self.add(datasource, minutes_ago=60 * 30, connection_count=99)  # 30 小时前
+        self.add(datasource, minutes_ago=1, connection_count=4)
+        self.assertEqual(self.item(datasource.id)["trend"], [4])
+
+    def test_no_samples_means_empty(self):
+        self.assertEqual(services.list_datasource_metrics(), {"items": []})
+
+    def test_hit_ratio_uses_the_interval_between_samples(self):
+        """
+        用相邻两次的差值算，而不是累计值——累计比率是「自服务启动以来」的平均值，
+        几乎不随近期变化而变动
+        """
+        datasource = self.make()
+        self.add(datasource, minutes_ago=5, cache_hit_count=1000, cache_read_count=1000)
+        self.add(datasource, minutes_ago=1, cache_hit_count=1900, cache_read_count=1100)
+        # 区间：命中 900、未命中 100 → 90%
+        self.assertEqual(self.item(datasource.id)["cache_hit_ratio"], 90.0)
+
+    def test_hit_ratio_falls_back_when_counters_reset(self):
+        """目标库重启会让计数器归零，差值为负时必须退回累计值，不能算出负命中率"""
+        datasource = self.make()
+        self.add(datasource, minutes_ago=5, cache_hit_count=9000, cache_read_count=1000)
+        self.add(datasource, minutes_ago=1, cache_hit_count=90, cache_read_count=10)
+        self.assertEqual(self.item(datasource.id)["cache_hit_ratio"], 90.0)
+
+    def test_hit_ratio_is_none_when_unavailable(self):
+        datasource = self.make()
+        self.add(datasource, minutes_ago=1, connection_count=1)
+        self.assertIsNone(self.item(datasource.id)["cache_hit_ratio"])
+
+    def test_hit_ratio_skips_offline_samples(self):
+        """
+        离线那一轮没有计数器，不能当成「上一轮」；间隔要跨过它，接到上一个在线点
+        """
+        datasource = self.make()
+        self.add(datasource, minutes_ago=30, cache_hit_count=1000, cache_read_count=1000)
+        self.add(datasource, minutes_ago=20, is_online=False, fail_reason="连接被拒绝")
+        self.add(datasource, minutes_ago=1, cache_hit_count=1900, cache_read_count=1100)
+        self.assertEqual(self.item(datasource.id)["cache_hit_ratio"], 90.0)
+
+    def test_latest_sample_is_reported_even_when_old(self):
+        """
+        最新值**不按时间截断**：采集进程停掉时，界面要靠这一行带着的采集时刻
+        把「陈旧」暴露出来，而不是显示成「指标采集中」——那会让人以为再等一会就有了
+        """
+        datasource = self.make()
+        self.add(datasource, minutes_ago=60 * 24 * 10, connection_count=42)  # 10 天前
+        item = self.item(datasource.id)
+        self.assertEqual(item["connection_count"], 42)
+        self.assertEqual(item["trend"], [], "超出 24 小时的点不进趋势")

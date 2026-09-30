@@ -9,7 +9,7 @@
 为准，重启后可重新触发。多 worker 部署时任务在接收请求的那个 worker 内执行。
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import psycopg2
 import pymysql
@@ -331,6 +331,125 @@ def list_snapshot_tables(datasource_id: int, keyword: str = "") -> list:
             }
         )
     return result
+
+
+def list_datasource_metrics() -> dict:
+    """
+    每个数据源的**最新指标**与近期连接数趋势
+
+    **跨模块请调用本函数**：调用方不要自己查 `DatasourceMetric`。
+
+    只回两类行，都受控：每库**一行**最新值，加上最近 24 小时的采样序列。指标表是
+    时间序列，30 天能攒到八千多行一库——整表捞出来在首页每次加载时跑一遍是不行的。
+
+    趋势**降采样到最多 48 个点**：画一条 100px 宽的小线用不着 288 个点。
+    """
+    samples = _recent_online_samples()
+
+    items = []
+    for datasource_id, latest in _latest_samples().items():
+        series = samples.get(datasource_id, [])
+        items.append(
+            {
+                "datasource_id": datasource_id,
+                "is_online": latest.is_online,
+                "fail_reason": latest.fail_reason,
+                "connection_count": latest.connection_count,
+                "max_connections": latest.max_connections,
+                "database_size": latest.database_size,
+                # 离线时不给命中率——前端本来也不展示过期指标，给了反而容易被误用
+                "cache_hit_ratio": _hit_ratio(series) if latest.is_online else None,
+                "io_read_bytes": latest.io_read_bytes,
+                "io_write_bytes": latest.io_write_bytes,
+                "unavailable": latest.unavailable,
+                "collected_at": latest.create_time.strftime("%Y-%m-%d %H:%M:%S"),
+                "trend": _downsample(
+                    [row["connection_count"] for row in series if row["connection_count"] is not None]
+                ),
+            }
+        )
+    return {"items": items}
+
+
+_TREND_HOURS = 24
+_TREND_MAX_POINTS = 48
+
+
+def _latest_samples() -> dict:
+    """
+    每库最近的一条采样，`{datasource_id: row}`
+
+    **不按时间截断**：采集进程停掉时，「最新一条」可能是几天前的，但界面正是靠它带着的
+    采集时刻把「陈旧」暴露出来。用 `DISTINCT ON` 让数据库每库只回一行——`ORDER BY`
+    与索引 `(datasource_id, create_time DESC)` 同序，走索引即可，无需扫全表。
+    """
+    rows = (
+        models.DatasourceMetric.objects.filter(is_deleted=False)
+        .order_by("datasource_id", "-create_time", "-id")
+        .distinct("datasource_id")
+    )
+    return {row.datasource_id: row for row in rows}
+
+
+def _recent_online_samples() -> dict:
+    """
+    最近 24 小时**在线**的采样，按数据源分组、按时间升序
+
+    只要趋势与间隔命中率用得上的几列。离线那几轮的指标全是空的，混进来只会把趋势
+    画歪，因此直接在库里滤掉。
+    """
+    deadline = datetime.now() - timedelta(hours=_TREND_HOURS)
+    rows = (
+        models.DatasourceMetric.objects.filter(is_deleted=False, is_online=True, create_time__gte=deadline)
+        .order_by("datasource_id", "create_time", "id")
+        .values_list("datasource_id", "connection_count", "cache_hit_count", "cache_read_count")
+    )
+    grouped = {}
+    for datasource_id, connection_count, hit_count, read_count in rows:
+        grouped.setdefault(datasource_id, []).append(
+            {"connection_count": connection_count, "cache_hit_count": hit_count, "cache_read_count": read_count}
+        )
+    return grouped
+
+
+def _downsample(values: list, limit: int = _TREND_MAX_POINTS) -> list:
+    """
+    等间隔抽样到最多 limit 个点，**末尾一点一定保留**——最新的变化最该被看到
+    """
+    total = len(values)
+    if total <= limit:
+        return values
+    step = total / limit
+    picked = [values[min(int(index * step), total - 1)] for index in range(limit)]
+    picked[-1] = values[-1]
+    return picked
+
+
+def _hit_ratio(series: list):
+    """
+    缓存命中率（百分数，保留两位），入参是**按时间升序**的采样序列
+
+    优先用**相邻两次采样的差值**算区间命中率：累计比率是「自服务启动以来」的平均值，
+    几乎不随近期变化而变动，看不出问题。只有一条记录时退回累计值。
+
+    计数器可能因目标库重启而归零，差值为负时同样退回累计值——不能算出负命中率。
+    """
+    if not series:
+        return None
+    latest = series[-1]
+    if latest["cache_hit_count"] is None or latest["cache_read_count"] is None:
+        return None
+
+    hits, reads = latest["cache_hit_count"], latest["cache_read_count"]
+    if len(series) > 1:
+        previous = series[-2]
+        delta_hits = hits - (previous["cache_hit_count"] or 0)
+        delta_reads = reads - (previous["cache_read_count"] or 0)
+        if delta_hits >= 0 and delta_reads >= 0 and delta_hits + delta_reads > 0:
+            hits, reads = delta_hits, delta_reads
+
+    total = hits + reads
+    return round(hits * 100.0 / total, 2) if total > 0 else None
 
 
 def list_datasource_status() -> list:

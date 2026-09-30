@@ -190,9 +190,7 @@ def probe(datasource_id: int, timeout: int = None) -> dict:
     from apps.datasource import services  # 延迟导入：services 是上层编排，避免循环引用
 
     try:
-        connection = services.open_readonly_connection(
-            datasource_id, probe_timeout() if timeout is None else timeout
-        )
+        connection = services.open_readonly_connection(datasource_id, probe_timeout() if timeout is None else timeout)
     except Exception as exc:  # noqa: BLE001 连接失败是本函数的正常返回之一
         return _offline(exc)
 
@@ -219,9 +217,7 @@ def collect_all(creator: str = "metrics") -> dict:
     written = failed = 0
     for datasource_id in datasource_ids:
         try:
-            models.DatasourceMetric.objects.create(
-                datasource_id=datasource_id, creator=creator, **probe(datasource_id)
-            )
+            models.DatasourceMetric.objects.create(datasource_id=datasource_id, creator=creator, **probe(datasource_id))
             written += 1
         except Exception as exc:  # noqa: BLE001 写库失败也不该中断整轮
             failed += 1
