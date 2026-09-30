@@ -22,18 +22,13 @@
 
     <!-- 概览数字带：先给一个总纲，下面再铺开 -->
     <div class="summary">
-      <div class="stat">
-        <div class="stat-value">{{ dash(summary.datasource_total) }}</div>
-        <div class="stat-label">已纳管的库</div>
-      </div>
+      <!-- 库数与在线数合成一格：两者本来就共用「总数」这一个数，分成两格是重复 -->
       <div class="stat">
         <div class="stat-value" :class="onlineLevel">
-          <template v-if="summary.online_total === null || summary.online_total === undefined">
-            {{ dash(null) }}
+          <template v-if="hasLibraryRatio">
+            {{ summary.online_total }}<span class="slash">/</span>{{ summary.datasource_total }}
           </template>
-          <template v-else>
-            {{ summary.online_total }}<span class="slash">/</span>{{ dash(summary.datasource_total) }}
-          </template>
+          <template v-else>{{ dash(null) }}</template>
         </div>
         <!-- 「在线 2/3」比单看某个库更早暴露问题，异常时整块着色 -->
         <div class="stat-label">{{ onlineLabel }}</div>
@@ -478,19 +473,23 @@ function hitLevel(card) {
   return ''
 }
 
-const onlineLevel = computed(() => {
-  const total = summary.value.datasource_total
+/** 一个库都没接时不给 0/0，那是个没有意义的比值 */
+const hasLibraryRatio = computed(() => {
   const online = summary.value.online_total
-  if (online === null || online === undefined || !total) return ''
-  return online < total ? 'text-warn' : ''
+  return Boolean(summary.value.datasource_total) && online !== null && online !== undefined
+})
+
+const onlineLevel = computed(() => {
+  if (!hasLibraryRatio.value) return ''
+  return summary.value.online_total < summary.value.datasource_total ? 'text-warn' : ''
 })
 
 const onlineLabel = computed(() => {
   const total = summary.value.datasource_total
   const online = summary.value.online_total
-  if (online === null || online === undefined) return '在线情况未知'
-  if (!total) return '在线'
-  return online < total ? `在线 · ${total - online} 个不在线` : '全部在线'
+  if (!total) return '已纳管的库'
+  if (online === null || online === undefined) return '已纳管的库 · 在线情况未知'
+  return online < total ? `已纳管的库 · ${total - online} 个不在线` : '已纳管的库 · 全部在线'
 })
 
 // ----------------------------------------------------------------------
@@ -563,7 +562,7 @@ onMounted(load)
 /* 概览数字带 */
 .summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 20px;
 }
