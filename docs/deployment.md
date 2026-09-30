@@ -94,6 +94,24 @@ psql "postgresql://<用户>:<密码>@<主机>:<端口>/<库名>" -f src/sql/patc
 - 访问日志与错误日志共用 `src/logs/gunicorn.log`，按天切割保留 7 天
 - 脚本末尾 `tail -f` 让容器保持前台运行
 
+### 容器内的第二个常驻进程：指标采集
+
+`start.sh` 还会启动一个**独立于 gunicorn** 的指标采集进程：
+
+```bash
+( while true; do python /home/src/jobs/metrics.py; sleep 5; done ) > "${METRICS_LOG}" 2>&1 &
+```
+
+- **不新增容器**，仍在 `web` 容器内
+- **独立进程**：不随 web 启动，因此 gunicorn 的 3 个 worker 不会各采一份
+- **守护方式**：外层的 `while true` + `sleep 5`。容器的 `restart: always` 只管容器、不管容器里的单个进程——采集进程崩了，容器还活着，没有外层守护就会静默停更
+- 日志在 `src/logs/metrics.log`
+- 采样间隔、保留天数、探测超时在 `src/config/conf.ini` 的 `[datasource_metrics]` 段
+
+> 部署后**第一轮采集在 5 分钟内完成**；在此之前首页的指标区显示「指标采集中…」，这是预期行为。
+>
+> **多实例部署时每个实例都会跑一份采集**，同一批库被采多次。当前是单实例部署，属已知限制（[datasource-metrics.md](datasource-metrics.md)）。
+
 > **多 worker 的后果**：后台任务是**进程内内存队列**（见 [architecture.md 的「后台任务」](architecture.md#后台任务)）。采集与文档摄入的任务会在**接收该请求的那个 worker 进程**内执行；进程重启后队列中未执行的任务会丢失，需重新触发。任务状态以数据库为准。
 
 ### 流式问答的并发占用

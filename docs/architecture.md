@@ -70,7 +70,7 @@ src/                          # 后端代码根目录
 ├── manage.py
 ├── requirements.txt / requirements-dev.txt
 ├── right_config.json         # 平台菜单注册配置（未使用）
-├── start.sh                  # 生产启动脚本（gunicorn）
+├── start.sh                  # 生产启动脚本（gunicorn + 指标采集进程）
 │
 ├── config/                   # Django 项目配置包
 │   ├── urls.py               # 根 URL 路由（注册所有 ViewSet，含 SYS_NAME）
@@ -107,7 +107,7 @@ src/                          # 后端代码根目录
 │   │   ├── serializers.py / views.py
 │   │   └── tests.py
 │   ├── overview/             # 首页状态总览（跨模块只读聚合，无模型）→ docs/overview.md
-│   │   ├── services.py       #   聚合三块数据 + 分块兜底
+│   │   ├── services.py       #   聚合各块数据 + 概览数字 + 分块兜底
 │   │   └── views.py          #   GET /v1/overview（StatelessView）
 │   ├── sqlanalysis/          # SQL 规范与性能分析 → docs/sql-analysis.md
 │   │   ├── parse.py          #   按方言解析、语句分类（只读 / DML / DDL / 其他）
@@ -134,7 +134,8 @@ src/                          # 后端代码根目录
 │   └── pagination.py         # 分页（StandardPagination + paginate）
 │
 ├── hooks/                    # 平台生命周期钩子（未使用）
-├── jobs/                     # 定时任务目录（预留）
+├── jobs/                     # 常驻任务目录（不随 web 进程启动）
+│   └── metrics.py            #   数据源指标采集循环 → docs/datasource-metrics.md
 ├── scripts/                  # 运维脚本（SQL 初始化）
 │
 └── sql/                      # 数据库 SQL
@@ -227,6 +228,21 @@ ViewSet 基类（`apps/base/baseviews.py`）按权限分三档：
 参考实现：`apps/datasource/services.py`（`utils/background.py` 是提交入口）。
 
 > 该队列是**进程内内存**队列：进程重启后未执行的任务会丢失，多 worker 部署时任务在接收请求的那个 worker 进程内执行。任务状态以数据库表为准（`collect_task` / `kb_document.status`），不要依赖队列本身。各模块的限制见其模块文档。
+
+## 周期任务
+
+项目**没有调度机制**（`simple-background-task` 是队列不是调度器，`apscheduler` / `django-q` 均未安装）。需要周期执行的任务放在 `jobs/`，由 `src/start.sh` 以**独立于 gunicorn 的进程**启动：
+
+```bash
+( while true; do python /home/src/jobs/metrics.py; sleep 5; done ) > "${METRICS_LOG}" 2>&1 &
+```
+
+两条硬性要求：
+
+- **独立进程** —— gunicorn 跑 3 个 worker，任何随 web 进程启动的周期任务都会每个 worker 各跑一份
+- **外层 `while true` 守护** —— 容器的 `restart: always` 只管容器、不管里面的单个进程；进程崩了没有别的东西会拉起它
+
+任务脚本体自己是个 `while True` 循环（间隔取配置），且**循环内要兜住所有异常**——业务出错绝不该让它退出。参考实现：`jobs/metrics.py`（[datasource-metrics.md](datasource-metrics.md)）。
 
 ## 代码规范入口
 
