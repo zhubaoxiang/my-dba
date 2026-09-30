@@ -247,11 +247,8 @@
     </section>
 
     <div class="footer">
-      <span class="meta">数据为进入页面时加载</span>
-      <span>
-        <span class="meta">最近刷新 {{ refreshedAt }}</span>
-        <el-button link type="primary" size="small" :loading="loading" @click="load">刷新</el-button>
-      </span>
+      <span class="meta">最近刷新 {{ refreshedAt }}</span>
+      <el-button link type="primary" size="small" :loading="loading" @click="load">刷新</el-button>
     </div>
   </div>
 </template>
