@@ -110,6 +110,7 @@ src/                          # 后端代码根目录
 │   │   ├── services.py       #   聚合各块数据 + 概览数字 + 分块兜底
 │   │   └── views.py          #   GET /v1/overview（StatelessView）
 │   ├── sqlanalysis/          # SQL 规范与性能分析 → docs/sql-analysis.md
+│   │   ├── services.py       #   跨模块只读契约（当前只有 rule_counts）
 │   │   ├── parse.py          #   按方言解析、语句分类（只读 / DML / DDL / 其他）
 │   │   ├── formatting.py     #   从语法树重新生成排版
 │   │   ├── rules/            #   18 条规则的声明与判定

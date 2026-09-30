@@ -17,6 +17,7 @@ from django.db.models import Count
 
 from apps.datasource import analyzer, models
 from apps.datasource.collectors import get_collector
+from apps.datasource.rules import registry as rule_registry
 from utils import background, common, crypto, custom_enum
 from utils.configure import CONF_ATTR
 from utils.logger import get_logger
@@ -450,6 +451,19 @@ def _hit_ratio(series: list):
 
     total = hits + reads
     return round(hits * 100.0 / total, 2) if total > 0 else None
+
+
+def rule_counts() -> dict:
+    """
+    库表分析规则的条目数
+
+    **跨模块请调用本函数**，不要直接 import 规则注册表。
+
+    取**代码声明**的长度，不是 `analysis_rule` 表的行数：那张表只有同步过之后才有行，
+    数它会在「还没点过同步」时得到 0——而那时规则有 7 条、分析也照常跑（代码声明是
+    全集与默认值来源，库只是覆盖层）。**数出 0 是把「没同步」说成了「没有规则」。**
+    """
+    return {"total": len(rule_registry.all_rules())}
 
 
 def list_datasource_status() -> list:

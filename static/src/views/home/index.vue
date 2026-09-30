@@ -241,6 +241,25 @@
       </div>
     </section>
 
+    <!-- 分析规则：系统的判断标准有多细。放在最末——它是参考信息，不是待办 -->
+    <section class="section">
+      <div class="section-title">分析规则</div>
+      <div class="rule-block">
+        <div class="rule-item">
+          <div class="metric-value">{{ dash(rules.datasource_total) }}</div>
+          <div class="metric-label">库表分析规则</div>
+          <el-button link type="primary" size="small" @click="router.push('/datasource/rules')">
+            查看规则清单
+          </el-button>
+        </div>
+        <div class="rule-item">
+          <div class="metric-value">{{ dash(rules.sql_total) }}</div>
+          <div class="metric-label">SQL 分析规则</div>
+          <!-- SQL 规则目前没有清单页可去，因此只给数、不给入口（design D5） -->
+        </div>
+      </div>
+    </section>
+
     <div class="footer">
       <span class="meta">最近刷新 {{ refreshedAt }}</span>
       <el-button link type="primary" size="small" :loading="loading" @click="load">刷新</el-button>
@@ -265,13 +284,15 @@ const blocks = ref({
   summary: {},
   datasources: { available: true, items: [] },
   metrics: { available: true, items: [] },
-  knowledge_bases: { available: true, items: [] }
+  knowledge_bases: { available: true, items: [] },
+  rules: { available: true, datasource_total: null, sql_total: null }
 })
 
 const readiness = computed(() => blocks.value.readiness)
 const summary = computed(() => blocks.value.summary || {})
 const datasourceItems = computed(() => blocks.value.datasources.items)
 const knowledgeItems = computed(() => blocks.value.knowledge_bases.items)
+const rules = computed(() => blocks.value.rules)
 
 const DB_TYPE_LABEL = { 1: 'PostgreSQL', 2: 'MySQL' }
 
@@ -626,7 +647,8 @@ onMounted(load)
 
 @media (max-width: 1199.98px) {
   .card-grid,
-  .summary {
+  .summary,
+  .rule-block {
     grid-template-columns: minmax(0, 1fr);
   }
 }
@@ -798,6 +820,20 @@ onMounted(load)
   margin-top: 8px;
   font-size: 12px;
   color: #b88230;
+}
+
+/* 分析规则：与概览数字带同形，但只在页面最末，不参与「待关注」的表达 */
+.rule-block {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.rule-item {
+  padding: 14px 16px;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  background: #fafcff;
 }
 
 .trend {

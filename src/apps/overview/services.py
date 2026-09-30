@@ -13,6 +13,7 @@
 from apps.datasource import services as datasource_services
 from apps.knowledge import llm
 from apps.knowledge import services as knowledge_services
+from apps.sqlanalysis import services as sqlanalysis_services
 from utils import custom_enum
 from utils.logger import get_logger
 
@@ -87,6 +88,20 @@ def _summary(datasources: dict, metrics: dict, knowledge_bases: dict) -> dict:
     }
 
 
+def _rules() -> dict:
+    """
+    两条能力线各自的规则条目数
+
+    这是「系统在替使用者检查什么」的规模，不是状态——它只在有人改代码时才变
+    （design.md D2）。两个数都由**代码常量**算出、不查库，因此不需要像别处那样
+    逐项兜底：要么一起取到，要么一起取不到，由分块兜底整块标为不可用。
+    """
+    return {
+        "datasource_total": datasource_services.rule_counts()["total"],
+        "sql_total": sqlanalysis_services.rule_counts()["total"],
+    }
+
+
 def build_overview() -> dict:
     """
     组装首页所需的全部数据
@@ -109,6 +124,12 @@ def build_overview() -> dict:
         lambda: {"items": knowledge_services.list_knowledge_base_status()},
         {"available": False, "items": []},
     )
+    rules = _block(
+        "rules",
+        _rules,
+        # 取不到时记 None 而不是 0：0 是「一条规则都没有」，与「没取到」是两回事
+        {"available": False, "datasource_total": None, "sql_total": None},
+    )
 
     return {
         "readiness": readiness,
@@ -116,4 +137,5 @@ def build_overview() -> dict:
         "datasources": datasources,
         "metrics": metrics,
         "knowledge_bases": knowledge_bases,
+        "rules": rules,
     }

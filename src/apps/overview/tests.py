@@ -12,8 +12,10 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from apps.datasource import models as ds_models
+from apps.datasource.rules import registry as ds_rules
 from apps.knowledge import models as kb_models
 from apps.overview import services
+from apps.sqlanalysis.rules import registry as sql_rules
 from utils import crypto, custom_enum
 
 HIGH = custom_enum.IssueLevelEnum.HIGH.value
@@ -412,6 +414,61 @@ class MetricsBlockTests(TestCase):
         self.assertTrue(overview["summary"]["datasource_total"] is not None)
 
 
+class RuleCountTests(TestCase):
+    """
+    规则条目数：取自代码声明，**不是**库里的行数
+    """
+
+    def test_counts_match_the_code_declarations(self):
+        self.assertEqual(services.datasource_services.rule_counts()["total"], len(ds_rules.all_rules()))
+        self.assertEqual(services.sqlanalysis_services.rule_counts()["total"], len(sql_rules.all_rules()))
+
+    def test_counts_do_not_depend_on_synced_rows(self):
+        """
+        `analysis_rule` 表只有同步过才有行。数它会在「还没点过同步」时得到 0——
+        而那时规则其实有 7 条、分析也照常跑（代码声明是全集，库只是覆盖层）。
+        **数出 0 是把「没同步」说成了「没有规则」。**
+        """
+        self.assertFalse(ds_models.AnalysisRule.objects.exists(), "本用例的前提是库里没有规则行")
+        self.assertGreater(services.datasource_services.rule_counts()["total"], 0)
+
+    def test_current_counts(self):
+        """
+        当前是 7 与 18。增减规则时来改这一行——让条数变化是有意的，
+        而不是某天悄悄漂移掉
+        """
+        self.assertEqual(services.datasource_services.rule_counts(), {"total": 7})
+        self.assertEqual(services.sqlanalysis_services.rule_counts(), {"total": 18})
+
+
+class RulesBlockTests(TestCase):
+    """
+    首页规则块：两个数、分块兜底、失败不显示成 0
+    """
+
+    def test_block_reports_both_counts(self):
+        block = services.build_overview()["rules"]
+        self.assertTrue(block["available"])
+        self.assertEqual(block["datasource_total"], 7)
+        self.assertEqual(block["sql_total"], 18)
+
+    def test_failure_gives_none_not_zero(self):
+        """0 条规则与没取到是两回事——界面靠这个区别决定显示 0 还是占位符"""
+        with mock.patch.object(services.datasource_services, "rule_counts", side_effect=RuntimeError("炸了")):
+            block = services.build_overview()["rules"]
+        self.assertFalse(block["available"])
+        self.assertIsNone(block["datasource_total"])
+        self.assertIsNone(block["sql_total"])
+
+    def test_rules_failure_leaves_the_rest_intact(self):
+        with mock.patch.object(services.sqlanalysis_services, "rule_counts", side_effect=RuntimeError("炸了")):
+            overview = services.build_overview()
+        self.assertFalse(overview["rules"]["available"])
+        self.assertTrue(overview["datasources"]["available"])
+        self.assertTrue(overview["knowledge_bases"]["available"])
+        self.assertTrue(overview["metrics"]["available"])
+
+
 class OverviewApiTests(TestCase):
     """
     接口：一次取回全部，某块失败不拖垮整页，且不含任何凭据
@@ -428,9 +485,9 @@ class OverviewApiTests(TestCase):
     def test_returns_every_block(self):
         payload = self.get()
         self.assertEqual(payload["code"], 2000)
-        for key in ("readiness", "summary", "datasources", "metrics", "knowledge_bases"):
+        for key in ("readiness", "summary", "datasources", "metrics", "knowledge_bases", "rules"):
             self.assertIn(key, payload["data"])
-        for key in ("readiness", "datasources", "metrics", "knowledge_bases"):
+        for key in ("readiness", "datasources", "metrics", "knowledge_bases", "rules"):
             self.assertIn("available", payload["data"][key])
 
     def test_a_failing_block_does_not_break_the_rest(self):
