@@ -6,13 +6,14 @@ crypto / analyzer / differ 均为纯计算，用 SimpleTestCase 即可，不需�
 （依赖 `utils/test_runner.py` 把 sql/pg_struct.sql 灌进测试库）。
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest import mock
 
 from django.test import SimpleTestCase, TestCase
 from rest_framework.test import APIClient
 
-from apps.datasource import analyzer, differ, models, serializers
+from apps.datasource import analyzer, differ, models, serializers, services
+from apps.datasource import metrics as ds_metrics
 from apps.datasource.rules import registry
 from utils import crypto, custom_enum
 
@@ -774,3 +775,199 @@ class DifferTests(SimpleTestCase):
     def test_empty_snapshots(self):
         result = differ.diff_snapshots({}, {})
         self.assertEqual(result, {"added_tables": [], "removed_tables": [], "changed_tables": []})
+
+
+class _FakeCursor:
+    """
+    按 SQL 片段匹配返回值的替身游标；命中 failures 的片段则抛错
+    """
+
+    def __init__(self, rows_by_marker, failures=()):
+        self.rows_by_marker = rows_by_marker
+        self.failures = tuple(failures)
+        self.executed = []
+        self._current = []
+
+    def execute(self, sql, *args):
+        self.executed.append(sql)
+        for marker in self.failures:
+            if marker in sql:
+                raise RuntimeError(f"不支持: {marker}")
+        for marker, rows in self.rows_by_marker.items():
+            if marker in sql:
+                self._current = list(rows)
+                return
+        self._current = []
+
+    def fetchone(self):
+        return self._current[0] if self._current else None
+
+    def fetchall(self):
+        return self._current
+
+    def close(self):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class _FakeConn:
+    def __init__(self, cursor, db_type=None):
+        self.db_type = db_type if db_type is not None else custom_enum.DbTypeEnum.POSTGRESQL.value
+        self.cursor_obj = cursor
+        self.rolled_back = 0
+
+    def cursor(self, *args, **kwargs):
+        return self.cursor_obj
+
+    def rollback(self):
+        self.rolled_back += 1
+
+    def close(self):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+# PG 侧三条查询的返回值，按 marker 匹配
+_PG_ROWS = {
+    "pg_stat_activity": [(11, 100, 8951475)],
+    "pg_stat_database": [(775521, 37)],
+    "pg_stat_io": [(63684608, 38780928)],
+}
+
+
+class MetricProbeTests(SimpleTestCase):
+    """
+    指标探测：连不上、某项取不到都要如实反映，且**不抛异常**——一轮采集不该
+    因为一个库出问题而整体中断。
+    """
+
+    def probe(self, cursor, db_type=None):
+        connection = _FakeConn(cursor, db_type)
+        # metrics.probe() 是函数内延迟导入 services 的，所以补丁打在 services 模块上
+        with mock.patch.object(services, "open_readonly_connection", return_value=connection):
+            return ds_metrics.probe(1), connection
+
+    def test_connection_failure_is_reported_without_metrics(self):
+        """连不上时只记原因，**不记任何指标**——记 0 会让人以为「连上了只是没负载」"""
+        with mock.patch.object(
+            services, "open_readonly_connection", side_effect=RuntimeError("连接被拒绝")
+        ):
+            result = ds_metrics.probe(1)
+        self.assertFalse(result["is_online"])
+        self.assertIn("连接被拒绝", result["fail_reason"])
+        self.assertNotIn("connection_count", result)
+
+    def test_postgres_metrics_are_collected(self):
+        result, _ = self.probe(_FakeCursor(_PG_ROWS))
+        self.assertTrue(result["is_online"])
+        self.assertEqual(result["connection_count"], 11)
+        self.assertEqual(result["max_connections"], 100)
+        self.assertEqual(result["database_size"], 8951475)
+        self.assertEqual(result["cache_hit_count"], 775521)
+        self.assertEqual(result["io_read_bytes"], 63684608)
+        self.assertEqual(result["unavailable"], [])
+
+    def test_missing_pg_stat_io_is_marked_unavailable(self):
+        """PG 16 以下没有 pg_stat_io：留空并标注，MUST NOT 记 0"""
+        cursor = _FakeCursor(_PG_ROWS, failures=("pg_stat_io",))
+        result, connection = self.probe(cursor)
+        self.assertNotIn("io_read_bytes", result)
+        self.assertIn("io", result["unavailable"])
+        self.assertEqual(result["connection_count"], 11, "一项取不到不该影响其余")
+        self.assertGreaterEqual(connection.rolled_back, 1, "语句失败后必须回滚，否则后续查询全废")
+
+    def test_mysql_metrics_are_collected(self):
+        rows = {
+            "Threads_connected": [("Threads_connected", "7")],
+            "max_connections": [("max_connections", "151")],
+            "information_schema": [(123456,)],
+            "Innodb_buffer_pool_read_requests": [("Innodb_buffer_pool_read_requests", "900")],
+            "Innodb_buffer_pool_reads": [("Innodb_buffer_pool_reads", "10")],
+            "Innodb_data_read": [("Innodb_data_read", "2048")],
+            "Innodb_data_written": [("Innodb_data_written", "4096")],
+        }
+        result, _ = self.probe(_FakeCursor(rows), db_type=custom_enum.DbTypeEnum.MYSQL.value)
+        self.assertEqual(result["connection_count"], 7)
+        self.assertEqual(result["max_connections"], 151)
+        self.assertEqual(result["cache_hit_count"], 900)
+        self.assertEqual(result["io_write_bytes"], 4096)
+        self.assertEqual(result["unavailable"], [])
+
+    def test_mysql_missing_status_variables_are_marked_unavailable(self):
+        """非 InnoDB 引擎下没有那几个状态变量：SHOW 不报错、只是没有行，必须标为未采到"""
+        rows = {
+            "Threads_connected": [("Threads_connected", "7")],
+            "max_connections": [("max_connections", "151")],
+            "information_schema": [(123456,)],
+        }
+        result, _ = self.probe(_FakeCursor(rows), db_type=custom_enum.DbTypeEnum.MYSQL.value)
+        self.assertEqual(result["connection_count"], 7, "一项取不到不该影响其余")
+        self.assertIn("cache", result["unavailable"])
+        self.assertIn("io", result["unavailable"])
+
+
+class MetricCollectTests(TestCase):
+    """
+    采集与保留：单个数据源失败不影响其余；清理只删过期的
+    """
+
+    def make(self, name):
+        return models.Datasource.objects.create(
+            name=name,
+            db_type=custom_enum.DbTypeEnum.POSTGRESQL.value,
+            host="127.0.0.1",
+            port=5432,
+            db_name="d",
+            username="u",
+            password="p",
+            creator="test",
+        )
+
+    def test_one_failure_does_not_stop_the_rest(self):
+        first = self.make("a")
+        second = self.make("b")
+        calls = []
+
+        def fake_probe(datasource_id, timeout=None):
+            calls.append(datasource_id)
+            if datasource_id == first.id:
+                raise RuntimeError("这个库炸了")
+            return {"is_online": True, "fail_reason": "", "unavailable": []}
+
+        with mock.patch.object(ds_metrics, "probe", side_effect=fake_probe):
+            summary = ds_metrics.collect_all()
+
+        self.assertEqual(calls, [first.id, second.id], "第一个失败后仍要继续采第二个")
+        self.assertEqual(summary, {"written": 1, "failed": 1})
+        self.assertEqual(models.DatasourceMetric.objects.filter(datasource_id=second.id).count(), 1)
+
+    def test_purge_only_removes_expired(self):
+        datasource = self.make("c")
+        old = models.DatasourceMetric.objects.create(datasource_id=datasource.id, is_online=True, creator="t")
+        models.DatasourceMetric.objects.filter(id=old.id).update(
+            create_time=datetime.now() - timedelta(days=ds_metrics.retention_days() + 1)
+        )
+        fresh = models.DatasourceMetric.objects.create(datasource_id=datasource.id, is_online=True, creator="t")
+
+        ds_metrics.purge_expired()
+
+        self.assertFalse(models.DatasourceMetric.objects.filter(id=old.id).exists())
+        self.assertTrue(models.DatasourceMetric.objects.filter(id=fresh.id).exists())
+
+    def test_soft_deleted_datasource_is_not_collected(self):
+        datasource = self.make("gone")
+        datasource.is_deleted = True
+        datasource.save(update_fields=["is_deleted"])
+        with mock.patch.object(ds_metrics, "probe") as probe:
+            ds_metrics.collect_all()
+        probe.assert_not_called()

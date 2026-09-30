@@ -105,6 +105,40 @@ class CatalogIssue(AbstractTimeFiledModel):
         db_table = "catalog_issue"
 
 
+class DatasourceMetric(AbstractTimeFiledModel):
+    """
+    数据源的一次指标探测，一行 = 一个库的一次探测
+
+    **只记录数据库自身报出来的东西**：可用性、连接数、容量与命中情况。
+    目标服务器本机的 CPU / 内存 / 磁盘不在其中——取它们要读服务器本地文件
+    （`pg_read_file('/proc/...')`）并动用超级用户，代价与收益不成比例（design.md D1）。
+
+    形态上是一张时间序列表：取「最新值」按 `(datasource_id, create_time DESC)` 取第一条，
+    取「趋势」按时间范围捞出若干条。
+    """
+
+    datasource = models.ForeignKey(
+        Datasource, on_delete=models.DO_NOTHING, db_column="datasource_id", verbose_name="数据源"
+    )
+    is_online = models.BooleanField(default=False, verbose_name="是否可连接")
+    fail_reason = models.CharField(max_length=1024, default="", blank=True, verbose_name="失败原因")
+    # 以下几项在「取不到」时留空，而不是记 0——0 与「没取到」是两回事
+    connection_count = models.IntegerField(null=True, blank=True, verbose_name="当前连接数")
+    max_connections = models.IntegerField(null=True, blank=True, verbose_name="连接数上限")
+    database_size = models.BigIntegerField(null=True, blank=True, verbose_name="数据库占用字节")
+    # 存**原始计数**而不是比率：比率要由相邻两次采样的差值算出来。
+    # 累计比率是「自服务启动以来」的平均值，几乎不随近期变化而变动，看不出问题
+    cache_hit_count = models.BigIntegerField(null=True, blank=True, verbose_name="缓存命中计数")
+    cache_read_count = models.BigIntegerField(null=True, blank=True, verbose_name="缓存未命中计数")
+    io_read_bytes = models.BigIntegerField(null=True, blank=True, verbose_name="读取字节数")
+    io_write_bytes = models.BigIntegerField(null=True, blank=True, verbose_name="写入字节数")
+    # 本次没能采到的项（如 PG 16 以下没有 pg_stat_io、MySQL 的某些状态变量缺失）
+    unavailable = models.JSONField(default=list, verbose_name="未能采集到的指标")
+
+    class Meta:
+        db_table = "datasource_metric"
+
+
 class AnalysisRule(AbstractTimeFiledModel):
     """
     分析规则的可覆盖项

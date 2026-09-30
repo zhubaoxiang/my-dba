@@ -238,3 +238,34 @@ COMMENT ON COLUMN qa_message.is_complete IS '回答是否生成完整；流式�
 ALTER TABLE metadata_snapshot ADD COLUMN IF NOT EXISTS evaluated_rules jsonb NOT NULL DEFAULT '[]'::jsonb;
 
 COMMENT ON COLUMN metadata_snapshot.evaluated_rules IS '本次分析实际参与评估的规则 code，用于察觉规则集在采集之后被改过';
+
+-- ============================================================
+-- 数据源指标探测（openspec: add-datasource-metrics）
+-- ============================================================
+
+-- 一行 = 一个库的一次探测，时间序列。可空列表示「该项没采到」——
+-- 留空而不是记 0，两者是两回事。
+CREATE TABLE IF NOT EXISTS datasource_metric (
+    id                serial        PRIMARY KEY,
+    datasource_id     integer       NOT NULL REFERENCES datasource (id),
+    is_online         boolean       NOT NULL DEFAULT false,
+    fail_reason       varchar(1024) NOT NULL DEFAULT '',
+    connection_count  integer,
+    max_connections   integer,
+    database_size     bigint,
+    cache_hit_count   bigint,
+    cache_read_count  bigint,
+    io_read_bytes     bigint,
+    io_write_bytes    bigint,
+    unavailable       jsonb         NOT NULL DEFAULT '[]'::jsonb,
+    create_time       timestamp     NOT NULL DEFAULT now(),
+    update_time       timestamp     NOT NULL DEFAULT now(),
+    creator           varchar(32)   NOT NULL DEFAULT '',
+    is_deleted        boolean       NOT NULL DEFAULT false
+);
+
+COMMENT ON TABLE datasource_metric IS '数据源指标探测记录，一行 = 一个库的一次探测';
+COMMENT ON COLUMN datasource_metric.cache_hit_count IS '缓存命中计数；比率由相邻两次采样差值算，故存原始计数';
+COMMENT ON COLUMN datasource_metric.unavailable IS '本次未能采集到的指标项（如 PG 16 以下没有 pg_stat_io）';
+
+CREATE INDEX IF NOT EXISTS idx_datasource_metric_ds ON datasource_metric (datasource_id, create_time DESC);

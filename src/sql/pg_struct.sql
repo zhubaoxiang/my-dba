@@ -139,6 +139,35 @@ COMMENT ON COLUMN analysis_rule.thresholds IS '该规则的判定阈值，键名
 CREATE UNIQUE INDEX IF NOT EXISTS uk_analysis_rule_code ON analysis_rule (code) WHERE is_deleted = false;
 
 
+-- 数据源指标探测（一行 = 一个库的一次探测，时间序列）
+CREATE TABLE IF NOT EXISTS datasource_metric (
+    id                serial        PRIMARY KEY,
+    datasource_id     integer       NOT NULL REFERENCES datasource (id),
+    is_online         boolean       NOT NULL DEFAULT false,
+    fail_reason       varchar(1024) NOT NULL DEFAULT '',
+    connection_count  integer,
+    max_connections   integer,
+    database_size     bigint,
+    cache_hit_count   bigint,
+    cache_read_count  bigint,
+    io_read_bytes     bigint,
+    io_write_bytes    bigint,
+    unavailable       jsonb         NOT NULL DEFAULT '[]'::jsonb,
+    create_time       timestamp     NOT NULL DEFAULT now(),
+    update_time       timestamp     NOT NULL DEFAULT now(),
+    creator           varchar(32)   NOT NULL DEFAULT '',
+    is_deleted        boolean       NOT NULL DEFAULT false
+);
+
+COMMENT ON TABLE datasource_metric IS '数据源指标探测记录，一行 = 一个库的一次探测';
+COMMENT ON COLUMN datasource_metric.fail_reason IS '不可连接时的原因';
+COMMENT ON COLUMN datasource_metric.cache_hit_count IS '缓存命中计数；比率由相邻两次采样差值算，故存原始计数';
+COMMENT ON COLUMN datasource_metric.unavailable IS '本次未能采集到的指标项（如 PG 16 以下没有 pg_stat_io）';
+
+-- 取最新值与趋势都按 (datasource_id, create_time) 走
+CREATE INDEX IF NOT EXISTS idx_datasource_metric_ds ON datasource_metric (datasource_id, create_time DESC);
+
+
 -- ============================================================
 -- 知识问答（openspec: add-rag-knowledge-qa）
 -- 模型接入配置 / 文档知识库 / 问答会话
