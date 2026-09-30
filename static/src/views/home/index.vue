@@ -45,6 +45,16 @@
         <div class="stat-value">{{ dash(summary.knowledge_base_total) }}</div>
         <div class="stat-label">知识库 · {{ dash(summary.document_total) }} 篇文档</div>
       </div>
+      <!-- 分析规则：系统的判断标准有多细。两个数并排在一格，用 · 而非 / ——
+           它们不是比值关系，用斜杠会读成「7 分之 18」 -->
+      <div class="stat">
+        <div class="stat-value">
+          {{ dash(rules.datasource_total) }}<span class="slash">·</span>{{ dash(rules.sql_total) }}
+        </div>
+        <div class="stat-label">分析规则 · 库表 / SQL</div>
+        <el-button class="stat-link" link type="primary" size="small"
+          @click="router.push('/datasource/rules')">查看规则清单</el-button>
+      </div>
     </div>
 
     <!-- 已纳管的库 -->
@@ -237,25 +247,6 @@
               <el-button link type="primary" size="small" @click="router.push('/knowledge/qa')">去提问</el-button>
             </div>
           </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- 分析规则：系统的判断标准有多细。放在最末——它是参考信息，不是待办 -->
-    <section class="section">
-      <div class="section-title">分析规则</div>
-      <div class="rule-block">
-        <div class="rule-item">
-          <div class="metric-value">{{ dash(rules.datasource_total) }}</div>
-          <div class="metric-label">库表分析规则</div>
-          <el-button link type="primary" size="small" @click="router.push('/datasource/rules')">
-            查看规则清单
-          </el-button>
-        </div>
-        <div class="rule-item">
-          <div class="metric-value">{{ dash(rules.sql_total) }}</div>
-          <div class="metric-label">SQL 分析规则</div>
-          <!-- SQL 规则目前没有清单页可去，因此只给数、不给入口（design D5） -->
         </div>
       </div>
     </section>
@@ -583,16 +574,27 @@ onMounted(load)
 /* 概览数字带 */
 .summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 20px;
 }
 
 .stat {
+  display: flex;
+  flex-direction: column;
   padding: 14px 16px;
   border: 1px solid #e4e7ed;
   border-radius: 6px;
   background: #fafcff;
+}
+
+/* 只有规则那格带入口，靠 margin-top:auto 让它贴到等高格子的底部，不至于是半空中一行 */
+.stat-link {
+  margin-top: auto;
+  padding-top: 4px;
+  align-self: flex-start;
+  height: auto;
+  font-size: 12px;
 }
 
 .stat-value {
@@ -647,8 +649,7 @@ onMounted(load)
 
 @media (max-width: 1199.98px) {
   .card-grid,
-  .summary,
-  .rule-block {
+  .summary {
     grid-template-columns: minmax(0, 1fr);
   }
 }
@@ -820,20 +821,6 @@ onMounted(load)
   margin-top: 8px;
   font-size: 12px;
   color: #b88230;
-}
-
-/* 分析规则：与概览数字带同形，但只在页面最末，不参与「待关注」的表达 */
-.rule-block {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.rule-item {
-  padding: 14px 16px;
-  border: 1px solid #e4e7ed;
-  border-radius: 6px;
-  background: #fafcff;
 }
 
 .trend {
