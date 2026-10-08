@@ -1000,6 +1000,33 @@ class SqlAnalysisApiTests(TestCase):
         self.assertIn("未指定数据源", data["schema_check"]["note"])
         self.assertIn("unknown_table", data["skipped_rules"], "跳过的规则要能解释")
 
+    def catalog(self):
+        return self.client.get(f"{self.URL}/rules?page=1&page_size=100").json()["data"]["results"]
+
+    def test_rules_catalog_lists_every_declared_rule(self):
+        """不用贴一条 SQL 也能看到系统会检查什么——这是规则清单页 SQL 那一组的取数来源"""
+        items = self.catalog()
+        self.assertEqual(len(items), len(registry.all_rules()))
+        for key in ("code", "name", "description", "level", "level_label", "needs_schema"):
+            self.assertIn(key, items[0])
+        self.assertTrue(items[0]["description"], "说明要真的给出内容，前端那一列才有意义")
+
+    def test_rules_catalog_marks_schema_dependent_rules(self):
+        """需要表结构的规则在未绑定数据源时会被跳过，清单必须把它标出来"""
+        marked = sorted(item["code"] for item in self.catalog() if item["needs_schema"])
+        self.assertEqual(marked, sorted(rule.code for rule in registry.schema_rules()))
+        self.assertTrue(marked, "本组不该为空，否则这条断言失去意义")
+
+    def test_rules_catalog_works_without_any_datasource(self):
+        """规则清单不依赖数据源，一个库都没纳管时也照常"""
+        self.assertEqual(models.Datasource.objects.count(), 0)
+        self.assertEqual(len(self.catalog()), len(registry.all_rules()))
+
+    def test_rules_catalog_does_not_leak_credentials(self):
+        for item in self.catalog():
+            self.assertNotIn("password", item)
+            self.assertNotIn("api_key", item)
+
     def test_format_returns_pretty_sql(self):
         data = self.post("format", {"sql": "select id from users where id=1 limit 1"})["data"]
         self.assertIn("SELECT", data["formatted"])

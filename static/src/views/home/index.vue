@@ -46,17 +46,19 @@
         <div class="stat-label">知识库 · {{ dash(summary.document_total) }} 篇文档</div>
       </div>
       <!-- 分析规则：系统的判断标准有多细。两类规则各占一格——挤在一格里时
-           两个数会被读成一个怪数字（7·18），标签也密到不像标签 -->
+           两个数会被读成一个怪数字（7·18），标签也密到不像标签。
+           两格都带入口（规则清单页现在同时有两组），并各自深链到对应那组 -->
       <div class="stat">
         <div class="stat-value">{{ dash(rules.datasource_total) }}</div>
         <div class="stat-label">库表规则</div>
         <el-button class="stat-link" link type="primary" size="small"
-          @click="router.push('/datasource/rules')">查看规则清单</el-button>
+          @click="router.push('/datasource/rules?tab=datasource')">查看规则清单</el-button>
       </div>
-      <!-- SQL 规则没有清单页可去（design D5），只给数，不做一个指向不存在地方的链接 -->
       <div class="stat">
         <div class="stat-value">{{ dash(rules.sql_total) }}</div>
         <div class="stat-label">SQL 规则</div>
+        <el-button class="stat-link" link type="primary" size="small"
+          @click="router.push('/datasource/rules?tab=sql')">查看规则清单</el-button>
       </div>
     </div>
 

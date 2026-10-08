@@ -165,8 +165,8 @@ class AnalysisRuleUpdateSerializer(serializers.Serializer):
     """
     修改规则的可覆盖项
 
-    只接受**启用、级别、阈值**三项。名称、说明与适用层级来自代码声明——在库里改它们
-    会让声明与库长期不一致，且下一次同步就被覆盖回来，不如不给改。
+    只接受**启用、级别、阈值**三项。名称、说明与适用层级来自代码声明——库里存的只是
+    这三项的覆盖值，改名字改说明都无处生效，不如不给改。
     """
 
     enabled = serializers.BooleanField(required=False)

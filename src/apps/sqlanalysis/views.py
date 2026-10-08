@@ -15,8 +15,8 @@ from rest_framework.decorators import action
 
 from apps.base import baseviews
 from apps.datasource import services as datasource_services
-from apps.sqlanalysis import analyzer, explain, formatting, interpret, parse, schema, serializers
-from utils import common
+from apps.sqlanalysis import analyzer, explain, formatting, interpret, parse, schema, serializers, services
+from utils import common, pagination
 from utils.logger import get_logger
 
 LOGGER = get_logger("sqlanalysis.log")
@@ -26,6 +26,20 @@ class SqlAnalysisView(baseviews.StatelessView):
     """
     SQL 分析：解析与格式化、规范与性能规则、结构校验、模型解读，以及显式触发的试运行
     """
+
+    pagination_class = pagination.StandardPagination
+
+    @action(detail=False, methods=["GET"], url_path="rules")
+    def rules(self, request):
+        """
+        SQL 规则清单（只读）
+
+        SQL 规则没有覆盖机制、也不落库，这里就是代码声明的直接呈现——目的是让使用者
+        **不用贴一条 SQL** 也能看到系统会检查什么。「需要表结构」的规则一并标出，
+        使未绑定数据源时被跳过的那些不至于被误以为在跑。
+        """
+        self.serializer_class = serializers.SqlRuleSerializer
+        return baseviews.ResponseOK(pagination.paginate(self, services.list_rules()))
 
     def _resolve_datasource(self, datasource_id):
         """

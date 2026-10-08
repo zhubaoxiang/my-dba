@@ -13,6 +13,21 @@ from utils import custom_enum
 MAX_SQL_LENGTH = 20000
 
 
+class SqlRuleSerializer(serializers.Serializer):
+    """
+    SQL 规则清单的一项
+
+    数据来自代码声明而非模型：SQL 规则没有覆盖机制、也不落库，因此这里只有只读字段。
+    """
+
+    code = serializers.CharField()
+    name = serializers.CharField()
+    description = serializers.CharField()
+    level = serializers.IntegerField()
+    level_label = serializers.CharField()
+    needs_schema = serializers.BooleanField()
+
+
 class SqlTextSerializer(serializers.Serializer):
     """
     只带 SQL 文本与方言的入参（格式化用它）

@@ -19,3 +19,23 @@ def rule_counts() -> dict:
     数库只会数出 0。
     """
     return {"total": len(rule_registry.all_rules())}
+
+
+def list_rules() -> list:
+    """
+    SQL 分析规则的清单（只读）
+
+    `needs_schema` 一并给出：需要表结构的规则在**未绑定数据源**时不会被判定，
+    看清单的人该知道这件事，否则会以为它一直在跑。
+    """
+    return [
+        {
+            "code": rule.code,
+            "name": rule.name,
+            "description": rule.description,
+            "level": rule.default_level.value,
+            "level_label": rule.default_level.label,
+            "needs_schema": bool(rule.needs_schema),
+        }
+        for rule in rule_registry.all_rules()
+    ]

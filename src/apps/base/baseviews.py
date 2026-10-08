@@ -1,6 +1,6 @@
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.viewsets import ModelViewSet, ViewSet
+from rest_framework.viewsets import GenericViewSet, ModelViewSet
 
 
 class BaseView(ModelViewSet):
@@ -20,12 +20,16 @@ class AnyLogin(ModelViewSet):
     authentication_classes = ()
 
 
-class StatelessView(ViewSet):
+class StatelessView(GenericViewSet):
     """
     无模型的 ViewSet 基类，供只有自定义 action 的接口使用
 
     例如 SQL 分析：不承载任何资源、不落库。若继承 `AnyLogin`（ModelViewSet 子类），
     会连同带上一套用不了的 list / detail / create 路由——路由注册了但访问即 500。
+
+    继承 `GenericViewSet` 而非裸 `ViewSet`：前者同样只生成自定义 action 的路由，
+    但额外提供 `get_serializer` / `paginate_queryset` / `get_paginated_response`，
+    使自定义 action 也能用 `pagination.paginate()` 返回分页列表。
 
     权限与 `AnyLogin` 一致：本项目不做应用层鉴权，访问控制依赖网络隔离。
     """

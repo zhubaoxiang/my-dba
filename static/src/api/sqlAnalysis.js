@@ -15,6 +15,13 @@ const SLOW_TIMEOUT = 90000
 // - interpret 模型解读，十几秒的外部调用
 // - execute   会在**真实的、可能是生产的**库上执行语句，必须由使用者显式触发
 export const sqlAnalysisApi = {
+  // SQL 规则清单（只读）
+  //
+  // 与上面几个接口不同：它不吃 SQL、不连库、也不跑规则，只是把「系统会检查什么」
+  // 列出来。规则来自代码声明，因此任何数据源都没有时也照常返回。
+  rules(params) {
+    return request.get('/v1/sql-analysis/rules', { params })
+  },
   format(data) {
     return request.post('/v1/sql-analysis/format', data)
   },

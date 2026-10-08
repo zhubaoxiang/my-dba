@@ -354,7 +354,11 @@ class AnalysisRuleView(baseviews.AnyLogin):
     分析规则注册表
 
     规则清单与默认值来自代码声明（`apps/datasource/rules/`），本接口只暴露**运行时可改**的部分：
-    启用开关、严重级别、阈值。名称与适用层级随同步更新，不接受直接修改。
+    启用开关、严重级别、阈值。名称、说明与适用层级随代码声明，不接受直接修改。
+
+    清单以**代码声明为基底、叠加库中的覆盖项**返回，从未落库的规则也会出现并展示代码默认值
+    （design D1）——库里有没有记录只决定「这条被改过没有」，不决定它在不在清单里。
+    规则以 `code` 定位而非自增主键：未落库的规则没有主键可用（design D2）。
 
     同基线：不做应用层鉴权，访问控制依赖网络隔离。
     """
@@ -362,37 +366,62 @@ class AnalysisRuleView(baseviews.AnyLogin):
     queryset = models.AnalysisRule.objects.all()
     serializer_class = serializers.AnalysisRuleSerializer
     pagination_class = pagination.StandardPagination
+    lookup_field = "code"
 
     @staticmethod
     def _creator(request) -> str:
         return getattr(getattr(request, "user", None), "username", "") or ""
 
-    def _get_instance(self, kwargs):
-        return models.AnalysisRule.objects.filter(is_deleted=False, id=kwargs.get("pk")).first()
+    @staticmethod
+    def _defaults(declared, creator: str) -> dict:
+        """
+        为「库里还没有」的规则建行时的初值：一律取代码声明的默认值
+
+        `name` / `description` / `object_level` 这三列**已不再被读取**（清单一律取代码声明，
+        见 `registry._declared_view`），但它们仍存在于表中（`object_level` 还是非空列），
+        故建行时照旧填上。待这几列随 DDL 删除后，这里只剩 enabled / level / thresholds / creator。
+        """
+        return {
+            "name": declared.name,
+            "description": declared.description,
+            "level": declared.default_level.value,
+            "object_level": declared.object_level.value,
+            "enabled": True,
+            "thresholds": dict(declared.default_thresholds),
+            "creator": creator,
+        }
 
     def list(self, request, **kwargs):
-        queryset = self.get_queryset().filter(is_deleted=False).order_by("object_level", "code")
-        return baseviews.ResponseOK(pagination.paginate(self, queryset))
+        rows = registry.declared_with_overrides()
+        rows.sort(key=lambda row: (row.object_level, row.code))
+        return baseviews.ResponseOK(pagination.paginate(self, rows))
 
     def retrieve(self, request, *args, **kwargs):
-        instance = self._get_instance(kwargs)
-        if instance is None:
+        row = registry.declared_row(kwargs.get("code"))
+        if row is None:
             return baseviews.ResponseNotFound("规则不存在")
-        return baseviews.ResponseOK(self.get_serializer(instance).data)
+        return baseviews.ResponseOK(self.get_serializer(row).data)
 
     def update(self, request, *args, **kwargs):
         """
         修改启用开关、级别或阈值。PUT 与 PATCH 同义——三项都是可选的
+
+        库里没有这条规则时**顺手建行**：清单改以代码声明为基底之后，使用者不再需要任何
+        「同步」之类的前置动作（design D3）。
         """
-        instance = self._get_instance(kwargs)
-        if instance is None:
+        code = kwargs.get("code")
+        declared = registry.get_rule(code)
+        if declared is None:
             return baseviews.ResponseNotFound("规则不存在")
-        serializer = serializers.AnalysisRuleUpdateSerializer(
-            data=request.data, context={"rule": registry.get_rule(instance.code)}
-        )
+        serializer = serializers.AnalysisRuleUpdateSerializer(data=request.data, context={"rule": declared})
         if not serializer.is_valid():
             return baseviews.ResponseBadRequest(common.ToolUtil.format_drf_error(serializer.errors))
         data = serializer.validated_data
+        instance, _ = models.AnalysisRule.objects.get_or_create(
+            code=code,
+            is_deleted=False,
+            defaults=self._defaults(declared, self._creator(request)),
+        )
         for field in ("enabled", "level", "thresholds"):
             if field in data:
                 setattr(instance, field, data[field])
@@ -404,61 +433,27 @@ class AnalysisRuleView(baseviews.AnyLogin):
 
     def create(self, request, **kwargs):
         # 凭空建一条库记录没有对应的代码实现，分析时会被忽略，不如明确拒绝
-        return baseviews.ResponseBadRequest("规则来自代码声明，请调用同步接口，而不是新建")
+        return baseviews.ResponseBadRequest("规则来自代码声明，请改用修改接口调整某条已有规则")
 
     def destroy(self, request, *args, **kwargs):
         # 删掉库记录只会退回代码默认值，达不到「删除规则」的效果
         return baseviews.ResponseBadRequest("规则来自代码声明，不支持删除；如需停用请改启用开关")
 
-    @action(detail=False, methods=["POST"], url_path="sync")
-    def sync(self, request):
-        """
-        从代码声明同步规则清单
-
-        按 `code` 幂等 upsert，**只更新** name / description / object_level。
-        enabled / level / thresholds 由使用者调整，同步不碰——否则一次部署就会冲掉调过的开关。
-        """
-        creator = self._creator(request)
-        existing = {row.code: row for row in models.AnalysisRule.objects.filter(is_deleted=False)}
-        created = updated = 0
-        for rule in registry.all_rules():
-            row = existing.get(rule.code)
-            if row is None:
-                models.AnalysisRule.objects.create(
-                    code=rule.code,
-                    name=rule.name,
-                    description=rule.description,
-                    level=rule.default_level.value,
-                    object_level=rule.object_level.value,
-                    enabled=True,
-                    thresholds=dict(rule.default_thresholds),
-                    creator=creator,
-                )
-                created += 1
-                continue
-            if (
-                row.name != rule.name
-                or row.description != rule.description
-                or row.object_level != rule.object_level.value
-            ):
-                row.name = rule.name
-                row.description = rule.description
-                row.object_level = rule.object_level.value
-                row.save(update_fields=["name", "description", "object_level", "update_time"])
-                updated += 1
-        return baseviews.ResponseOK({"created": created, "updated": updated, "total": len(registry.all_rules())})
-
     @action(detail=True, methods=["POST"], url_path="reset")
     def reset(self, request, **kwargs):
         """
         把可覆盖项恢复为代码声明的默认值
+
+        从未被调整过的规则库里没有记录，也就没有可恢复的东西——如实报错，而不是悄悄
+        建一行再抹掉，那会让「恢复默认」看起来生效了。
         """
-        instance = self._get_instance(kwargs)
-        if instance is None:
-            return baseviews.ResponseNotFound("规则不存在")
-        declared = registry.get_rule(instance.code)
+        code = kwargs.get("code")
+        declared = registry.get_rule(code)
         if declared is None:
-            return baseviews.ResponseExpectationFailed(f"规则 {instance.code} 已不在代码声明中，无法恢复默认值")
+            return baseviews.ResponseNotFound("规则不存在")
+        instance = models.AnalysisRule.objects.filter(is_deleted=False, code=code).first()
+        if instance is None:
+            return baseviews.ResponseBadRequest("该规则从未被调整过，没有可恢复的默认值")
         instance.enabled = True
         instance.level = declared.default_level.value
         instance.thresholds = dict(declared.default_thresholds)

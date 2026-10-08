@@ -48,7 +48,7 @@ DDL 见 `src/sql/pg_struct.sql`（全量）与 `src/sql/patch.sql`（增量）�
 | GET | `/catalog/issues?datasource_id=&issue_level=` | 问题清单（按级别筛选） |
 | GET | `/catalog/diff?snapshot_id=&compare_snapshot_id=` | 两个快照的结构差异 |
 
-> ⚠️ 以上接口继承 `baseviews.AnyLogin`，**系统内不做任何认证与角色校验**。这意味着只要服务可达，任何人都能读写数据源配置（含目标库凭据）、触发采集、并借「连接测试」探测内网。**服务只能部署在内网**——完整说明见 [architecture.md 的「认证与鉴权」](architecture.md#认证与鉴权)。
+> ⚠️ 以上接口继承 `baseviews.AnyLogin`，**系统内不做任何认证与角色校验**。这意味着只要服务可达，任何人都能读写数据源配置（含目标库凭据）、触发采集、并借「连接测试」探测内网。**分析规则的写接口（`PUT` / `POST …/reset`）同样没有保护**——改一条规则会影响**所有使用者**看到的问题清单，例如把「无条件的 DELETE」这类高危规则关掉。**服务只能部署在内网**——完整说明见 [architecture.md 的「认证与鉴权」](architecture.md#认证与鉴权)。
 
 ## 健康分析规则
 
@@ -108,28 +108,37 @@ DDL 见 `src/sql/pg_struct.sql`（全量）与 `src/sql/patch.sql`（增量）�
 
 ```
 代码声明（apps/datasource/rules/definitions.py）
-  ├─ 规则清单与默认值的唯一来源
+  ├─ 规则清单、名称、说明、适用层级与默认值的唯一来源
   └─ 是「全集」——即使一条库记录都没有，规则照样生效
-        ↑ 覆盖
+        ⊕ 叠加
 analysis_rule 表
-  └─ 只存运行时改的三项：enabled / level / thresholds
+  └─ 只提供运行时改的三项：enabled / level / thresholds
 ```
 
-**没有同步过也不影响功能**：库里没有某个 `code` 的记录时，分析用代码默认值。同步只负责让规则出现在管理界面上。
+**规则清单页也以代码声明为基底**：库里有记录只说明「这条被改过」，不决定它在不在清单里。所以清单**一打开就有内容**，与分析的取数口径一致——首页说 7 条，点进去也是 7 条。
+
+库里**没有**某个 `code` 的记录时，分析用代码默认值；清单页展示默认值并把「恢复默认」置灰。第一次调整某条规则时后端为它顺手建行，**不需要任何前置动作**。
+
+> 早期的「同步规则」按钮已随清单换基底一并移除：它原本的职责是「让页面有数据」，而这件事现在不再需要它。
+
+**库里那三列（`name` / `description` / `object_level`）不再被读取。** 它们原是「同步」刷新的副本，同步移除后无人刷新；继续读它们，在代码里改过的名字就会**永远显示成旧的**（实测确认过）。所以清单里这三项一律取声明，只有 `enabled` / `level` / `thresholds` 取库里的行——**声明与副本冲突时，声明是对的**。
 
 ### 规则管理接口
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/analysis-rule` | 规则清单（分页），带级别/层级标签与「是否被调整过」 |
-| PUT | `/analysis-rule/{id}` | 修改 `enabled` / `level` / `thresholds`（PUT 与 PATCH 同义） |
-| POST | `/analysis-rule/{id}/reset` | 恢复为代码声明的默认值 |
-| POST | `/analysis-rule/sync` | 从代码声明同步清单，**幂等** |
+| PUT | `/analysis-rule/{code}` | 修改 `enabled` / `level` / `thresholds`（PUT 与 PATCH 同义）；库里没有则自动建行 |
+| POST | `/analysis-rule/{code}/reset` | 恢复为代码声明的默认值；从未调整过的规则报参数错误 |
+
+**规则以 `code` 定位，不用自增 id**：未落库的规则没有 id 可用，却必须可被修改。
 
 两条刻意的约束：
 
-- **同步不覆盖使用者的改动**——它只更新名称、说明与适用层级，不碰 `enabled` / `level` / `thresholds`，否则一次部署就把运维调过的开关冲掉了
 - **不接受新建与删除**——规则来自代码声明，凭空建一条库记录没有对应实现；删掉库记录只会退回默认值，达不到「删除规则」的效果。要停用请改开关
+- **名称、说明与适用层级不接受修改**——库里存的只是那三项覆盖值，改名字改说明无处生效
+
+> SQL 分析规则在同一页的另一组里展示，但**只读**：它们没有覆盖机制，因此那一组不出现启用开关与级别下拉。接口见 [sql-analysis.md 的「规则清单」](sql-analysis.md#规则清单)。
 
 ### 规则集变化可被察觉
 
@@ -153,5 +162,7 @@ analysis_rule 表
 > ```
 >
 > 补丁会给 `catalog_issue` 补 `rule_code` / `rule_name` / `object_level` / `schema_name` 并删除 `issue_type`，给 `metadata_snapshot` 补 `evaluated_rules`。旧问题行因 `rule_code` 为空属失效数据，确认可清空后手动执行 `DELETE FROM catalog_issue;`（该语句只写在 `patch.sql` 注释里，不会自动执行）。
+
+> **待办**：`analysis_rule` 的 `name` / `description` / `object_level` 三列已无用途（不再被读取，只有建行时写一次），随下一次库结构补丁一并删除。删完 `analysis_rule` 就只剩 `code` / `enabled` / `level` / `thresholds`——一张没有任何副本、不会过期的覆盖表。**与上面 `evaluated_rules` 那条一起执行**，不单独占一次 DDL 往返。
 
 > SQL 分析能力（`add-sql-analysis`）排在本变更之后，届时会给注册表增加 scope 维度，使同一个管理页承载语句级规则。

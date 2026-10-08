@@ -4,7 +4,7 @@
 对外暴露全部规则声明，并负责把 `analysis_rule` 表中的覆盖项合并到代码声明之上。
 
 **代码声明是全集与默认值来源，库是覆盖层**（design.md D3）：库里没有某个 `code` 的记录时
-用代码默认值；有则取库里的启用开关、级别与阈值。这样「还没同步过」不影响功能，
+用代码默认值；有则取库里的启用开关、级别与阈值。这样「一条都没调整过」不影响功能，
 一次部署也不会冲掉运维改过的开关。
 """
 
@@ -39,6 +39,61 @@ def get_rule(code: str):
         if rule.code == code:
             return rule
     return None
+
+
+def _declared_view(rule, row=None):
+    """
+    一条规则的「声明 ⊕ 覆盖」形态：名称、说明、适用层级取**代码声明**，只有
+    启用、级别、阈值来自库中的行
+
+    **为什么那三项一律取声明**：`analysis_rule` 里也有 name / description / object_level
+    三列，但它们是早期「同步」动作刷新的**副本**。同步已随清单换基底一并移除，副本从此
+    无人刷新——若继续读它们，在代码里改过的名字会永远显示成旧的（实测：库里副本一旦被
+    改乱，清单就跟着错）。声明与副本冲突时，声明是对的。
+
+    库里没有这条规则时（`row` 为 None）造一条**未落库**的实例，字段取代码默认值，`id`
+    为空——这样「一条都没调过」的部署打开清单页也能看到全部规则（design.md D1）。
+
+    返回的实例**仅供序列化，不要保存**：它身上的声明字段覆盖过库里的值。
+    """
+    from apps.datasource.models import AnalysisRule
+
+    if row is None:
+        row = AnalysisRule(
+            enabled=True,
+            level=rule.default_level.value,
+            thresholds=dict(rule.default_thresholds),
+        )
+    row.code = rule.code
+    row.name = rule.name
+    row.description = rule.description
+    row.object_level = rule.object_level.value
+    return row
+
+
+def declared_with_overrides() -> list:
+    """
+    规则清单：以代码声明为基底，叠加库中已存的覆盖项
+
+    声明里没有的 `code`（规则曾被删过的历史遗留）不进清单：基底是声明，不在声明里就不存在
+    （design.md D6）。
+    """
+    from apps.datasource.models import AnalysisRule
+
+    existing = {row.code: row for row in AnalysisRule.objects.filter(is_deleted=False)}
+    return [_declared_view(rule, existing.get(rule.code)) for rule in RULES]
+
+
+def declared_row(code: str):
+    """
+    单条规则的「声明 ⊕ 覆盖」形态；不在代码声明中时返回 None
+    """
+    from apps.datasource.models import AnalysisRule
+
+    rule = get_rule(code)
+    if rule is None:
+        return None
+    return _declared_view(rule, AnalysisRule.objects.filter(is_deleted=False, code=code).first())
 
 
 def allowed_levels(rule) -> set:

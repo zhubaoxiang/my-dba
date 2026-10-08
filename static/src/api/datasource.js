@@ -41,22 +41,21 @@ export const datasourceApi = {
 }
 
 // 分析规则注册表 API
+//
+// 规则以 `code` 定位而非自增 id：清单以代码声明为基底，从未落库的规则也在清单里、
+// 却没有 id 可用。修改时后端会为它顺手建行。
 export const analysisRuleApi = {
   // 规则清单（分页）
   list(params) {
     return request.get('/v1/analysis-rule', { params })
   },
   // 修改启用开关 / 严重级别 / 阈值
-  update(id, data) {
-    return request.put(`/v1/analysis-rule/${id}`, data)
+  update(code, data) {
+    return request.put(`/v1/analysis-rule/${code}`, data)
   },
   // 把可覆盖项恢复为代码声明的默认值
-  reset(id) {
-    return request.post(`/v1/analysis-rule/${id}/reset`)
-  },
-  // 从代码声明同步规则清单（不覆盖已改过的开关、级别与阈值）
-  sync() {
-    return request.post('/v1/analysis-rule/sync')
+  reset(code) {
+    return request.post(`/v1/analysis-rule/${code}/reset`)
   }
 }
 

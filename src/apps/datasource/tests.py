@@ -12,7 +12,7 @@ from unittest import mock
 from django.test import SimpleTestCase, TestCase
 from rest_framework.test import APIClient
 
-from apps.datasource import analyzer, differ, models, serializers, services
+from apps.datasource import analyzer, differ, models, serializers, services, views
 from apps.datasource import metrics as ds_metrics
 from apps.datasource import services as ds_services
 from apps.datasource.rules import registry
@@ -480,7 +480,7 @@ class RuleRegistryDbTests(TestCase):
         return models.AnalysisRule.objects.create(**{**defaults, **kwargs})
 
     def test_no_rows_falls_back_to_code_defaults(self):
-        """库里一条都没有时，全部规则按代码默认值生效——「没同步过」不影响功能"""
+        """库里一条都没有时，全部规则按代码默认值生效——「一条都没调整过」不影响功能"""
         effective = {item.code: item for item in registry.load_effective_rules()}
         self.assertEqual(sorted(effective), sorted(registry.rule_codes()))
         for code, item in effective.items():
@@ -517,7 +517,7 @@ class RuleRegistryDbTests(TestCase):
 
 class AnalysisRuleApiTests(TestCase):
     """
-    规则管理接口：清单、同步、改覆盖项、恢复默认
+    规则管理接口：清单（代码声明为基底）、改覆盖项、恢复默认
 
     规则注册表的**可配置**部分离开数据库测不了，故这一组用 TestCase。
     """
@@ -528,92 +528,145 @@ class AnalysisRuleApiTests(TestCase):
     def setUp(self):
         self.client = APIClient()
 
-    def sync(self):
-        return self.client.post(f"{self.URL}/sync", {}, format="json").json()
+    def catalog(self):
+        return self.client.get(f"{self.URL}?page=1&page_size=100").json()["data"]["results"]
 
-    def rule_id(self, code):
-        return models.AnalysisRule.objects.get(code=code, is_deleted=False).id
+    # ------------------------------------------------------------------
+    # 清单：代码声明为基底 ⊕ 库中覆盖
+    # ------------------------------------------------------------------
 
-    def test_sync_creates_every_declared_rule(self):
-        payload = self.sync()
-        self.assertEqual(payload["code"], 2000)
-        self.assertEqual(payload["data"]["created"], len(registry.all_rules()))
-        self.assertEqual(payload["data"]["total"], len(registry.all_rules()))
-
-    def test_sync_is_idempotent(self):
-        self.sync()
-        payload = self.sync()
-        self.assertEqual(payload["data"]["created"], 0)
-        self.assertEqual(payload["data"]["updated"], 0)
-        self.assertEqual(models.AnalysisRule.objects.filter(is_deleted=False).count(), len(registry.all_rules()))
-
-    def test_sync_does_not_overwrite_user_changes(self):
-        """同步只更新名称/说明/层级，不碰开关、级别与阈值——否则一次部署就把调过的冲掉了"""
-        self.sync()
-        rid = self.rule_id("big_table")
-        self.client.put(
-            f"{self.URL}/{rid}", {"enabled": False, "level": 3, "thresholds": {"big_table_rows": 7}}, format="json"
-        )
-        self.sync()
-        row = models.AnalysisRule.objects.get(id=rid)
-        self.assertFalse(row.enabled)
-        self.assertEqual(row.level, 3)
-        self.assertEqual(row.thresholds["big_table_rows"], 7)
-
-    def test_list_returns_rules_with_labels(self):
-        self.sync()
-        results = self.client.get(f"{self.URL}?page=1&page_size=100").json()["data"]["results"]
+    def test_catalog_is_not_empty_without_any_db_row(self):
+        """全新部署：库里一行都没有，清单仍须给出全部规则——首页说 7 条，点进来不该是空表"""
+        self.assertEqual(models.AnalysisRule.objects.count(), 0)
+        results = self.catalog()
         self.assertEqual(len(results), len(registry.all_rules()))
-        for key in ("code", "name", "level", "level_label", "object_level_label", "is_overridden", "thresholds"):
-            self.assertIn(key, results[0])
+        for item in results:
+            declared = registry.get_rule(item["code"])
+            self.assertIsNone(item["id"], "未落库的规则没有自增 id")
+            self.assertEqual(item["level"], declared.default_level.value)
+            self.assertTrue(item["enabled"])
+            self.assertFalse(item["is_overridden"])
 
-    def test_update_level(self):
-        self.sync()
-        payload = self.client.put(f"{self.URL}/{self.rule_id('big_table')}", {"level": 3}, format="json").json()
+    def test_catalog_returns_labels(self):
+        first = self.catalog()[0]
+        for key in (
+            "code",
+            "name",
+            "description",
+            "level",
+            "level_label",
+            "object_level_label",
+            "is_overridden",
+            "thresholds",
+        ):
+            self.assertIn(key, first)
+        self.assertTrue(first["description"], "说明要真的给出内容，前端那一列才有意义")
+
+    def test_catalog_reflects_overrides(self):
+        self.client.put(f"{self.URL}/big_table", {"level": 3}, format="json")
+        item = next(row for row in self.catalog() if row["code"] == "big_table")
+        self.assertEqual(item["level"], 3)
+        self.assertTrue(item["is_overridden"])
+
+    def test_db_copies_never_shadow_the_declaration(self):
+        """
+        库里的 name / description / object_level 只是历史副本，清单必须一律取代码声明
+
+        这三列原先由「同步」刷新，同步移除后无人刷新。若读它们，代码里改过的名字会永远
+        显示成旧的——这条用例把库里的副本改乱，清单仍须给出声明的值。
+        """
+        models.AnalysisRule.objects.create(
+            code="big_table",
+            name="★库里的旧名字★",
+            description="★库里的旧说明★",
+            level=custom_enum.IssueLevelEnum.LOW.value,
+            object_level=custom_enum.ObjectLevelEnum.COLUMN.value,
+        )
+        item = next(row for row in self.catalog() if row["code"] == "big_table")
+        declared = registry.get_rule("big_table")
+        self.assertEqual(item["name"], declared.name)
+        self.assertEqual(item["description"], declared.description)
+        self.assertEqual(item["object_level_label"], declared.object_level.label)
+        self.assertEqual(item["level"], custom_enum.IssueLevelEnum.LOW.value, "级别是覆盖项，必须取库里的值")
+
+    def test_orphan_code_is_not_listed(self):
+        """库里留着、已不在代码声明中的规则不进清单（design D6）"""
+        models.AnalysisRule.objects.create(
+            code="removed_rule",
+            name="已删除的规则",
+            level=custom_enum.IssueLevelEnum.LOW.value,
+            object_level=custom_enum.ObjectLevelEnum.TABLE.value,
+        )
+        self.assertNotIn("removed_rule", [row["code"] for row in self.catalog()])
+        self.assertTrue(models.AnalysisRule.objects.filter(code="removed_rule").exists(), "孤儿行保留，不做删除")
+
+    # ------------------------------------------------------------------
+    # 修改：按 code 定位；库里没有时自动建行
+    # ------------------------------------------------------------------
+
+    def test_update_creates_the_row_on_first_change(self):
+        payload = self.client.put(f"{self.URL}/big_table", {"level": 3}, format="json").json()
+        self.assertEqual(payload["code"], 2000)
         self.assertEqual(payload["data"]["level"], 3)
-        self.assertTrue(payload["data"]["is_overridden"], "改过之后应当标记为已偏离默认值")
+        self.assertTrue(payload["data"]["is_overridden"])
+        self.assertEqual(models.AnalysisRule.objects.filter(code="big_table").count(), 1)
+
+    def test_second_update_reuses_the_same_row(self):
+        self.client.put(f"{self.URL}/big_table", {"level": 3}, format="json")
+        self.client.put(f"{self.URL}/big_table", {"enabled": False}, format="json")
+        rows = models.AnalysisRule.objects.filter(code="big_table", is_deleted=False)
+        self.assertEqual(rows.count(), 1)
+        self.assertEqual(rows.first().level, 3)
+        self.assertFalse(rows.first().enabled)
+
+    def test_retrieve_by_code(self):
+        payload = self.client.get(f"{self.URL}/big_table").json()
+        self.assertEqual(payload["code"], 2000)
+        self.assertEqual(payload["data"]["code"], "big_table")
 
     def test_reset_restores_defaults(self):
-        self.sync()
-        rid = self.rule_id("big_table")
         self.client.put(
-            f"{self.URL}/{rid}", {"enabled": False, "level": 3, "thresholds": {"big_table_rows": 7}}, format="json"
+            f"{self.URL}/big_table", {"enabled": False, "level": 3, "thresholds": {"big_table_rows": 7}}, format="json"
         )
-        payload = self.client.post(f"{self.URL}/{rid}/reset").json()
+        payload = self.client.post(f"{self.URL}/big_table/reset").json()
         declared = registry.get_rule("big_table")
         self.assertTrue(payload["data"]["enabled"])
         self.assertEqual(payload["data"]["level"], declared.default_level.value)
         self.assertEqual(payload["data"]["thresholds"], declared.default_thresholds)
         self.assertFalse(payload["data"]["is_overridden"])
 
+    def test_reset_on_untouched_rule_is_rejected(self):
+        """没有可恢复的覆盖项时如实报错，而不是悄悄建一行再抹掉"""
+        payload = self.client.post(f"{self.URL}/big_table/reset").json()
+        self.assertEqual(payload["code"], 4000)
+        self.assertFalse(models.AnalysisRule.objects.exists())
+
+    # ------------------------------------------------------------------
+    # 校验与拒绝
+    # ------------------------------------------------------------------
+
     def test_unknown_threshold_key_is_rejected(self):
         """写错键名不会报错、只会静默不生效，是这类配置最难排查的问题，必须拦下"""
-        self.sync()
-        payload = self.client.put(
-            f"{self.URL}/{self.rule_id('big_table')}", {"thresholds": {"big_table_row": 7}}, format="json"
-        ).json()
+        payload = self.client.put(f"{self.URL}/big_table", {"thresholds": {"big_table_row": 7}}, format="json").json()
         self.assertEqual(payload["code"], 4000)
         self.assertIn("big_table_row", payload["message"])
 
     def test_non_numeric_threshold_is_rejected(self):
-        self.sync()
         payload = self.client.put(
-            f"{self.URL}/{self.rule_id('big_table')}", {"thresholds": {"big_table_rows": "很多"}}, format="json"
+            f"{self.URL}/big_table", {"thresholds": {"big_table_rows": "很多"}}, format="json"
         ).json()
         self.assertEqual(payload["code"], 4000)
 
     def test_invalid_level_is_rejected(self):
-        self.sync()
-        payload = self.client.put(f"{self.URL}/{self.rule_id('big_table')}", {"level": 99}, format="json").json()
+        payload = self.client.put(f"{self.URL}/big_table", {"level": 99}, format="json").json()
         self.assertEqual(payload["code"], 4000)
 
     def test_empty_body_is_rejected(self):
-        self.sync()
-        payload = self.client.put(f"{self.URL}/{self.rule_id('big_table')}", {}, format="json").json()
+        payload = self.client.put(f"{self.URL}/big_table", {}, format="json").json()
         self.assertEqual(payload["code"], 4000)
 
     def test_unknown_rule_returns_not_found(self):
-        payload = self.client.put(f"{self.URL}/999999", {"level": 3}, format="json").json()
+        payload = self.client.put(f"{self.URL}/no_such_rule", {"level": 3}, format="json").json()
         self.assertEqual(payload["code"], 4004)
 
     def test_create_is_rejected(self):
@@ -621,21 +674,27 @@ class AnalysisRuleApiTests(TestCase):
         self.assertEqual(payload["code"], 4000)
 
     def test_destroy_is_rejected(self):
-        self.sync()
-        payload = self.client.delete(f"{self.URL}/{self.rule_id('big_table')}").json()
+        self.client.put(f"{self.URL}/big_table", {"level": 3}, format="json")
+        payload = self.client.delete(f"{self.URL}/big_table").json()
         self.assertEqual(payload["code"], 4000)
         self.assertTrue(models.AnalysisRule.objects.filter(code="big_table", is_deleted=False).exists())
 
+    def test_sync_action_is_removed(self):
+        """「同步」已随清单换基底一并移除：它不再是查看规则的前置动作"""
+        self.assertFalse(hasattr(views.AnalysisRuleView, "sync"))
+
+    # ------------------------------------------------------------------
+    # 端到端
+    # ------------------------------------------------------------------
+
     def test_disabling_a_rule_through_the_api_stops_it_from_producing_issues(self):
-        """端到端：接口停用一条规则 → 分析不再产出它。这是本变更的核心收益"""
-        self.sync()
-        self.client.put(f"{self.URL}/{self.rule_id('no_primary_key')}", {"enabled": False}, format="json")
+        """端到端：接口停用一条规则 → 分析不再产出它。这是本次改动的核心收益"""
+        self.client.put(f"{self.URL}/no_primary_key", {"enabled": False}, format="json")
         runner = analyzer.CatalogAnalyzer(_snapshot([_table("no_pk", primary_key=None)]))
         self.assertNotIn("no_primary_key", [item["rule_code"] for item in runner.analyze()])
 
     def test_summary_reports_evaluated_and_enabled_rule_counts(self):
         """两者不一致才说明规则集在采集之后被改过——只报一个数就看不出变化"""
-        self.sync()
         datasource = models.Datasource.objects.create(
             name="ds",
             db_type=custom_enum.DbTypeEnum.POSTGRESQL.value,
