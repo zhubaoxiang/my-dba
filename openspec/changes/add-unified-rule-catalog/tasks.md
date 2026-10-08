@@ -57,7 +57,7 @@
 - [x] 7.3 `cd static && npm run build`
 - [x] 7.4 `ENV_TYPE=test python manage.py test apps.datasource apps.knowledge apps.overview apps.sqlanalysis`（386 passed）
 - [x] 7.5 **真实接口核对**：库为空时 `GET /v1/analysis-rule` 返回 7 条（`id` 为 null）；`GET /v1/sql-analysis/rules` 返回 18 条（5 条 `needs_schema`）；PUT 未落库规则自动建行且复用同一行；reset 未调整规则报 4000；未知 code 报 4004
-- [ ] 7.6 **真实页面核对**：两个 Tab 可见，SQL Tab 无任何可操作控件
+- [x] 7.6 **真实页面核对**：两个 Tab 可见且标签带条数；SQL Tab 无任何可操作控件；「说明」列两 Tab 都有；库表组「操作」列为 `[开关] 恢复默认`
 - [x] 7.7 `openspec validate add-unified-rule-catalog --strict --no-interactive`
 
 ## 8. 修订：库中的副本不再参与读取
