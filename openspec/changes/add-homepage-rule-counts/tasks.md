@@ -14,7 +14,7 @@
 
 ## 3. 前端
 
-- [x] 3.1 知识库之后、页脚之前新增「分析规则」块，并列两个条目数
+- [x] 3.1 概览数字带新增两格（库表规则 / SQL 规则），各一个大数字 + 独立标签
 - [x] 3.2 库表规则那格给到 `/datasource/rules` 的入口；SQL 规则暂无清单页，只给数（design D5）
 - [x] 3.3 取不到时显示占位符而非 0
 - [x] 3.4 `npm run build` 通过
@@ -32,3 +32,14 @@
 - [x] 5.4 `ENV_TYPE=test python manage.py test apps.datasource apps.knowledge apps.overview apps.sqlanalysis`
 - [x] 5.5 **真实接口核对**：`GET /my-dba/v1/overview` 返回 `rules` 块且条数为 7 / 18
 - [x] 5.6 `openspec validate add-homepage-rule-counts --strict --no-interactive`
+
+## 6. 修订：规则概况由「并成一格」改为「并排两格」
+
+初版把两个规则数并进数字带第 4 格（`7 · 18` + 标签「分析规则 · 库表 / SQL」）。实测两个数被读成一个怪数字、标签过密，**太不明显**——诉求「让系统的判断标准可见」没达成。改为第 4、5 两格。
+
+- [x] 6.1 `home/index.vue`：第 4 格拆成两个 `.stat`，标签分别为「库表规则」「SQL 规则」
+- [x] 6.2 `.summary` 栅格 `repeat(4, …)` → `repeat(5, …)`
+- [x] 6.3 `docs/overview.md`：结构图改 5 格，「分析规则」整段改述
+- [x] 6.4 design.md D2 改写为「并排两格」
+- [x] 6.5 校验：`npm run build`、`python .ci/custom-checks/scaffold_check.py`、`ruff check`、`openspec validate add-homepage-rule-counts --strict --no-interactive`
+- [ ] 6.6 真实页面核对：数字带 5 格；库表规则 7 带入口、SQL 规则 18 不带

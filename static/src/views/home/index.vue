@@ -45,15 +45,18 @@
         <div class="stat-value">{{ dash(summary.knowledge_base_total) }}</div>
         <div class="stat-label">知识库 · {{ dash(summary.document_total) }} 篇文档</div>
       </div>
-      <!-- 分析规则：系统的判断标准有多细。两个数并排在一格，用 · 而非 / ——
-           它们不是比值关系，用斜杠会读成「7 分之 18」 -->
+      <!-- 分析规则：系统的判断标准有多细。两类规则各占一格——挤在一格里时
+           两个数会被读成一个怪数字（7·18），标签也密到不像标签 -->
       <div class="stat">
-        <div class="stat-value">
-          {{ dash(rules.datasource_total) }}<span class="slash">·</span>{{ dash(rules.sql_total) }}
-        </div>
-        <div class="stat-label">分析规则 · 库表 / SQL</div>
+        <div class="stat-value">{{ dash(rules.datasource_total) }}</div>
+        <div class="stat-label">库表规则</div>
         <el-button class="stat-link" link type="primary" size="small"
           @click="router.push('/datasource/rules')">查看规则清单</el-button>
+      </div>
+      <!-- SQL 规则没有清单页可去（design D5），只给数，不做一个指向不存在地方的链接 -->
+      <div class="stat">
+        <div class="stat-value">{{ dash(rules.sql_total) }}</div>
+        <div class="stat-label">SQL 规则</div>
       </div>
     </div>
 
@@ -571,10 +574,10 @@ onMounted(load)
   margin-top: 4px;
 }
 
-/* 概览数字带 */
+/* 概览数字带。5 格：库·在线 / 问题合计 / 知识库 / 库表规则 / SQL 规则 */
 .summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 20px;
 }
