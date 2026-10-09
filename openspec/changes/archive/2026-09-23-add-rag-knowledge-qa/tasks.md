@@ -117,7 +117,7 @@
 - [x] 9.2 更新 `README.md`：新增「已实现：知识问答」章节（数据表、API 清单、三种模式、重复来源检测、`[knowledge]` 配置项、**部署前提与已知限制**），并把路线图与目录结构同步
 - [x] 9.3 更新 `openspec/project.md`：Domain Context 补充知识问答流程与**向量维度三方一致**的约束；External Dependencies 增加 Qdrant 与模型 API
 - [x] 9.4 整体验证全绿：`scaffold_check.py` ✅、`manage.py test` **88 项** ✅、`ruff check`/`format` ✅、`npm run build` ✅
-- [ ] 9.5 【**待你执行**】浏览器端到端走查：模型配置 → 知识库摄入 → 三种模式提问 → 来源可点开 → 回退提示可见。**这是人工确认项，自动化无法替代**
+- [x] 9.5 浏览器端到端走查：模型配置 → 知识库摄入 → 三种模式提问 → 来源可点开 → 回退提示可见。**人工确认项，自动化无法替代**——已由项目负责人走查通过（2026-10-09 确认）
 - [x] 9.6 规则自查：模型继承 `AbstractTimeFiledModel` ✅、`db_table` 全部显式 ✅、4 个 ViewSet 均继承 `baseviews.AnyLogin` ✅、路由全部注册 ✅；枚举走 `custom_enum`、DDL 写 `pg_struct.sql`/`patch.sql`、新依赖均先评估
 
 ## 依赖关系说明
