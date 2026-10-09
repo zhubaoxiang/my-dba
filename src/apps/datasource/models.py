@@ -143,17 +143,21 @@ class AnalysisRule(AbstractTimeFiledModel):
     """
     分析规则的可覆盖项
 
-    规则清单与默认值来自代码声明（apps/datasource/rules/），本表只存运行时可改的部分：
-    启用开关、严重级别、阈值。库中无对应 code 的记录时，分析使用代码声明的默认值。
+    规则的清单、名称、说明与默认值**全部来自代码声明**（apps/datasource/rules/），本表只存
+    运行时可改的三项：启用开关、严重级别、阈值。库中无对应 `code` 的记录时，分析使用代码
+    声明的默认值。
+
+    本表曾经还有 `name` / `description` / `object_level` 三列，是早期「同步」动作刷新的
+    **声明副本**。同步移除、清单改为一律取声明之后它们不再被读取，遂随 DDL 删除。
+
+    **不要把这三列加回来。** 副本与声明并存就是这个 bug 的成因：在代码里给规则改名之后，
+    只要它被调整过，清单里就永远显示库里的旧名字。
     """
 
     # 唯一性由 db 的部分唯一索引保证（未删除范围内唯一），与 Datasource.name 一致，
     # 避免软删除后同 code 无法重建
     code = models.CharField(max_length=64, verbose_name="规则标识")
-    name = models.CharField(max_length=128, default="", blank=True, verbose_name="规则名称")
-    description = models.CharField(max_length=512, default="", blank=True, verbose_name="规则说明")
     level = models.SmallIntegerField(choices=custom_enum.IssueLevelEnum.choices, verbose_name="严重级别")
-    object_level = models.SmallIntegerField(choices=custom_enum.ObjectLevelEnum.choices, verbose_name="适用层级")
     enabled = models.BooleanField(default=True, verbose_name="是否启用")
     thresholds = models.JSONField(default=dict, verbose_name="阈值")
 

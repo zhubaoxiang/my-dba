@@ -78,11 +78,10 @@ DDL 见 `src/sql/pg_struct.sql`（全量）与 `src/sql/patch.sql`（增量）�
 | `connect_timeout` | 连接超时（秒） |
 | `statement_timeout` | 语句超时（秒） |
 | `exact_count` | 是否用 `COUNT(*)` 取精确行数，默认 `false`（改用估算值，避免拖垮大表） |
-| `big_table_rows` / `big_table_size_mb` | 超大表判定阈值 |
-| `varchar_max_length` | 可疑超长 varchar 的判定长度 |
-| `unused_index_min_rows` | 判定未使用索引所需的最小表行数 |
 
-> 阈值将在「分析规则注册表」改造完成后迁入规则表，`conf.ini` 只保留采集侧参数。改动 `conf.ini` **必须重启进程**（见 [architecture.md 的「配置层级」](architecture.md#配置层级)）。
+> **分析阈值不在 `conf.ini`。** 4 个阈值（`big_table_rows` / `big_table_size_mb` / `varchar_max_length` / `unused_index_min_rows`）已在「分析规则注册表」改造中迁入规则注册表，见下方[「阈值」](#阈值)——它们是业务策略，必须能运行时调整，而 `conf.ini` 改完还得重启。
+
+改动 `conf.ini` **必须重启进程**（见 [architecture.md 的「配置层级」](architecture.md#配置层级)）。
 
 ## 安全说明
 
@@ -121,7 +120,7 @@ analysis_rule 表
 
 > 早期的「同步规则」按钮已随清单换基底一并移除：它原本的职责是「让页面有数据」，而这件事现在不再需要它。
 
-**库里那三列（`name` / `description` / `object_level`）不再被读取。** 它们原是「同步」刷新的副本，同步移除后无人刷新；继续读它们，在代码里改过的名字就会**永远显示成旧的**（实测确认过）。所以清单里这三项一律取声明，只有 `enabled` / `level` / `thresholds` 取库里的行——**声明与副本冲突时，声明是对的**。
+**表里只有 `code` / `level` / `enabled` / `thresholds`。** 它曾经还有 `name` / `description` / `object_level` 三列，是「同步」动作刷新的**声明副本**。副本与声明并存会导致「在代码里给一条规则改名之后，清单里永远显示旧名字」（已起服务实测复现），故随 DDL 删除。清单里这三项一律取声明，只有那三项取库里的行。
 
 ### 规则管理接口
 
@@ -152,17 +151,25 @@ analysis_rule 表
 
 职责划分：采集参数是运行时基础设施配置，改完重启可以接受；分析阈值是业务策略，必须能运行时调整且可审计。
 
-> **待办**：`conf.ini` 的 4 个分析阈值项尚未删除（`big_table_rows` / `big_table_size_mb` / `varchar_max_length` / `unused_index_min_rows`）。代码已不再读取它们，但留着会形成「改了不生效」的双源陷阱。
-
-> **待办**：库结构补丁需要执行——`metadata_snapshot` 的 `evaluated_rules` 列尚未应用到 `dba` / `test`。执行方式：
+> **部署注意**：`patch.sql` 里与规则注册表相关的两条是——
+>
+> 1. `metadata_snapshot` 补 `evaluated_rules`（用于察觉规则集在采集之后被改过）
+> 2. `analysis_rule` 删 `name` / `description` / `object_level` 三列
+>
+> **`dba` 与 `test` 已于 2026-10-09 执行完毕**（核实过两库的列与 `pg_struct.sql` 完全一致）。**其他环境（含生产）上线时**照跑：
 >
 > ```bash
 > # 已有数据的库执行增量补丁（新库直接执行 pg_struct.sql 即可）
 > psql "postgresql://<用户>:<密码>@<主机>:<端口>/<库名>" -f src/sql/patch.sql
 > ```
 >
-> 补丁会给 `catalog_issue` 补 `rule_code` / `rule_name` / `object_level` / `schema_name` 并删除 `issue_type`，给 `metadata_snapshot` 补 `evaluated_rules`。旧问题行因 `rule_code` 为空属失效数据，确认可清空后手动执行 `DELETE FROM catalog_issue;`（该语句只写在 `patch.sql` 注释里，不会自动执行）。
-
-> **待办**：`analysis_rule` 的 `name` / `description` / `object_level` 三列已无用途（不再被读取，只有建行时写一次），随下一次库结构补丁一并删除。删完 `analysis_rule` 就只剩 `code` / `enabled` / `level` / `thresholds`——一张没有任何副本、不会过期的覆盖表。**与上面 `evaluated_rules` 那条一起执行**，不单独占一次 DDL 往返。
-
-> SQL 分析能力（`add-sql-analysis`）排在本变更之后，届时会给注册表增加 scope 维度，使同一个管理页承载语句级规则。
+> 该补丁还给 `catalog_issue` 补过 `rule_code` / `rule_name` / `object_level` / `schema_name` 并删除 `issue_type`。旧问题行因 `rule_code` 为空属失效数据，确认可清空后手动执行 `DELETE FROM catalog_issue;`（该语句只写在 `patch.sql` 注释里，不会自动执行）。
+>
+> ⚠️ 第 2 条删列与代码是**双向依赖，必须同时上线**，顺序怎么排都有一边会断（实测确认过）：
+>
+> - **补丁先跑、代码没上** → 旧代码仍声明那三个字段，`SELECT ... name` 报 `column analysis_rule.name does not exist`
+> - **代码先上、补丁没跑** → 新代码不再写 `object_level`，而旧表结构里它是 `NOT NULL` **且无默认值**，建行时直接 `IntegrityError: null value in column "object_level" ... violates not-null constraint`
+>
+> 注意**测试跑不出第二个问题**：测试库是拿最新 `pg_struct.sql` 现建的，本来就没有那三列，只有真实环境才走得到「新代码 + 旧表」这条路。
+>
+> 若将来需要零停机切换，可以把它拆成三步：先 `ALTER COLUMN object_level SET DEFAULT 0`（新旧代码都能跑）→ 发代码 → 再删三列。本项目按 docker compose 整体替换，直接同时上即可。

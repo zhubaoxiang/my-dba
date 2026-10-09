@@ -274,3 +274,21 @@ CREATE INDEX IF NOT EXISTS idx_datasource_metric_ds ON datasource_metric (dataso
 -- 取「最近 24 小时趋势」要单独一条：那条查询跨全部数据源按时间过滤，首列是
 -- datasource_id 的复合索引带不动它，实测会退化成全表扫描（130k 行 → 72 个堆块）
 CREATE INDEX IF NOT EXISTS idx_datasource_metric_time ON datasource_metric (create_time DESC);
+
+
+-- ============================================================
+-- analysis_rule 删除声明副本三列（openspec: add-unified-rule-catalog 的收尾）
+-- ============================================================
+
+-- name / description / object_level 是早期「同步」动作刷新的**代码声明副本**。
+-- 「同步」已随规则清单换基底一并移除，清单一律取代码声明（registry._declared_view），
+-- 这三列从此只写不读。副本与声明并存正是这个 bug 的成因：在代码里给规则改名之后，
+-- 只要它被调整过，清单里就永远显示库里的旧名字（已实测复现）。
+--
+-- 删除后本表只剩 code / level / enabled / thresholds + 时间戳，没有任何会过期的副本。
+-- models.AnalysisRule 已同步去掉这三个字段；序列化器显式声明了 name / description，
+-- 由注册表在读取时注入——**不要只回滚本补丁而不回滚代码**。
+
+ALTER TABLE analysis_rule DROP COLUMN IF EXISTS name;
+ALTER TABLE analysis_rule DROP COLUMN IF EXISTS description;
+ALTER TABLE analysis_rule DROP COLUMN IF EXISTS object_level;

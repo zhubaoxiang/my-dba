@@ -118,10 +118,7 @@ CREATE INDEX IF NOT EXISTS idx_catalog_issue_datasource ON catalog_issue (dataso
 CREATE TABLE IF NOT EXISTS analysis_rule (
     id            serial       PRIMARY KEY,
     code          varchar(64)  NOT NULL,
-    name          varchar(128) NOT NULL DEFAULT '',
-    description   varchar(512) NOT NULL DEFAULT '',
     level         smallint     NOT NULL,
-    object_level  smallint     NOT NULL,
     enabled       boolean      NOT NULL DEFAULT true,
     thresholds    jsonb        NOT NULL DEFAULT '{}'::jsonb,
     create_time   timestamp    NOT NULL DEFAULT now(),
@@ -130,10 +127,12 @@ CREATE TABLE IF NOT EXISTS analysis_rule (
     is_deleted    boolean      NOT NULL DEFAULT false
 );
 
-COMMENT ON TABLE analysis_rule IS '分析规则的可覆盖项，库中无记录时分析使用代码声明的默认值';
+-- 本表**只存运行时可改的三项**。名称、说明与适用层级一律取代码声明，不落库——
+-- 曾经有过这三列，是早期「同步」刷新的声明副本；副本与声明并存会导致「在代码里改名后
+-- 清单永远显示旧名字」，故随 DDL 删除。不要把它们加回来。
+COMMENT ON TABLE analysis_rule IS '分析规则的可覆盖项，只存 enabled / level / thresholds；无记录时分析使用代码声明的默认值';
 COMMENT ON COLUMN analysis_rule.code IS '规则稳定标识，与代码声明中的 RuleDefinition.code 对应';
 COMMENT ON COLUMN analysis_rule.level IS '严重级别：1=高 2=中 3=低';
-COMMENT ON COLUMN analysis_rule.object_level IS '适用层级：1=库 2=模式 3=表 4=列';
 COMMENT ON COLUMN analysis_rule.thresholds IS '该规则的判定阈值，键名与代码声明中的 default_thresholds 一致';
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_analysis_rule_code ON analysis_rule (code) WHERE is_deleted = false;

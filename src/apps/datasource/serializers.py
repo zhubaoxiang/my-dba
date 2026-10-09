@@ -133,8 +133,14 @@ class AnalysisRuleSerializer(serializers.ModelSerializer):
 
     级别与层级同时给出值、标签与「是否与代码声明不一致」，前端不必再维护一份枚举映射，
     也能据此判断「恢复默认」是否有意义。
+
+    `name` 与 `description` **必须显式声明**：库里已无这两列（随 DDL 删除），它们来自
+    代码声明、由 `rules.registry` 在读取时注入实例。不显式声明的话，ModelSerializer
+    按模型字段生成，这两个字段就会从响应里消失（「说明」列随之空掉）。
     """
 
+    name = serializers.CharField()
+    description = serializers.CharField()
     create_time = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S")
     level_label = serializers.SerializerMethodField(label="严重级别")
     object_level_label = serializers.SerializerMethodField(label="适用层级")

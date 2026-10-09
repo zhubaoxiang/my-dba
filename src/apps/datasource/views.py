@@ -377,15 +377,10 @@ class AnalysisRuleView(baseviews.AnyLogin):
         """
         为「库里还没有」的规则建行时的初值：一律取代码声明的默认值
 
-        `name` / `description` / `object_level` 这三列**已不再被读取**（清单一律取代码声明，
-        见 `registry._declared_view`），但它们仍存在于表中（`object_level` 还是非空列），
-        故建行时照旧填上。待这几列随 DDL 删除后，这里只剩 enabled / level / thresholds / creator。
+        表里只存可覆盖的三项——名称、说明与适用层级不落库，那是代码声明的事。
         """
         return {
-            "name": declared.name,
-            "description": declared.description,
             "level": declared.default_level.value,
-            "object_level": declared.object_level.value,
             "enabled": True,
             "thresholds": dict(declared.default_thresholds),
             "creator": creator,
@@ -426,7 +421,8 @@ class AnalysisRuleView(baseviews.AnyLogin):
             if field in data:
                 setattr(instance, field, data[field])
         instance.save()
-        return baseviews.ResponseOK(self.get_serializer(instance).data)
+        # 走「声明 ⊕ 覆盖」的统一出口：名称与说明不在表里，得由注册表注入后序列化器才拿得到
+        return baseviews.ResponseOK(self.get_serializer(registry.declared_row(code)).data)
 
     def partial_update(self, request, *args, **kwargs):
         return self.update(request, *args, **kwargs)
@@ -458,4 +454,4 @@ class AnalysisRuleView(baseviews.AnyLogin):
         instance.level = declared.default_level.value
         instance.thresholds = dict(declared.default_thresholds)
         instance.save(update_fields=["enabled", "level", "thresholds", "update_time"])
-        return baseviews.ResponseOK(self.get_serializer(instance).data)
+        return baseviews.ResponseOK(self.get_serializer(registry.declared_row(code)).data)

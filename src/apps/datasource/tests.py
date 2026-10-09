@@ -472,9 +472,7 @@ class RuleRegistryDbTests(TestCase):
     def make_rule(self, **kwargs):
         defaults = {
             "code": "big_table",
-            "name": "超大表",
             "level": custom_enum.IssueLevelEnum.MEDIUM.value,
-            "object_level": custom_enum.ObjectLevelEnum.TABLE.value,
             "enabled": True,
         }
         return models.AnalysisRule.objects.create(**{**defaults, **kwargs})
@@ -505,7 +503,7 @@ class RuleRegistryDbTests(TestCase):
         self.assertEqual(self.effective("big_table").level, registry.get_rule("big_table").default_level)
 
     def test_disabled_rule_is_skipped_by_the_analyzer(self):
-        self.make_rule(code="no_primary_key", name="无主键表", enabled=False)
+        self.make_rule(code="no_primary_key", enabled=False)
         runner = analyzer.CatalogAnalyzer(_snapshot([_table("no_pk", primary_key=None)]))
         self.assertNotIn("no_primary_key", self.codes(runner.analyze()))
         self.assertNotIn("no_primary_key", runner.evaluated_rules)
@@ -568,34 +566,34 @@ class AnalysisRuleApiTests(TestCase):
         self.assertEqual(item["level"], 3)
         self.assertTrue(item["is_overridden"])
 
-    def test_db_copies_never_shadow_the_declaration(self):
+    def test_catalog_metadata_comes_from_the_declaration(self):
         """
-        库里的 name / description / object_level 只是历史副本，清单必须一律取代码声明
+        名称、说明与适用层级一律取代码声明；级别 / 启用 / 阈值取库里的覆盖值
 
-        这三列原先由「同步」刷新，同步移除后无人刷新。若读它们，代码里改过的名字会永远
-        显示成旧的——这条用例把库里的副本改乱，清单仍须给出声明的值。
+        那三列**已不在表里**（随 DDL 删除），由注册表注入实例后交给序列化器。这条用例
+        同时守住「序列化器必须显式声明 name / description」——模型没这两个字段，
+        ModelSerializer 不显式声明就不会输出它们，「说明」列会整列空掉。
         """
-        models.AnalysisRule.objects.create(
-            code="big_table",
-            name="★库里的旧名字★",
-            description="★库里的旧说明★",
-            level=custom_enum.IssueLevelEnum.LOW.value,
-            object_level=custom_enum.ObjectLevelEnum.COLUMN.value,
-        )
+        self.client.put(f"{self.URL}/big_table", {"level": 3}, format="json")
         item = next(row for row in self.catalog() if row["code"] == "big_table")
         declared = registry.get_rule("big_table")
         self.assertEqual(item["name"], declared.name)
         self.assertEqual(item["description"], declared.description)
         self.assertEqual(item["object_level_label"], declared.object_level.label)
-        self.assertEqual(item["level"], custom_enum.IssueLevelEnum.LOW.value, "级别是覆盖项，必须取库里的值")
+        self.assertEqual(item["level"], 3, "级别是覆盖项，必须取库里的值")
+
+    def test_update_response_carries_the_declared_name_and_description(self):
+        """PUT 的响应也走「声明 ⊕ 覆盖」出口：名称与说明不在表里，漏了注入响应就会缺字段"""
+        payload = self.client.put(f"{self.URL}/big_table", {"level": 3}, format="json").json()
+        declared = registry.get_rule("big_table")
+        self.assertEqual(payload["data"]["name"], declared.name)
+        self.assertEqual(payload["data"]["description"], declared.description)
 
     def test_orphan_code_is_not_listed(self):
         """库里留着、已不在代码声明中的规则不进清单（design D6）"""
         models.AnalysisRule.objects.create(
             code="removed_rule",
-            name="已删除的规则",
             level=custom_enum.IssueLevelEnum.LOW.value,
-            object_level=custom_enum.ObjectLevelEnum.TABLE.value,
         )
         self.assertNotIn("removed_rule", [row["code"] for row in self.catalog()])
         self.assertTrue(models.AnalysisRule.objects.filter(code="removed_rule").exists(), "孤儿行保留，不做删除")
@@ -779,12 +777,12 @@ class CatalogIssueApiTests(TestCase):
         快照不可变：历史问题用自身行里快照下来的 `rule_name` 渲染，
         规则停用或改名后仍能正确展示（design.md D6）
         """
+        # 快照里记的是「无主键表（旧名）」，而代码声明现在叫「无主键表」——规则的名称只存在于
+        # 代码声明（库里已无 name 列），这两者的差值就代表「规则改过名」。
         self.add_issue("no_primary_key", "无主键表（旧名）")
         models.AnalysisRule.objects.create(
             code="no_primary_key",
-            name="改了名的规则",
             level=custom_enum.IssueLevelEnum.LOW.value,
-            object_level=custom_enum.ObjectLevelEnum.TABLE.value,
             enabled=False,
         )
         item = self.client.get(f"{self.CATALOG}/issues?snapshot_id={self.snapshot.id}").json()["data"]["results"][0]
