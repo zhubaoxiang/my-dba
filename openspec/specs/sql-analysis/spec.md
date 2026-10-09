@@ -181,3 +181,22 @@ TBD - created by archiving change add-sql-analysis. Update Purpose after archive
 - **WHEN** 页面同时展示规则判定与模型产出
 - **THEN** 两者 MUST 在视觉上分区，模型推测 MUST 带明确标注
 
+### Requirement: SQL 规则清单可见
+
+系统 SHALL 提供 SQL 分析规则的清单查询能力，使使用者**不需要绑定数据源、也不需要贴一条 SQL**，就能看到系统会检查哪些问题。清单 MUST 来源于 SQL 规则注册表的代码声明，MUST NOT 依赖任何数据库记录。每条规则 MUST 至少给出标识、名称与严重级别，并 MUST 标明该规则是否需要表结构才能判定。
+
+#### Scenario: 查询 SQL 规则清单
+
+- **WHEN** 请求 SQL 规则清单
+- **THEN** 系统返回全部 SQL 分析规则，每条含标识、名称、严重级别与是否需要表结构
+
+#### Scenario: 标明依赖表结构的规则
+
+- **WHEN** 清单中包含需要表结构才能判定的规则
+- **THEN** 该规则的「需要表结构」标记 MUST 为真，使使用者知道未绑定数据源时它不会被判定
+
+#### Scenario: 清单不受数据源影响
+
+- **WHEN** 系统内一个数据源都没有纳管时请求 SQL 规则清单
+- **THEN** 清单 MUST 照常返回全部规则，条数与非空时一致
+
