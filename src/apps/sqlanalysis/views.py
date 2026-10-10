@@ -15,7 +15,7 @@ from rest_framework.decorators import action
 
 from apps.base import baseviews
 from apps.datasource import services as datasource_services
-from apps.sqlanalysis import analyzer, explain, formatting, interpret, parse, schema, serializers, services
+from apps.sqlanalysis import explain, formatting, interpret, parse, serializers, services
 from utils import common, pagination
 from utils.logger import get_logger
 
@@ -50,49 +50,17 @@ class SqlAnalysisView(baseviews.StatelessView):
         return datasource_services.datasource_brief(datasource_id), None
 
     @staticmethod
-    def _syntax(result) -> dict:
-        return {
-            "ok": result.ok,
-            "statement_count": len(result.statements),
-            "statements": [
-                {"index": item.index, "kind": item.kind.value, "kind_label": item.kind.label, "sql": item.sql}
-                for item in result.statements
-            ],
-            "errors": [dict(item) for item in result.errors],
-        }
-
-    @staticmethod
-    def _syntax_note(result) -> str:
+    def _syntax_note(syntax: dict) -> str:
         """
         解析失败时给模型的补充信息
 
         规则一条都跑不了，而模型对语法错误往往**最有帮助**，所以哪怕没判出问题也要把位置告诉它。
         """
-        if result.ok or not result.errors:
+        if syntax.get("ok") or not syntax.get("errors"):
             return ""
-        first = result.errors[0]
+        first = syntax["errors"][0]
         where = f"第 {first['line']} 行第 {first['col']} 列" if first.get("line") else "位置未知"
         return f"该 SQL 解析失败（{where}）：{first['description']}"
-
-    @staticmethod
-    def _schema_check(index, skipped_reason: str = "") -> dict:
-        """
-        结构校验的结果说明
-
-        **未做校验时必须说明原因**——让使用者以为校验过了比不校验更糟。
-        """
-        if index is None:
-            return {"performed": False, "note": skipped_reason, "table_count": 0}
-        return {"performed": True, "note": "", "table_count": len(index.tables)}
-
-    def _load_index(self, datasource_id):
-        """
-        取表结构索引；拿不到时返回 (None, 说明)
-        """
-        try:
-            return schema.load_schema_index(datasource_id), ""
-        except schema.SchemaUnavailable as exc:
-            return None, str(exc)
 
     @action(detail=False, methods=["POST"], url_path="format")
     def format_sql(self, request):
@@ -115,16 +83,17 @@ class SqlAnalysisView(baseviews.StatelessView):
                 "sql": sql,
                 "dialect": dialect or "",
                 "formatted": formatting.format_sql(sql, dialect),
-                "syntax": self._syntax(result),
+                "syntax": services.syntax_of(result),
             }
         )
 
     @action(detail=False, methods=["POST"], url_path="analyze")
     def analyze(self, request):
         """
-        解析、格式化、规则判定、结构校验与模型解读
+        解析、规则判定与结构校验
 
         解析失败**不是整体失败**：仍返回语法错误与原始语句，规则与结构校验标记为未进行。
+        结果由 `services.analyze_sql` 产出——本视图只做入参校验与数据源解析。
         """
         serializer = serializers.SqlAnalyzeSerializer(data=request.data)
         if not serializer.is_valid():
@@ -139,41 +108,7 @@ class SqlAnalysisView(baseviews.StatelessView):
         # 方言：显式指定的优先，其次按数据源的库类型推断，都没有则用默认
         dialect = data.get("dialect") or (brief or {}).get("db_type")
 
-        sql = data["sql"]
-        result = parse.parse_sql(sql, dialect)
-        issues = []
-        runner = None
-        skipped_rules = 0
-
-        if result.ok:
-            index, skipped = self._load_index(datasource_id)
-            runner = analyzer.SqlAnalyzer(result, sql=sql, dialect=dialect, schema=index)
-            issues = runner.analyze()
-            skipped_rules = len(runner.skipped_rules)
-            schema_check = self._schema_check(index, skipped)
-        else:
-            # 解析不了，规则一条都跑不了；但模型对语法错误往往最有帮助，解读照常进行
-            schema_check = self._schema_check(None, "SQL 未能解析，本次未做结构校验。")
-
-        return baseviews.ResponseOK(
-            {
-                "sql": sql,
-                "dialect": dialect or "",
-                # 格式化已拆成独立接口（format），这里不再返回——
-                # 分析回答「有没有问题」，格式化是另一件事
-                "syntax": self._syntax(result),
-                # 结论由后端按规则产出算出来，**不依赖模型**——「有没有明显问题」
-                # 任何时候都要有答案。解析失败与规则被跳过都要如实反映：
-                # 「没能分析」与「没有问题」是两回事
-                "verdict": analyzer.verdict_of(issues, parsed=result.ok, skipped_rules=skipped_rules),
-                "issues": issues,
-                "schema_check": schema_check,
-                # 模型解读不在这里返回：它是十几秒的外部调用，与毫秒级的规则判定绑在一个
-                # 请求里会让前者拖住后者，前端也会先超时。改由 interpret 接口单独请求
-                "evaluated_rules": list(runner.evaluated_rules) if runner else [],
-                "skipped_rules": list(runner.skipped_rules) if runner else [],
-            }
-        )
+        return baseviews.ResponseOK(services.analyze_sql(data["sql"], dialect=dialect, datasource_id=datasource_id))
 
     @action(detail=False, methods=["POST"], url_path="interpret")
     def interpret_sql(self, request):
@@ -199,14 +134,16 @@ class SqlAnalysisView(baseviews.StatelessView):
 
         dialect = data.get("dialect") or (brief or {}).get("db_type")
         sql = data["sql"]
-        result = parse.parse_sql(sql, dialect)
+        analysis = services.analyze_sql(sql, dialect=dialect, datasource_id=datasource_id)
 
-        issues = []
-        if result.ok:
-            index, _ = self._load_index(datasource_id)
-            issues = analyzer.SqlAnalyzer(result, sql=sql, dialect=dialect, schema=index).analyze()
-
-        return baseviews.ResponseOK(interpret.interpret(sql, issues, dialect, context_note=self._syntax_note(result)))
+        return baseviews.ResponseOK(
+            interpret.interpret(
+                sql,
+                analysis["issues"],
+                dialect,
+                context_note=self._syntax_note(analysis["syntax"]),
+            )
+        )
 
     @action(detail=False, methods=["POST"], url_path="execute")
     def execute(self, request):

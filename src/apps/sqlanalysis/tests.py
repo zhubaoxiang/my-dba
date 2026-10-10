@@ -1050,7 +1050,7 @@ class SqlAnalysisApiTests(TestCase):
         而这正是把它与分析拆开的理由
         """
         with (
-            mock.patch.object(views.analyzer.SqlAnalyzer, "analyze") as run_rules,
+            mock.patch.object(analyzer.SqlAnalyzer, "analyze") as run_rules,
             mock.patch.object(views.interpret, "interpret") as run_model,
         ):
             self.post("format", {"sql": "SELECT * FROM users"})
@@ -1079,7 +1079,7 @@ class SqlAnalysisApiTests(TestCase):
 
     def test_interpret_reruns_the_rules(self):
         """解读要重新跑一遍规则，才能保证只接受对应本次问题清单的解读"""
-        with mock.patch.object(views.analyzer.SqlAnalyzer, "analyze", return_value=[]) as run_rules:
+        with mock.patch.object(analyzer.SqlAnalyzer, "analyze", return_value=[]) as run_rules:
             self.post("interpret", {"sql": "SELECT * FROM users"})
         run_rules.assert_called_once()
 

@@ -28,7 +28,7 @@
 | **分析数据库表** | 「这个库/表长什么样？有没有坑？」 | ✅ 已实现（[文档](docs/datasource.md)） |
 | **知识问答**（RAG） | 「这个报错 / 概念 / 用法是什么？」 | ✅ 已实现（[文档](docs/knowledge-qa.md)） |
 | **分析 SQL** | 「我这条 SQL 写得对吗？会不会慢？」 | ✅ 已实现（[文档](docs/sql-analysis.md)） |
-| **自然语言转建表语句 / SQL** | 「按我说的建张表 / 写条查询」 | ⬜ 未开始 |
+| **自然语言转建表语句 / SQL** | 「按我说的建张表 / 写条查询」 | ✅ 已实现（[文档](docs/nl2sql.md)） |
 | 分析规则注册表（支撑） | 让分析规则可配置、可开关 | 🚧 进行中（[文档](docs/datasource.md#分析规则注册表)） |
 
 已确定的技术选型：数据源支持 PostgreSQL + MySQL；RAG 向量存储用独立的 Qdrant 服务；LLM 走公有云 API。
@@ -113,6 +113,7 @@ my-dba/
 | [docs/datasource.md](docs/datasource.md) | 分析数据库表：元数据采集、健康分析规则、API、配置、安全说明、已知限制 |
 | [docs/knowledge-qa.md](docs/knowledge-qa.md) | 知识问答：**架构与数据流**、摄入链路、问答链路、关键设计决策、数据模型、API、配置、实测踩坑 |
 | [docs/sql-analysis.md](docs/sql-analysis.md) | 分析 SQL：能力与规则清单、**执行边界**（只读真跑 / DML·DDL 只 EXPLAIN）、模型解读分区、API、配置 |
+| [docs/nl2sql.md](docs/nl2sql.md) | 说人话 → SQL 语句：**生成 → 校验 → 自修一轮**的机制、**生成与执行是两件事**、校验只覆盖结构这一限定、表范围的取舍、边界与降级、API |
 | [docs/development.md](docs/development.md) | 开发规范：新增模块、Model/ViewSet/Serializer/URL、日志、SQL、代码风格、测试与质量检查、已知问题 |
 | [docs/deployment.md](docs/deployment.md) | 部署：镜像构建、compose 编排的两个坑、数据库初始化、生产运行方式、平台化部署备查 |
 

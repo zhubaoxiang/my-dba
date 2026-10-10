@@ -167,6 +167,16 @@ observations[]  模型推测      规则没覆盖到的观察，**未经规则�
 
 均走对方模块声明的服务函数，不直接查其 model。
 
+**本模块对外提供**（给别的模块用的只读契约，同样声明在 `services.py` 里）：
+
+| 契约 | 用途 |
+|------|------|
+| `services.rule_counts()` / `services.list_rules()` | SQL 规则的条数与清单（首页与规则清单页） |
+| `services.analyze_sql(sql, dialect, datasource_id)` | 解析 + 规则判定 + 结构校验。**`nl2sql` 用它校验生成的语句**（[nl2sql.md](nl2sql.md)） |
+| `services.syntax_of(parse_result)` | 解析结果的对外形态（`format` 与 `analyze` 共用） |
+
+`/sql-analysis/analyze` 与 `/sql-analysis/interpret` 都改走 `analyze_sql()`——视图层不再直接调本模块的 `parse` / `analyzer` / `schema`，别的模块更不该。
+
 ## 已知限制
 
 - **不落库**：分析结果不保存，无法对比改写前后的结果（需自行复制）

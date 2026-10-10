@@ -45,6 +45,12 @@ const routes = [
         meta: { title: 'SQL 分析', icon: 'MagicStick', showInMenu: true }
       },
       {
+        path: 'nl2sql',
+        name: 'Nl2Sql',
+        component: () => import('@/views/nl2sql/index.vue'),
+        meta: { title: 'SQL 生成', icon: 'EditPen', showInMenu: true }
+      },
+      {
         path: 'knowledge/qa',
         name: 'KnowledgeQa',
         component: () => import('@/views/knowledge/qa.vue'),

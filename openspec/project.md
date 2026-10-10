@@ -10,12 +10,12 @@
 
 | # | 能力 | 状态 |
 |---|------|------|
-| 1 | RAG 知识问答（无配置时回退通用大模型） | 未开始（规划 `add-rag-knowledge-qa`） |
-| 2 | 自然语言转建表语句 / SQL | 未开始（规划 `add-nl2sql`） |
-| 3 | SQL 规范与性能分析 | 未开始（规划 `add-sql-analysis`） |
-| 4 | 数据源对接与库表分析 | 已提案（`add-datasource-catalog`） |
+| 1 | RAG 知识问答（无配置时回退通用大模型） | 已实现（`add-rag-knowledge-qa`） |
+| 2 | 自然语言转建表语句 / SQL | 已实现（`add-nl2sql`，待归档）——生成查询、修改与 DDL；**只生成不执行** |
+| 3 | SQL 规范与性能分析 | 已实现（`add-sql-analysis`） |
+| 4 | 数据源对接与库表分析 | 已实现（`add-datasource-catalog`） |
 
-已确定的外部技术选型：数据源支持 PostgreSQL + MySQL；RAG 向量存储用 pgvector（复用现有 PG）；LLM 走公有云 API。
+已确定的外部技术选型：数据源支持 PostgreSQL + MySQL；RAG 向量存储用**独立的 Qdrant 服务**；LLM 走公有云 API。
 
 ## Tech Stack
 
