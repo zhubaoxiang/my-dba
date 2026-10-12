@@ -48,7 +48,11 @@
                 <div class="fix-caveat">⚠ {{ row.fix.caveat }}</div>
               </template>
 
-              <div v-else-if="row.fix && row.fix.source === 'unsupported'" class="fix-hint">
+              <!-- 方言不支持、或判定依据不足（如「孤立表」）——**明确说明为什么不给**，不留白 -->
+              <div
+                v-else-if="row.fix && (row.fix.source === 'unsupported' || row.fix.source === 'advisory')"
+                class="fix-hint"
+              >
                 {{ row.fix.note }}
               </div>
 
@@ -136,16 +140,26 @@ function copyText(text) {
 }
 
 // **只复制模板生成的**——模型那些是建议，混进来会让人以为它们同等可靠。
+//
+// 每段都带上**问题说明与风险前提作为 SQL 注释**：前提是贴着语句的，拼接时把它丢掉，
+// 就等于产出一段「光秃秃的 DDL 脚本」——那恰恰是最危险的形态。
 // 只含本页：跨页拼一份「看起来像完整脚本」的东西，反而容易被整段执行。
 function copyPageFixes() {
-  const statements = rows.value
+  const blocks = rows.value
     .filter((row) => row.fix && row.fix.source === 'rule')
-    .map((row) => row.fix.sql)
-  if (!statements.length) {
+    .map((row) =>
+      [
+        `-- [${row.issue_level_label}] ${row.rule_name} · ${row.target}`,
+        `-- ${row.description}`,
+        `-- 前提：${row.fix.caveat}`,
+        row.fix.sql
+      ].join('\n')
+    )
+  if (!blocks.length) {
     ElMessage.warning('本页没有问题带修复语句')
     return
   }
-  copyText(statements.join('\n'))
+  copyText(blocks.join('\n\n'))
 }
 
 async function makeReference(row) {

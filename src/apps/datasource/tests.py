@@ -1217,9 +1217,16 @@ class FixTemplateTests(SimpleTestCase):
         self.assertIn("idx_old", fix["sql"])
         self.assertIn("业务周期", fix["caveat"])
 
-    def test_isolated_table(self):
+    def test_isolated_table_gets_no_statement(self):
+        """
+        **刻意不给语句**：`isolated_table` 判的是「没有外键」，而大量正常库根本不建外键
+        ——真机核对时某库 23 张表全被判成孤立，包括显然是业务表的那些。
+        「没有外键」与「没人用」之间隔着一整个业务上下文，而 `DROP TABLE` 不可逆。
+        """
         fix = self.fix(self.issue(rule_code="isolated_table", column_name=""))
-        self.assertIn("DROP TABLE", fix["sql"])
+        self.assertEqual(fix["sql"], "")
+        self.assertEqual(fix["source"], fixes.SOURCE_ADVISORY)
+        self.assertIn("没有业务在用", fix["note"])
 
     def test_no_primary_key_adds_surrogate(self):
         fix = self.fix(self.issue(rule_code="no_primary_key", column_name=""))

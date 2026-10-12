@@ -22,6 +22,7 @@ from utils import custom_enum
 SOURCE_RULE = "rule"  # 由规则对象直接得出——确定的
 SOURCE_MODEL_REQUIRED = "model_required"  # 无唯一答案，需模型给参考
 SOURCE_UNSUPPORTED = "unsupported"  # 方言不支持，明确说明
+SOURCE_ADVISORY = "advisory"  # 判定依据不足，**不给出语句**
 
 _POSTGRES = custom_enum.DbTypeEnum.POSTGRESQL.value
 
@@ -96,14 +97,6 @@ def _drop_index(issue, caveat: str) -> tuple:
     return (f"DROP INDEX {target};", caveat)
 
 
-def _drop_table(issue) -> tuple:
-    target = _qualified(_of(issue, "schema_name"), _of(issue, "table_name"))
-    return (
-        f"DROP TABLE {target};",
-        "执行前确认没有业务代码、外键或视图引用它——孤立是按当前快照判的，也可能只是暂时没接上。",
-    )
-
-
 def _add_surrogate_key(issue) -> tuple:
     target = _qualified(_of(issue, "schema_name"), _of(issue, "table_name"))
     return (
@@ -158,8 +151,6 @@ def _template(issue, limit: int):
         return _drop_index(issue, "执行前确认没有视图、约束或外键依赖它；若被依赖，先处理依赖方。")
     if code == "unused_index":
         return _drop_index(issue, "先观察一个完整的业务周期（含月末、季末这类周期场景）确认确实无用，再执行。")
-    if code == "isolated_table":
-        return _drop_table(issue)
     if code == "no_primary_key":
         return _add_surrogate_key(issue)
     if code == "suspicious_column_type":
@@ -181,6 +172,23 @@ def _unsupported() -> dict:
     }
 
 
+def _advisory(note: str) -> dict:
+    return {"sql": "", "caveat": "", "source": SOURCE_ADVISORY, "note": note}
+
+
+# **这一条规则刻意不产出语句**，理由值得写下来：
+#
+# `isolated_table` 判的是「既没有外键，也没有被任何表引用」。但**大量正常库根本不建外键**——
+# 真机核对时，`覆羽51环境` 的 23 张表全被判成「孤立」，包括那些显然是业务表的
+# （`tb_cases_project` / `tb_interface` / `tb_env`）。
+#
+# 「没有外键」与「没人用」之间隔着一整个业务上下文。把它变成一条可执行的 `DROP TABLE`，
+# 是**把一个弱证据伪装成确定结论**；而这条语句又是**不可逆**的。宁可只留排查建议。
+_ADVISORY_RULES = {
+    "isolated_table": "「孤立」只说明该表没有外键关系，不说明没有业务在用——不自动给出语句，请按排查建议人工确认。",
+}
+
+
 def fixes_for(issues: list, db_type, limit: int = None) -> list:
     """
     给一批问题各配一条修复语句，与输入**等长同序**
@@ -200,6 +208,10 @@ def fixes_for(issues: list, db_type, limit: int = None) -> list:
     limit = varchar_limit() if limit is None else limit
     result = []
     for issue in issues:
+        advisory = _ADVISORY_RULES.get(_of(issue, "rule_code"))
+        if advisory:
+            result.append(_advisory(advisory))
+            continue
         template = _template(issue, limit)
         if template is None:
             result.append({"sql": "", "caveat": "", "source": SOURCE_MODEL_REQUIRED})
