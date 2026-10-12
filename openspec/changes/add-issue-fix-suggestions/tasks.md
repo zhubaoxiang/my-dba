@@ -42,7 +42,7 @@
 - [x] 6.3 `cd static && npm run build`
 - [x] 6.4 `ENV_TYPE=test python manage.py test apps.datasource apps.nl2sql apps.overview`
 - [x] 6.5 **真实接口核对**（`ENV_TYPE=local`，142 + 30 条问题）：模板语句正确、来源标注正确；**并据此抓到一处危害**——见 8.1
-- [ ] 6.6 **真实页面核对**：语句与前提可见、两类分区陈列、「复制全部」只含模板的
+- [x] 6.6 **真实页面核对**（已通过）：语句与前提可见、两类分区陈列、「复制全部」只含模板的
 - [ ] 6.7 `openspec validate add-issue-fix-suggestions --strict --no-interactive`
 
 ## 7. 实现时的三处偏差（与上面写的不同）
