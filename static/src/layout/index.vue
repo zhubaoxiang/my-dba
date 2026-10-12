@@ -91,7 +91,7 @@ const MENU_GROUP_ICONS = {
   库表: 'Coin',
   SQL: 'MagicStick',
   知识: 'Collection',
-  系统: 'Setting'
+  设置: 'Setting'
 }
 
 // 从路由配置的 children 中筛选需要展示在菜单中的项（`meta.showInMenu !== false`），

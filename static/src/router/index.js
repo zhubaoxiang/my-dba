@@ -11,11 +11,11 @@ import Layout from '@/layout/index.vue'
 // 1. **跨族的不挂在某一条能力线下面**。被多条线依赖的东西挂在其中一条下面，等于把公共的
 //    东西收进了某一家的抽屉：
 //      - 「数据源管理」被库表与 SQL 两条线依赖（SQL 生成的入参里它是必填）→ 放一级
-//      - 「分析规则」同时管库表规则与 SQL 规则（两个 Tab）→ 归到「系统」那一组
+//      - 「分析规则」同时管库表规则与 SQL 规则（两个 Tab）→ 归到「设置」那一组
 //      - 「知识问答」是日常用的入口，不该收进组里 → 放一级
 // 2. 组内按**概念/工作顺序**排，不按点击频率。库表那组只剩「看」的动作——接入与规则
 //    都已经挪走了。
-// 3. 「系统」那一组实际上是**设置类**的集合（规则、知识库、模型、用户）。
+// 3. 「设置」那一组是设置类的集合（规则、知识库、模型、用户）——组名如实反映了它装什么。
 const routes = [
   {
     path: '/',
@@ -68,31 +68,31 @@ const routes = [
         path: 'datasource/rules',
         name: 'AnalysisRules',
         component: () => import('@/views/datasource/rules.vue'),
-        meta: { title: '分析规则', icon: 'SetUp', showInMenu: true, group: '系统' }
+        meta: { title: '分析规则', icon: 'SetUp', showInMenu: true, group: '设置' }
       },
       {
         path: 'knowledge/bases',
         name: 'KnowledgeBase',
         component: () => import('@/views/knowledge/bases.vue'),
-        meta: { title: '知识库', icon: 'Collection', showInMenu: true, group: '系统' }
+        meta: { title: '知识库', icon: 'Collection', showInMenu: true, group: '设置' }
       },
       {
         path: 'knowledge/provider',
         name: 'ModelProvider',
         component: () => import('@/views/knowledge/provider.vue'),
-        meta: { title: '模型配置', icon: 'Cpu', showInMenu: true, group: '系统' }
+        meta: { title: '模型配置', icon: 'Cpu', showInMenu: true, group: '设置' }
       },
       {
         path: 'user',
         name: 'UserManagement',
         component: () => import('@/views/development/index.vue'),
-        meta: { title: '用户管理', icon: 'User', showInMenu: true, group: '系统' }
+        meta: { title: '用户管理', icon: 'User', showInMenu: true, group: '设置' }
       },
       {
         path: 'system',
         name: 'SystemManagement',
         component: () => import('@/views/development/index.vue'),
-        meta: { title: '系统管理', icon: 'Setting', showInMenu: true, group: '系统' }
+        meta: { title: '系统管理', icon: 'Setting', showInMenu: true, group: '设置' }
       },
       {
         path: 'about',
