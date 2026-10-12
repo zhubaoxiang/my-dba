@@ -1,4 +1,4 @@
-# sdc-harness 后端服务镜像（Django + gunicorn）
+# my-dba 后端服务镜像（Django + gunicorn）
 #
 # 内网/国内环境适配：apt 与 pip 均走阿里云镜像。
 # 注意：bullseye 已归档，直接换成 mirrors.aliyun.com/debian 会 404，

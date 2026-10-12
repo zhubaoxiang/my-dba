@@ -33,7 +33,7 @@ class Nl2SqlGenerateSerializer(serializers.Serializer):
     def validate_question(self, value):
         value = value.strip()
         if not value:
-            raise serializers.ValidationError("请描述你要查什么")
+            raise serializers.ValidationError("请输入查询需求")
         return value
 
     def validate_tables(self, value):

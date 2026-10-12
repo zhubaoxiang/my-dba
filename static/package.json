@@ -1,5 +1,5 @@
 {
-  "name": "sdc-harness-frontend",
+  "name": "my-dba-frontend",
   "version": "0.1.0",
   "private": true,
   "description": "我的数据库管理专家前端（Vue3 + Element Plus）",

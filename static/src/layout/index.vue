@@ -3,8 +3,8 @@
     <!-- 侧边栏 -->
     <el-aside :width="isCollapse ? '64px' : '210px'" class="layout-aside">
       <div class="logo">
-        <span v-if="!isCollapse">SDC-harness</span>
-        <span v-else>S</span>
+        <span v-if="!isCollapse">数据库管理专家</span>
+        <span v-else>库</span>
       </div>
       <el-menu
         :default-active="activeMenu"
