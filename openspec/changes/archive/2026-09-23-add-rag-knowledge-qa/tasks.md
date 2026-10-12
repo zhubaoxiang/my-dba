@@ -25,7 +25,7 @@
       —— `activate` 先取消原生效项再设新项（库上有部分唯一索引约束「至多一条生效」）；**首条配置自动生效**，避免出现「有配置但无生效项」导致问答直接失败
 - [x] 2.5 连接测试发一次最小请求、带超时、**失败原因经 `_sanitize` 脱敏**（外部 SDK 报错内容不受控，兜底剔除 API Key）
 - [x] 2.6 注册路由 `rf"{SYS_NAME}/v1/llm-provider"`，4 条路由（list/detail/test/activate）已用 resolver 确认匹配
-- [x] 2.7 用真实 provider 验证：对 `aigw.inone.nsfocus.com` 的 `deepseek-flash` **真实调用成功**（1.4s，HTTP 200），`仅通用模型` 模式连续 3 次返回干净答案
+- [x] 2.7 用真实 provider 验证：对配置的对话模型**真实调用成功**（1.4s，HTTP 200），`仅通用模型` 模式连续 3 次返回干净答案
       —— 过程中发现两个真实问题并修复（见 design.md 风险表）：模型会把工具调用语法当正文吐出；网关不提供嵌入模型
 - [x] 2.8 嵌入模型已配置并**真实跑通**：`Qwen/Qwen3-VL-Embedding-8B` @ SiliconFlow，输出 **1024 维**
       —— 期间修正三处：`base_url` 多带了 `/embeddings` 后缀导致 404；`check_embedding_ctx_length` 默认开启使请求发的是 token id 而非原文，兼容端点返回 400；`dimensions` 参数**应保留**（实测该服务原生 4096 维，靠它截到 1024 可省约 4 倍内存）。详见 design.md D2b
