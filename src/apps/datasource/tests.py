@@ -7,15 +7,17 @@ crypto / analyzer / differ 均为纯计算，用 SimpleTestCase 即可，不需�
 """
 
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from unittest import mock
 
 from django.test import SimpleTestCase, TestCase
 from rest_framework.test import APIClient
 
-from apps.datasource import analyzer, differ, models, serializers, services, views
+from apps.datasource import analyzer, differ, fixes, models, serializers, services, views
 from apps.datasource import metrics as ds_metrics
 from apps.datasource import services as ds_services
 from apps.datasource.rules import registry
+from apps.nl2sql import services as nl2sql_services
 from utils import crypto, custom_enum
 
 
@@ -738,18 +740,19 @@ class CatalogIssueApiTests(TestCase):
             datasource_id=self.datasource.id, collect_time=datetime.now(), raw_data={"tables": []}
         )
 
-    def add_issue(self, rule_code, rule_name, level=custom_enum.IssueLevelEnum.HIGH.value):
-        return models.CatalogIssue.objects.create(
-            datasource_id=self.datasource.id,
-            snapshot_id=self.snapshot.id,
-            issue_level=level,
-            rule_code=rule_code,
-            rule_name=rule_name,
-            object_level=custom_enum.ObjectLevelEnum.TABLE.value,
-            table_name="t",
-            description="说明",
-            suggestion="建议",
-        )
+    def add_issue(self, rule_code, rule_name, level=custom_enum.IssueLevelEnum.HIGH.value, **extra):
+        defaults = {
+            "datasource_id": self.datasource.id,
+            "snapshot_id": self.snapshot.id,
+            "issue_level": level,
+            "rule_code": rule_code,
+            "rule_name": rule_name,
+            "object_level": custom_enum.ObjectLevelEnum.TABLE.value,
+            "table_name": "t",
+            "description": "说明",
+            "suggestion": "建议",
+        }
+        return models.CatalogIssue.objects.create(**{**defaults, **extra})
 
     def test_filter_by_rule_code(self):
         self.add_issue("no_primary_key", "无主键表")
@@ -757,6 +760,28 @@ class CatalogIssueApiTests(TestCase):
         payload = self.client.get(f"{self.CATALOG}/issues?snapshot_id={self.snapshot.id}&rule_code=big_table").json()
         results = payload["data"]["results"]
         self.assertEqual([item["rule_code"] for item in results], ["big_table"])
+
+    def test_issues_carry_fix_statements(self):
+        """修复语句随问题清单一并返回——对象确定的那几条由模板给出，不需要模型"""
+        self.add_issue("fk_without_index", "外键缺索引", column_name="user_id")
+        item = self.client.get(f"{self.CATALOG}/issues?snapshot_id={self.snapshot.id}").json()["data"]["results"][0]
+        self.assertEqual(item["fix"]["source"], "rule")
+        self.assertIn("CREATE INDEX", item["fix"]["sql"])
+        self.assertTrue(item["fix"]["caveat"], "每条语句都要带风险前提")
+
+    def test_issues_mark_the_ones_needing_the_model(self):
+        """无唯一答案的**必须与模板生成的分开标**——不能让人同等信任"""
+        self.add_issue("big_table", "超大表")
+        item = self.client.get(f"{self.CATALOG}/issues?snapshot_id={self.snapshot.id}").json()["data"]["results"][0]
+        self.assertEqual(item["fix"]["source"], "model_required")
+        self.assertEqual(item["fix"]["sql"], "")
+
+    def test_fix_key_is_exposed(self):
+        """索引名必须能从接口读到——这是修复语句的原料"""
+        self.add_issue("unused_index", "疑似未使用索引", fix_key="idx_old")
+        item = self.client.get(f"{self.CATALOG}/issues?snapshot_id={self.snapshot.id}").json()["data"]["results"][0]
+        self.assertEqual(item["fix_key"], "idx_old")
+        self.assertIn("idx_old", item["fix"]["sql"])
 
     def test_filter_by_issue_level_still_works(self):
         self.add_issue("no_primary_key", "无主键表")
@@ -1147,3 +1172,172 @@ class MetricQueryTests(TestCase):
         item = self.item(datasource.id)
         self.assertEqual(item["connection_count"], 42)
         self.assertEqual(item["trend"], [], "超出 24 小时的点不进趋势")
+
+
+class FixTemplateTests(SimpleTestCase):
+    """
+    修复语句模板：纯计算，**不碰数据库**（阈值显式传入）
+
+    最要紧的一条分界：模板生成的是「算出来的」，需模型参考的是「一种建议」——
+    两者必须由 `source` 分得开，否则使用者会同等信任。
+    """
+
+    POSTGRES = custom_enum.DbTypeEnum.POSTGRESQL.value
+    MYSQL = custom_enum.DbTypeEnum.MYSQL.value
+
+    def issue(self, **kwargs):
+        defaults = {
+            "rule_code": "fk_without_index",
+            "schema_name": "public",
+            "table_name": "orders",
+            "column_name": "user_id",
+            "fix_key": "",
+        }
+        return SimpleNamespace(**{**defaults, **kwargs})
+
+    def fix(self, issue, db_type=None):
+        return fixes.fixes_for([issue], db_type or self.POSTGRES, limit=2000)[0]
+
+    def test_foreign_key_index(self):
+        fix = self.fix(self.issue())
+        self.assertEqual(fix["source"], fixes.SOURCE_RULE)
+        self.assertIn("CREATE INDEX", fix["sql"])
+        self.assertIn('"orders"', fix["sql"])
+        self.assertIn('"user_id"', fix["sql"])
+        self.assertTrue(fix["caveat"], "索引名是拼出来的，前提里要说可以改")
+
+    def test_duplicate_index_drops_by_name(self):
+        fix = self.fix(self.issue(rule_code="duplicate_index", fix_key="idx_dup"))
+        self.assertIn("DROP INDEX", fix["sql"])
+        self.assertIn("idx_dup", fix["sql"])
+        self.assertIn("依赖", fix["caveat"])
+
+    def test_unused_index_caveat_tells_you_to_wait_a_cycle(self):
+        fix = self.fix(self.issue(rule_code="unused_index", fix_key="idx_old"))
+        self.assertIn("idx_old", fix["sql"])
+        self.assertIn("业务周期", fix["caveat"])
+
+    def test_isolated_table(self):
+        fix = self.fix(self.issue(rule_code="isolated_table", column_name=""))
+        self.assertIn("DROP TABLE", fix["sql"])
+
+    def test_no_primary_key_adds_surrogate(self):
+        fix = self.fix(self.issue(rule_code="no_primary_key", column_name=""))
+        self.assertIn("bigserial PRIMARY KEY", fix["sql"])
+        self.assertIn("代理键", fix["caveat"])
+
+    def test_char_time_uses_using_clause(self):
+        fix = self.fix(self.issue(rule_code="suspicious_column_type", fix_key="char_time", column_name="created_at"))
+        self.assertIn("TYPE timestamp", fix["sql"])
+        self.assertIn("USING", fix["sql"])
+
+    def test_long_varchar_uses_the_given_limit(self):
+        fix = self.fix(self.issue(rule_code="suspicious_column_type", fix_key="long_varchar", column_name="remark"))
+        self.assertIn("varchar(2000)", fix["sql"])
+
+    def test_big_table_has_no_template(self):
+        fix = self.fix(self.issue(rule_code="big_table", column_name=""))
+        self.assertEqual(fix["sql"], "")
+        self.assertEqual(fix["source"], fixes.SOURCE_MODEL_REQUIRED)
+
+    def test_large_object_has_no_template(self):
+        fix = self.fix(self.issue(rule_code="suspicious_column_type", fix_key="large_object"))
+        self.assertEqual(fix["source"], fixes.SOURCE_MODEL_REQUIRED)
+
+    def test_missing_object_name_gives_no_statement(self):
+        """对象名缺失时**不硬拼**——宁可给不出，也不给一条猜的"""
+        fix = self.fix(self.issue(rule_code="duplicate_index", fix_key=""))
+        self.assertEqual(fix["sql"], "")
+        self.assertEqual(fix["source"], fixes.SOURCE_MODEL_REQUIRED)
+
+    def test_non_public_schema_is_qualified(self):
+        fix = self.fix(self.issue(schema_name="reporting"))
+        self.assertIn('"reporting"."orders"', fix["sql"])
+
+    def test_public_schema_is_omitted(self):
+        """public 是 PostgreSQL 的默认模式，写上反而啰嗦"""
+        self.assertNotIn("public", self.fix(self.issue(schema_name="public"))["sql"])
+
+    def test_mysql_is_unsupported_with_a_reason(self):
+        """**方言不支持时必须明说，不静默降级**——MySQL 的写法不同且未在真机验证"""
+        fix = self.fix(self.issue(), db_type=self.MYSQL)
+        self.assertEqual(fix["source"], fixes.SOURCE_UNSUPPORTED)
+        self.assertEqual(fix["sql"], "")
+        self.assertIn("PostgreSQL", fix["note"])
+
+    def test_fixes_align_with_issues(self):
+        issues = [self.issue(), self.issue(rule_code="big_table", column_name="")]
+        result = fixes.fixes_for(issues, self.POSTGRES, limit=2000)
+        self.assertEqual(len(result), len(issues), "等长同序——错位会让语句挂到别的问题上")
+        self.assertEqual(result[0]["source"], fixes.SOURCE_RULE)
+        self.assertEqual(result[1]["source"], fixes.SOURCE_MODEL_REQUIRED)
+
+
+class ReferenceFixTests(TestCase):
+    """
+    无唯一答案那类问题的**参考语句**：走 nl2sql 的模型接入（打桩）
+
+    与模板生成的分开标 `source`——模板是算出来的，这里是建议。
+    """
+
+    def setUp(self):
+        self.datasource = models.Datasource.objects.create(
+            name="ds",
+            db_type=custom_enum.DbTypeEnum.POSTGRESQL.value,
+            host="127.0.0.1",
+            port=5432,
+            db_name="d",
+            username="u",
+            password="p",
+        )
+        self.snapshot = models.MetadataSnapshot.objects.create(
+            datasource_id=self.datasource.id,
+            collect_time=datetime.now(),
+            raw_data={"tables": []},
+        )
+        self.issue = models.CatalogIssue.objects.create(
+            datasource_id=self.datasource.id,
+            snapshot_id=self.snapshot.id,
+            issue_level=custom_enum.IssueLevelEnum.MEDIUM.value,
+            rule_code="big_table",
+            rule_name="超大表",
+            object_level=custom_enum.ObjectLevelEnum.TABLE.value,
+            table_name="orders",
+            description="这张表很大",
+        )
+
+    def stub(self, **result):
+        return mock.patch.object(nl2sql_services, "generate_sql", return_value=result)
+
+    def test_returns_sql_with_a_backend_supplied_caveat(self):
+        with self.stub(sql="CREATE TABLE orders_new ...", generation={"available": True}) as call:
+            data = services.reference_fix(self.datasource.id, self.issue.id)
+        self.assertTrue(data["available"])
+        self.assertIn("CREATE TABLE", data["sql"])
+        # 前提由后端给，不依赖模型自己声明——那句是恒定的
+        self.assertIn("策略", data["caveat"])
+        # 问题的描述要说给模型，它才知道要修什么
+        self.assertIn("这张表很大", call.call_args.args[1])
+
+    def test_model_unavailable_is_reported_not_hidden(self):
+        with self.stub(sql="", generation={"available": False, "note": "尚未配置对话模型，无法生成查询语句；…"}):
+            data = services.reference_fix(self.datasource.id, self.issue.id)
+        self.assertFalse(data["available"])
+        self.assertIn("对话模型", data["note"])
+
+    def test_unknown_issue_is_rejected(self):
+        with self.assertRaises(services.DatasourceUnavailable):
+            services.reference_fix(self.datasource.id, 999999)
+
+    def test_issue_of_another_datasource_is_rejected(self):
+        other = models.Datasource.objects.create(
+            name="other",
+            db_type=custom_enum.DbTypeEnum.POSTGRESQL.value,
+            host="127.0.0.1",
+            port=5432,
+            db_name="d",
+            username="u",
+            password="p",
+        )
+        with self.assertRaises(services.DatasourceUnavailable):
+            services.reference_fix(other.id, self.issue.id)

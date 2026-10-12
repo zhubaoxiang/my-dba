@@ -39,6 +39,7 @@ class RuleContext:
         table: dict = None,
         column_name: str = "",
         target: str = "",
+        fix_key: str = "",
         issue_level=None,
         object_level=None,
     ) -> dict:
@@ -47,6 +48,9 @@ class RuleContext:
 
         - 传入 table 时自动推导对象定位（模式.表[.列]）
         - 不传 table 时用 target 直接指定定位（供库级/模式级规则使用）
+        - `fix_key` 是生成修复语句所需的额外标识，由规则自己填：索引类规则填**索引名**
+          （否则 `DROP INDEX` 只能靠解析描述文字得出）；可疑字段类型填**命中的分支**
+          （该规则有三个分支，可修的那两个语句形态不同，而表里没有 data_type 可分）
         - issue_level 留空则使用规则配置的级别；规则内部有级别细分时可显式覆盖
         - object_level 留空则使用规则声明的层级；只能覆写为更细的层级，框架会校验
         """
@@ -70,6 +74,7 @@ class RuleContext:
             "schema_name": schema_name,
             "table_name": table_name,
             "column_name": column_name,
+            "fix_key": fix_key,
             "description": description,
             "suggestion": suggestion,
         }

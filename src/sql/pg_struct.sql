@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS catalog_issue (
     schema_name   varchar(128)  NOT NULL DEFAULT '',
     table_name    varchar(128)  NOT NULL DEFAULT '',
     column_name   varchar(128)  NOT NULL DEFAULT '',
+    fix_key       varchar(128)  NOT NULL DEFAULT '',
     description   varchar(1024) NOT NULL DEFAULT '',
     suggestion    varchar(1024) NOT NULL DEFAULT '',
     create_time   timestamp     NOT NULL DEFAULT now(),
@@ -108,6 +109,9 @@ COMMENT ON COLUMN catalog_issue.issue_level IS '严重级别：1=高 2=中 3=低
 COMMENT ON COLUMN catalog_issue.rule_code IS '产出该问题的规则标识，规则清单见 apps/datasource/rules/definitions.py';
 COMMENT ON COLUMN catalog_issue.rule_name IS '产出时的规则名称快照，规则改名或停用后历史问题仍可正确展示';
 COMMENT ON COLUMN catalog_issue.object_level IS '适用层级：1=库 2=模式 3=表 4=列';
+-- 生成修复语句所需的额外标识，由规则自己填：索引类规则填索引名（否则 DROP INDEX 只能靠
+-- 解析描述文字得出）；可疑字段类型填命中的分支（该规则有三个分支，语句形态不同）
+COMMENT ON COLUMN catalog_issue.fix_key IS '修复语句所需的额外标识：索引名 / 字段类型分支';
 COMMENT ON COLUMN catalog_issue.schema_name IS '所在模式名，供非表级问题定位';
 
 CREATE INDEX IF NOT EXISTS idx_catalog_issue_snapshot ON catalog_issue (snapshot_id, issue_level);

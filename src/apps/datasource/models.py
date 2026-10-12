@@ -98,6 +98,8 @@ class CatalogIssue(AbstractTimeFiledModel):
     schema_name = models.CharField(max_length=128, default="", blank=True, verbose_name="模式名")
     table_name = models.CharField(max_length=128, default="", blank=True, verbose_name="表名")
     column_name = models.CharField(max_length=128, default="", blank=True, verbose_name="列名")
+    # 生成修复语句所需的额外标识，由规则自己填（各规则要的不一样，见下）
+    fix_key = models.CharField(max_length=128, default="", blank=True, verbose_name="修复标识")
     description = models.CharField(max_length=1024, default="", blank=True, verbose_name="问题说明")
     suggestion = models.CharField(max_length=1024, default="", blank=True, verbose_name="改进建议")
 

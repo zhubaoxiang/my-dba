@@ -1,5 +1,9 @@
 import request from './request'
 
+// 会调模型的接口的超时（毫秒）
+// 后端单次模型调用受 `[knowledge] llm_timeout` 约束（默认 60 秒），全局 axios 只等 15 秒
+const SLOW_TIMEOUT = 90000
+
 // 数据源配置 API
 export const datasourceApi = {
   // 列表（分页）
@@ -84,6 +88,10 @@ export const catalogApi = {
   // 问题清单（可按级别筛选）
   issues(params) {
     return request.get('/v1/catalog/issues', { params })
+  },
+  // 给一条「无唯一答案」的问题生成参考语句（按需，会调模型）
+  issueReference(data) {
+    return request.post('/v1/catalog/issues/reference', data, { timeout: SLOW_TIMEOUT })
   },
   // 两个快照的结构差异
   diff(params) {

@@ -111,6 +111,7 @@ def _check_duplicate_index(ctx):
                     ctx.issue(
                         table=table,
                         column_name=",".join(columns),
+                        fix_key=idx["name"],
                         description=f"索引 {idx['name']} 与 {keep['name']} 的列完全相同（{', '.join(columns)}），属重复索引，"
                         f"会拖慢写入并占用额外空间。",
                         suggestion=f"确认无其他依赖后删除索引 {idx['name']}，保留 {keep['name']}。",
@@ -132,6 +133,7 @@ def _check_duplicate_index(ctx):
                         ctx.issue(
                             table=table,
                             column_name=",".join(columns),
+                            fix_key=idx["name"],
                             issue_level=custom_enum.IssueLevelEnum.LOW,
                             description=f"索引 {idx['name']}（{', '.join(columns)}）是索引 {other['name']}"
                             f"（{', '.join(other_columns)}）的前缀，属冗余索引。",
@@ -160,6 +162,7 @@ def _check_unused_index(ctx):
                 ctx.issue(
                     table=table,
                     column_name=",".join(idx.get("columns") or []),
+                    fix_key=idx["name"],
                     description=f"索引 {idx['name']} 自统计重置以来未被使用（scans=0），且表行数已达 "
                     f"{table.get('row_count')}，仅增加写入成本。",
                     suggestion=f"观察一个完整业务周期后确认无用，再删除索引 {idx['name']}。",
@@ -206,6 +209,7 @@ def _check_column_types(ctx):
                     ctx.issue(
                         table=table,
                         column_name=name,
+                        fix_key="char_time",
                         description=f"列 {name} 语义上是时间，却使用字符类型 {data_type}。字符串比较无法利用时间运算与范围索引，"
                         f"格式也不受约束。",
                         suggestion="改用 timestamp / datetime 类型。",
@@ -218,6 +222,7 @@ def _check_column_types(ctx):
                     ctx.issue(
                         table=table,
                         column_name=name,
+                        fix_key="long_varchar",
                         issue_level=custom_enum.IssueLevelEnum.LOW,
                         description=f"列 {name} 定义为 {data_type}({length})，长度上限远超常规，实际占用与索引体积都偏大。",
                         suggestion="按实际数据分布收紧长度，或改用更合适的类型。",
@@ -230,6 +235,7 @@ def _check_column_types(ctx):
                     ctx.issue(
                         table=table,
                         column_name=name,
+                        fix_key="large_object",
                         issue_level=custom_enum.IssueLevelEnum.LOW,
                         description=f"列 {name} 使用大对象类型 {data_type}，与其他列同行存储会显著降低表扫描效率。",
                         suggestion="评估把大字段拆到独立扩展表，或改用更适合的类型。",

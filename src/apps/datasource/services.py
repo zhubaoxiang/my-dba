@@ -156,6 +156,7 @@ def _save_issues(datasource, snapshot, issues: list, creator: str):
                 schema_name=item["schema_name"][:128],
                 table_name=item["table_name"][:128],
                 column_name=item["column_name"][:128],
+                fix_key=item.get("fix_key", "")[:128],
                 description=item["description"][:1024],
                 suggestion=item["suggestion"][:1024],
                 creator=creator,
@@ -169,6 +170,51 @@ class DatasourceUnavailable(Exception):
     """
     数据源不存在或不可用
     """
+
+
+# 「无唯一答案」那类问题的参考语句：把问题本身说给模型，让它给一条示例
+_REFERENCE_QUESTION = (
+    "表 {table} 上存在这样一个问题：{description}\n" "请给出一个可执行的修复**示例**语句（例如分区、归档或拆分）。"
+)
+
+
+def reference_fix(datasource_id: int, issue_id: int) -> dict:
+    """
+    给一条**无唯一答案**的问题生成参考语句
+
+    走 `apps/nl2sql` 的服务函数（跨模块调它的公开契约）——那里已经拥有「模型 → SQL」
+    这一能力，不在这里另起一套提示词与输出解析。
+
+    **与模板生成的语句分开标 `source`**：模板是算出来的，这里是**一种建议**，
+    界面上分区陈列，不让使用者同等信任。
+
+    :raises DatasourceUnavailable: 问题不存在，或不属于该数据源
+    """
+    issue = models.CatalogIssue.objects.filter(is_deleted=False, id=issue_id).first()
+    if issue is None or issue.datasource_id != datasource_id:
+        raise DatasourceUnavailable("问题不存在或不属于该数据源")
+
+    # 延迟导入：`nl2sql` 依赖本模块的 `list_snapshot_tables`，模块级导入会成环
+    from apps.nl2sql import services as nl2sql_services
+
+    table = f"{issue.schema_name}.{issue.table_name}" if issue.schema_name else issue.table_name
+    result = nl2sql_services.generate_sql(
+        datasource_id,
+        _REFERENCE_QUESTION.format(table=table, description=issue.description),
+        tables=[issue.table_name] if issue.table_name else None,
+    )
+
+    generation = result.get("generation") or {}
+    if not generation.get("available"):
+        return {"available": False, "sql": "", "caveat": "", "note": generation.get("note") or "本次未能生成"}
+
+    return {
+        "available": True,
+        "sql": result.get("sql") or "",
+        # 前提由后端给，而不是让模型自己声明——这句是恒定的，模型说不如我们说
+        "caveat": "这条语句依赖策略选择（分区键、归档周期、拆分边界），必须按你的查询与保留策略调整后才能用。",
+        "note": "",
+    }
 
 
 class ReadonlyConnection:

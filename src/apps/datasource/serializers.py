@@ -115,6 +115,7 @@ class CatalogIssueSerializer(serializers.ModelSerializer):
     create_time = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S")
     issue_level_label = serializers.SerializerMethodField(label="严重级别")
     object_level_label = serializers.SerializerMethodField(label="适用层级")
+    fix = serializers.SerializerMethodField(label="修复语句")
 
     class Meta:
         model = models.CatalogIssue
@@ -122,6 +123,15 @@ class CatalogIssueSerializer(serializers.ModelSerializer):
 
     def get_issue_level_label(self, obj):
         return custom_enum.IssueLevelEnum(obj.issue_level).label
+
+    def get_fix(self, obj):
+        """
+        修复语句在视图层按方言算好后挂在实例上（见 `CatalogView.issues`）
+
+        它需要「本次这一批」的上下文（方言、当前阈值），不适合放在序列化器里逐条算——
+        逐条算会把阈值读库重复 N 次。
+        """
+        return getattr(obj, "fix", None)
 
     def get_object_level_label(self, obj):
         return custom_enum.ObjectLevelEnum(obj.object_level).label

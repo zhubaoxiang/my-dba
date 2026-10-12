@@ -292,3 +292,18 @@ CREATE INDEX IF NOT EXISTS idx_datasource_metric_time ON datasource_metric (crea
 ALTER TABLE analysis_rule DROP COLUMN IF EXISTS name;
 ALTER TABLE analysis_rule DROP COLUMN IF EXISTS description;
 ALTER TABLE analysis_rule DROP COLUMN IF EXISTS object_level;
+
+
+-- ============================================================
+-- catalog_issue 补修复标识（openspec: add-issue-fix-suggestions）
+-- ============================================================
+
+-- 生成修复语句所需的额外标识：索引类规则填**索引名**（它原先只出现在描述文字里，
+-- `DROP INDEX xxx` 无法从库中读出），可疑字段类型填**命中的分支**（该规则有三个分支，
+-- 可修的那两个语句形态不同，而表里没有 data_type 可分）。
+--
+-- **加列且带默认值**：与上面那次删列不同，这种不会双向打架（新代码 + 旧表结构也能跑，
+-- 只是老问题行读出空串、那几条暂时给不出语句）。重新采集一次即正常。
+ALTER TABLE catalog_issue ADD COLUMN IF NOT EXISTS fix_key varchar(128) NOT NULL DEFAULT '';
+
+COMMENT ON COLUMN catalog_issue.fix_key IS '修复语句所需的额外标识：索引名 / 字段类型分支';

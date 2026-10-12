@@ -5,7 +5,7 @@
 from rest_framework.decorators import action
 
 from apps.base import baseviews
-from apps.datasource import differ, models, serializers, services
+from apps.datasource import differ, fixes, models, serializers, services
 from apps.datasource.collectors import get_collector
 from apps.datasource.rules import registry
 from utils import common, crypto, custom_enum, pagination
@@ -270,6 +270,12 @@ class CatalogView(baseviews.AnyLogin):
     def issues(self, request):
         """
         问题清单，可按严重级别筛选
+
+        每条问题附带一条**修复语句**（`fix`）：对象确定的那几类由模板给出（纯计算，
+        见 `apps/datasource/fixes.py`），无唯一答案的标为需模型参考。
+
+        分页在此**手动完成**而非用 `pagination.paginate`：修复语句要挂在**分页后的这一页**
+        上，而那个封装内部就把序列化做完了，插不进去。
         """
         queryset = models.CatalogIssue.objects.filter(is_deleted=False)
         snapshot_id = request.query_params.get("snapshot_id")
@@ -295,8 +301,24 @@ class CatalogView(baseviews.AnyLogin):
         if rule_code:
             queryset = queryset.filter(rule_code=rule_code)
         queryset = queryset.order_by("issue_level", "rule_code", "id")
+
+        page = self.paginate_queryset(queryset)
+        items = list(page) if page is not None else list(queryset)
+
+        # 修复语句按**目标库的方言**生成，故取本次问题所属数据源的库类型
+        owner_id = queryset.values_list("datasource_id", flat=True).first()
+        brief = services.datasource_brief(owner_id) if owner_id else None
+        db_type = (brief or {}).get("db_type")
+        for item, fix in zip(items, fixes.fixes_for(items, db_type), strict=False):
+            item.fix = fix
+
         self.serializer_class = serializers.CatalogIssueSerializer
-        return baseviews.ResponseOK(pagination.paginate(self, queryset))
+        serializer = self.get_serializer(items, many=True)
+        if page is None:
+            return baseviews.ResponseOK({"results": serializer.data, "total": len(serializer.data)})
+        result = self.get_paginated_response(serializer.data).data
+        result["total"] = result["count"]
+        return baseviews.ResponseOK(result)
 
     @action(detail=False, methods=["GET"], url_path="summary")
     def summary(self, request):
@@ -347,6 +369,24 @@ class CatalogView(baseviews.AnyLogin):
         if base is None or target is None:
             return baseviews.ResponseNotFound("快照不存在")
         return baseviews.ResponseOK(differ.diff_snapshots(base.raw_data, target.raw_data))
+
+    @action(detail=False, methods=["POST"], url_path="issues/reference")
+    def issue_reference(self, request):
+        """
+        给一条「无唯一答案」的问题生成**参考语句**
+
+        **按需触发**——它要调模型，有延迟与成本，且只在那两条上用得着（超大表、
+        大对象拆表）。模型不可用时返回 `available: false` 与原因，不是接口错误。
+        """
+        datasource_id = _to_int(request.data.get("datasource_id"))
+        issue_id = _to_int(request.data.get("issue_id"))
+        if datasource_id is None or issue_id is None:
+            return baseviews.ResponseBadRequest("缺少参数 datasource_id 或 issue_id")
+
+        try:
+            return baseviews.ResponseOK(services.reference_fix(datasource_id, issue_id))
+        except services.DatasourceUnavailable as exc:
+            return baseviews.ResponseNotFound(str(exc))
 
 
 class AnalysisRuleView(baseviews.AnyLogin):

@@ -16,6 +16,7 @@
             <el-select v-model="ruleCode" placeholder="全部规则" clearable style="width: 190px" @change="reload">
               <el-option v-for="item in rules" :key="item.code" :value="item.code" :label="item.name" />
             </el-select>
+            <el-button @click="copyPageFixes" :disabled="!rows.length">复制本页修复语句</el-button>
             <el-button @click="reload" :disabled="!datasourceId">刷新</el-button>
           </div>
         </div>
@@ -35,6 +36,53 @@
           <el-table-column prop="target" label="对象" min-width="220" show-overflow-tooltip />
           <el-table-column prop="description" label="说明" min-width="280" show-overflow-tooltip />
           <el-table-column prop="suggestion" label="建议" min-width="240" show-overflow-tooltip />
+          <!-- 修复语句：**模板生成的与模型建议的分区陈列**——前者是算出来的，后者是一种建议，
+               混在一起展示会让人同等信任。系统不执行任何一条。 -->
+          <el-table-column label="修复语句" min-width="320">
+            <template #default="{ row }">
+              <template v-if="row.fix && row.fix.source === 'rule'">
+                <pre class="fix-sql">{{ row.fix.sql }}</pre>
+                <div class="fix-row">
+                  <el-button link type="primary" size="small" @click="copyText(row.fix.sql)">复制</el-button>
+                </div>
+                <div class="fix-caveat">⚠ {{ row.fix.caveat }}</div>
+              </template>
+
+              <div v-else-if="row.fix && row.fix.source === 'unsupported'" class="fix-hint">
+                {{ row.fix.note }}
+              </div>
+
+              <template v-else-if="row.fix">
+                <el-alert
+                  v-if="row.reference && !row.reference.available"
+                  type="info"
+                  :closable="false"
+                  :title="row.reference.note"
+                />
+                <template v-else-if="row.reference">
+                  <pre class="fix-sql model">{{ row.reference.sql }}</pre>
+                  <div class="fix-row">
+                    <el-tag type="warning" size="small" effect="plain">模型建议</el-tag>
+                    <el-button link type="primary" size="small" @click="copyText(row.reference.sql)">复制</el-button>
+                  </div>
+                  <div class="fix-caveat">{{ row.reference.caveat }}</div>
+                </template>
+                <el-button
+                  v-else
+                  link
+                  type="primary"
+                  size="small"
+                  :loading="referencing === row.id"
+                  @click="makeReference(row)"
+                >
+                  生成参考语句
+                </el-button>
+                <div class="fix-hint">无唯一答案，需按你的策略定</div>
+              </template>
+
+              <div v-else class="fix-hint">—</div>
+            </template>
+          </el-table-column>
           <el-table-column label="操作" width="110" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" :disabled="!row.table_name" @click="openTable(row)">查看表</el-button>
@@ -61,6 +109,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { analysisRuleApi, catalogApi, datasourceApi } from '@/api/datasource'
 
 const route = useRoute()
@@ -76,6 +125,37 @@ const total = ref(0)
 const loading = ref(false)
 const loaded = ref(false)
 const query = reactive({ page: 1, page_size: 20 })
+// 正在生成参考语句的那一行（它要调模型，有延迟）
+const referencing = ref(null)
+
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(
+    () => ElMessage.success('已复制'),
+    () => ElMessage.warning('复制失败，请手动选中复制')
+  )
+}
+
+// **只复制模板生成的**——模型那些是建议，混进来会让人以为它们同等可靠。
+// 只含本页：跨页拼一份「看起来像完整脚本」的东西，反而容易被整段执行。
+function copyPageFixes() {
+  const statements = rows.value
+    .filter((row) => row.fix && row.fix.source === 'rule')
+    .map((row) => row.fix.sql)
+  if (!statements.length) {
+    ElMessage.warning('本页没有问题带修复语句')
+    return
+  }
+  copyText(statements.join('\n'))
+}
+
+async function makeReference(row) {
+  referencing.value = row.id
+  try {
+    row.reference = await catalogApi.issueReference({ datasource_id: datasourceId.value, issue_id: row.id })
+  } finally {
+    referencing.value = null
+  }
+}
 
 function levelTagType(level) {
   if (level === 1) return 'danger'
@@ -169,5 +249,38 @@ onMounted(async () => {
 .pager {
   margin-top: 16px;
   justify-content: flex-end;
+}
+
+/* 修复语句：模板生成的用普通底色，模型建议的另给一层底色——两者来源不同，不该长得一样 */
+.fix-sql {
+  margin: 0;
+  padding: 6px 8px;
+  background: #f5f7fa;
+  border: 1px solid #e4e7ed;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.fix-sql.model {
+  background: #fdf6ec;
+  border-color: #f5dab1;
+}
+
+.fix-row {
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fix-caveat,
+.fix-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.6;
 }
 </style>
