@@ -6,8 +6,10 @@ import Layout from '@/layout/index.vue'
 // **菜单按能力线分组**：`meta.group` 相同的项在侧边栏里归到同一个可展开的分组下
 // （分组名与图标见 layout/index.vue 的 MENU_GROUP_ICONS）。没有 `group` 的项直接平铺在顶层。
 //
-// **这里的声明顺序就是菜单顺序**——组内也是。所以「数据源管理」排在库表那组最后：
-// 它是配置动作，日常先看的是表、问题与规则。
+// **这里的声明顺序就是菜单顺序**——组内也是。所以：
+// - 「知识问答」不带分组，直接排在一级（它是日常用的入口，不该收进组里）
+// - 「数据源管理」排在库表那组最后（配置动作，日常先看的是表、问题与规则）
+// - 系统那一组把有功能的排在占位页之前
 const routes = [
   {
     path: '/',
@@ -19,6 +21,12 @@ const routes = [
         name: 'Home',
         component: () => import('@/views/home/index.vue'),
         meta: { title: '首页', icon: 'House', showInMenu: true }
+      },
+      {
+        path: 'knowledge/qa',
+        name: 'KnowledgeQa',
+        component: () => import('@/views/knowledge/qa.vue'),
+        meta: { title: '知识问答', icon: 'ChatDotRound', showInMenu: true }
       },
       {
         path: 'datasource/tables',
@@ -57,22 +65,16 @@ const routes = [
         meta: { title: 'SQL 生成', icon: 'EditPen', showInMenu: true, group: 'SQL' }
       },
       {
-        path: 'knowledge/qa',
-        name: 'KnowledgeQa',
-        component: () => import('@/views/knowledge/qa.vue'),
-        meta: { title: '知识问答', icon: 'ChatDotRound', showInMenu: true, group: '知识' }
-      },
-      {
         path: 'knowledge/bases',
         name: 'KnowledgeBase',
         component: () => import('@/views/knowledge/bases.vue'),
-        meta: { title: '知识库', icon: 'Collection', showInMenu: true, group: '知识' }
+        meta: { title: '知识库', icon: 'Collection', showInMenu: true, group: '系统' }
       },
       {
         path: 'knowledge/provider',
         name: 'ModelProvider',
         component: () => import('@/views/knowledge/provider.vue'),
-        meta: { title: '模型配置', icon: 'Cpu', showInMenu: true, group: '知识' }
+        meta: { title: '模型配置', icon: 'Cpu', showInMenu: true, group: '系统' }
       },
       {
         path: 'user',
