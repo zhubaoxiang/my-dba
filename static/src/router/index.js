@@ -6,11 +6,15 @@ import Layout from '@/layout/index.vue'
 // **菜单按能力线分组**：`meta.group` 相同的项在侧边栏里归到同一个可展开的分组下
 // （分组名与图标见 layout/index.vue 的 MENU_GROUP_ICONS）。没有 `group` 的项直接平铺在顶层。
 //
-// **这里的声明顺序就是菜单顺序**——组内也是。排序按**概念/工作顺序**，不按点击频率：
-// - 「知识问答」不带分组，直接排在一级（它是日常用的入口，不该收进组里）
-// - 「数据源管理」排在库表那组**第一位**：数据源是这条线的根，没有它，后面三个页面
-//   全是空状态（那三个页面的空状态里也都有「去接入」引导）
-// - 系统那一组把有功能的排在占位页之前
+// **这里的声明顺序就是菜单顺序**——组内也是。两条排序原则：
+//
+// 1. **跨族的不收进组里**，直接一级。被多条线依赖的东西挂在其中一条下面，等于把公共的
+//    东西收进了某一家的抽屉：
+//      - 「数据源管理」被库表与 SQL 两条线依赖（SQL 生成的入参里它是必填）
+//      - 「分析规则」同时管库表规则与 SQL 规则（两个 Tab）
+//      - 「知识问答」是日常用的入口，不该收进组里
+// 2. 组内按**概念/工作顺序**排，不按点击频率。库表那组只剩「看」的动作——接入与规则
+//    都已经在一级了。
 const routes = [
   {
     path: '/',
@@ -33,7 +37,13 @@ const routes = [
         path: 'datasource',
         name: 'DatasourceManagement',
         component: () => import('@/views/datasource/index.vue'),
-        meta: { title: '数据源管理', icon: 'Coin', showInMenu: true, group: '库表' }
+        meta: { title: '数据源管理', icon: 'Coin', showInMenu: true }
+      },
+      {
+        path: 'datasource/rules',
+        name: 'AnalysisRules',
+        component: () => import('@/views/datasource/rules.vue'),
+        meta: { title: '分析规则', icon: 'SetUp', showInMenu: true }
       },
       {
         path: 'datasource/tables',
@@ -46,12 +56,6 @@ const routes = [
         name: 'DatasourceIssues',
         component: () => import('@/views/datasource/issues.vue'),
         meta: { title: '问题清单', icon: 'Warning', showInMenu: true, group: '库表' }
-      },
-      {
-        path: 'datasource/rules',
-        name: 'AnalysisRules',
-        component: () => import('@/views/datasource/rules.vue'),
-        meta: { title: '分析规则', icon: 'SetUp', showInMenu: true, group: '库表' }
       },
       {
         path: 'sqlanalysis',
