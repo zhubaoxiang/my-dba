@@ -15,6 +15,8 @@ import Layout from '@/layout/index.vue'
 //      - 「知识问答」是日常用的入口，不该收进组里
 // 2. 组内按**概念/工作顺序**排，不按点击频率。库表那组只剩「看」的动作——接入与规则
 //    都已经在一级了。
+// 3. 一级项里，「分析规则」放在**紧挨系统组的上方**——它是设置类的，与系统那组连成一片；
+//    「数据源管理」则靠上，它是资源入口。
 const routes = [
   {
     path: '/',
@@ -40,12 +42,6 @@ const routes = [
         meta: { title: '数据源管理', icon: 'Coin', showInMenu: true }
       },
       {
-        path: 'datasource/rules',
-        name: 'AnalysisRules',
-        component: () => import('@/views/datasource/rules.vue'),
-        meta: { title: '分析规则', icon: 'SetUp', showInMenu: true }
-      },
-      {
         path: 'datasource/tables',
         name: 'DatasourceTables',
         component: () => import('@/views/datasource/tables.vue'),
@@ -68,6 +64,12 @@ const routes = [
         name: 'Nl2Sql',
         component: () => import('@/views/nl2sql/index.vue'),
         meta: { title: 'SQL 生成', icon: 'EditPen', showInMenu: true, group: 'SQL' }
+      },
+      {
+        path: 'datasource/rules',
+        name: 'AnalysisRules',
+        component: () => import('@/views/datasource/rules.vue'),
+        meta: { title: '分析规则', icon: 'SetUp', showInMenu: true }
       },
       {
         path: 'knowledge/bases',
