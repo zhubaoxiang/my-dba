@@ -1226,7 +1226,7 @@ class FixTemplateTests(SimpleTestCase):
         fix = self.fix(self.issue(rule_code="isolated_table", column_name=""))
         self.assertEqual(fix["sql"], "")
         self.assertEqual(fix["source"], fixes.SOURCE_ADVISORY)
-        self.assertIn("没有业务在用", fix["note"])
+        self.assertIn("不代表没有业务在使用", fix["note"])
 
     def test_no_primary_key_adds_surrogate(self):
         fix = self.fix(self.issue(rule_code="no_primary_key", column_name=""))
@@ -1282,7 +1282,7 @@ class FixTemplateTests(SimpleTestCase):
 
 class ReferenceFixTests(TestCase):
     """
-    无唯一答案那类问题的**参考语句**：走 nl2sql 的模型接入（打桩）
+    无唯一答案那类问题的**AI 修复语句**：走 nl2sql 的模型接入（打桩）
 
     与模板生成的分开标 `source`——模板是算出来的，这里是建议。
     """

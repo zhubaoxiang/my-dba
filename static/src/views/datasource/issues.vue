@@ -40,7 +40,7 @@
           <el-table-column prop="target" label="对象" min-width="220" show-overflow-tooltip />
           <el-table-column prop="description" label="说明" min-width="280" show-overflow-tooltip />
           <el-table-column prop="suggestion" label="建议" min-width="240" show-overflow-tooltip />
-          <!-- 修复语句：**模板生成的与模型建议的分区陈列**——前者是算出来的，后者是一种建议，
+          <!-- 修复语句：**模板生成的与 AI 生成的分区陈列**——前者是算出来的，后者是一种建议，
                混在一起展示会让人同等信任。系统不执行任何一条。 -->
           <el-table-column label="修复语句" min-width="320">
             <template #default="{ row }">
@@ -70,7 +70,7 @@
                 <template v-else-if="row.reference">
                   <pre class="fix-sql model">{{ row.reference.sql }}</pre>
                   <div class="fix-row">
-                    <el-tag type="warning" size="small" effect="plain">模型建议</el-tag>
+                    <el-tag type="warning" size="small" effect="plain">AI 修复</el-tag>
                     <el-button link type="primary" size="small" @click="copyText(row.reference.sql)">复制</el-button>
                   </div>
                   <div class="fix-caveat">{{ row.reference.caveat }}</div>
@@ -83,9 +83,9 @@
                   :loading="referencing === row.id"
                   @click="makeReference(row)"
                 >
-                  生成参考语句
+                  生成 AI 修复语句
                 </el-button>
-                <div class="fix-hint">无唯一答案，需按你的策略定</div>
+                <div class="fix-hint">无唯一答案，需按实际策略确定</div>
               </template>
 
               <div v-else class="fix-hint">—</div>
@@ -94,7 +94,7 @@
           <el-table-column label="操作" width="150" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" :disabled="!row.table_name" @click="openTable(row)">查看表</el-button>
-              <el-tooltip content="只让这一处不再报；要让整条规则都不跑，请到「分析规则」页停用规则" placement="top">
+              <el-tooltip content="仅对该条目生效；若要使整条规则不再运行，请到「分析规则」页停用规则" placement="top">
                 <el-button link type="primary" @click="muteRow(row)">静音</el-button>
               </el-tooltip>
             </template>
@@ -118,7 +118,7 @@
     <!-- 已静音的条目：能看、能取消。静音**不表示问题消失了**，只是不再报 -->
     <el-dialog v-model="mutedVisible" title="已静音的问题" width="760px">
       <div class="muted-note">
-        静音只让这些条目不再出现，<b>它们并没有被修复</b>；这些条目也不再计入各处的问题统计。
+        静音仅使这些条目不再出现，<b>并不表示问题已被修复</b>；它们同样不再计入各处的问题统计。
       </div>
       <el-table :data="mutedRows" v-loading="mutedLoading" border size="small">
         <el-table-column prop="rule_name" label="规则" width="140" />
@@ -131,7 +131,7 @@
           </template>
         </el-table-column>
       </el-table>
-      <el-empty v-if="!mutedLoading && !mutedRows.length" description="还没有静音任何问题" :image-size="60" />
+      <el-empty v-if="!mutedLoading && !mutedRows.length" description="暂无已静音的问题" :image-size="60" />
     </el-dialog>
   </div>
 </template>
@@ -168,7 +168,7 @@ async function muteRow(row) {
     table_name: row.table_name || '',
     column_name: row.column_name || ''
   })
-  ElMessage.success('已静音，该处不再出现在清单与统计里')
+  ElMessage.success('已静音，该条目不再计入清单与统计')
   await loadIssues()
 }
 
@@ -188,13 +188,13 @@ async function unmuteRow(row) {
   ElMessage.success('已取消静音')
   await Promise.all([openMuted(), loadIssues()])
 }
-// 正在生成参考语句的那一行（它要调模型，有延迟）
+// 正在生成 AI 修复语句的那一行（它要调模型，有延迟）
 const referencing = ref(null)
 
 function copyText(text) {
   navigator.clipboard.writeText(text).then(
     () => ElMessage.success('已复制'),
-    () => ElMessage.warning('复制失败，请手动选中复制')
+    () => ElMessage.warning('复制失败，请手动选择后复制')
   )
 }
 
@@ -215,7 +215,7 @@ function copyPageFixes() {
       ].join('\n')
     )
   if (!blocks.length) {
-    ElMessage.warning('本页没有问题带修复语句')
+    ElMessage.warning('本页没有问题附带修复语句')
     return
   }
   copyText(blocks.join('\n\n'))
@@ -325,7 +325,7 @@ onMounted(async () => {
   justify-content: flex-end;
 }
 
-/* 修复语句：模板生成的用普通底色，模型建议的另给一层底色——两者来源不同，不该长得一样 */
+/* 修复语句：模板生成的用普通底色，AI 生成的另给一层底色——两者来源不同，不该长得一样 */
 .fix-sql {
   margin: 0;
   padding: 6px 8px;

@@ -5,7 +5,7 @@
 不需要模型：确定性、可单测、且不依赖模型可用性。
 
 「无唯一答案」的两类（超大表的分区/归档策略、大对象字段拆表）在这里**故意没有模板**：
-它们要先决定策略，模板拼不出来。那两条由模型给参考语句。
+它们要先决定策略，模板拼不出来。那两条由模型给 AI 修复语句。
 
 **只支持 PostgreSQL 方言。** 生成出来的语句是要贴到目标库上跑的，而
 `ALTER COLUMN … TYPE` / `ADD COLUMN … bigserial` 这些在 MySQL 上是另一套写法；
@@ -82,7 +82,7 @@ def _create_index(issue) -> tuple:
     rendered = ", ".join(_quote(item) for item in columns)
     return (
         f"CREATE INDEX {_quote(name)} ON {target} ({rendered});",
-        f"索引名 {name} 是按「表_列」自动拼的，可按团队命名规范改；执行前确认该列组合确实缺少可用的索引。",
+        f"索引名 {name} 由「表_列」自动拼出，可按团队命名规范调整；执行前请确认该列组合确实缺少可用索引。",
     )
 
 
@@ -101,7 +101,7 @@ def _add_surrogate_key(issue) -> tuple:
     target = _qualified(_of(issue, "schema_name"), _of(issue, "table_name"))
     return (
         f"ALTER TABLE {target} ADD COLUMN id bigserial PRIMARY KEY;",
-        "代理键列名默认取 id——若表中已有同名列请换一个。只有在确实没有业务唯一列时才用代理键。",
+        "代理键列名默认取 id；若表中已有同名列，请另行指定。仅在确实没有业务唯一列时才使用代理键。",
     )
 
 
@@ -113,7 +113,7 @@ def _char_to_timestamp(issue) -> tuple:
     rendered = _quote(column)
     return (
         f"ALTER TABLE {target} ALTER COLUMN {rendered} TYPE timestamp USING {rendered}::timestamp;",
-        "转换会逐行解析现有文本，任何一行不是合法时间，整条语句都会失败——先用 SELECT 把这批行找出来。",
+        "转换会逐行解析现有文本；任何一行不是合法时间，整条语句都会失败。建议先用 SELECT 找出这些行。",
     )
 
 
@@ -150,7 +150,7 @@ def _template(issue, limit: int):
     if code == "duplicate_index":
         return _drop_index(issue, "执行前确认没有视图、约束或外键依赖它；若被依赖，先处理依赖方。")
     if code == "unused_index":
-        return _drop_index(issue, "先观察一个完整的业务周期（含月末、季末这类周期场景）确认确实无用，再执行。")
+        return _drop_index(issue, "需先观察一个完整业务周期（含月末、季末等周期场景）确认确实无用，再执行。")
     if code == "no_primary_key":
         return _add_surrogate_key(issue)
     if code == "suspicious_column_type":
@@ -185,7 +185,7 @@ def _advisory(note: str) -> dict:
 # 「没有外键」与「没人用」之间隔着一整个业务上下文。把它变成一条可执行的 `DROP TABLE`，
 # 是**把一个弱证据伪装成确定结论**；而这条语句又是**不可逆**的。宁可只留排查建议。
 _ADVISORY_RULES = {
-    "isolated_table": "「孤立」只说明该表没有外键关系，不说明没有业务在用——不自动给出语句，请按排查建议人工确认。",
+    "isolated_table": "「孤立」仅表示该表没有外键关系，不代表没有业务在使用；因此不自动给出语句，请按排查建议人工确认。",
 }
 
 

@@ -172,7 +172,7 @@ class DatasourceUnavailable(Exception):
     """
 
 
-# 「无唯一答案」那类问题的参考语句：把问题本身说给模型，让它给一条示例
+# 「无唯一答案」那类问题的 AI 修复语句：把问题本身说给模型，让它给一条示例
 _REFERENCE_QUESTION = (
     "表 {table} 上存在这样一个问题：{description}\n" "请给出一个可执行的修复**示例**语句（例如分区、归档或拆分）。"
 )
@@ -180,7 +180,7 @@ _REFERENCE_QUESTION = (
 
 def reference_fix(datasource_id: int, issue_id: int) -> dict:
     """
-    给一条**无唯一答案**的问题生成参考语句
+    给一条**无唯一答案**的问题生成 AI 修复语句
 
     走 `apps/nl2sql` 的服务函数（跨模块调它的公开契约）——那里已经拥有「模型 → SQL」
     这一能力，不在这里另起一套提示词与输出解析。

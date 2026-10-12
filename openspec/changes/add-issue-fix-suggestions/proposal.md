@@ -18,7 +18,7 @@
 - 库表分析判出的每条问题，附带一条**可执行的修复语句**
 - **两类分开呈现、各自标明来源**：
   - **由规则对象直接得出**（对象确定的 7 个分支）——确定性模板生成，随问题清单一并返回，**不需要模型**
-  - **无唯一答案、需你决策**（超大表、大对象拆表）——按需由模型给出参考语句，写明前提
+  - **无唯一答案、需你决策**（超大表、大对象拆表）——按需由模型给出 AI 修复语句，写明前提
 - `catalog_issue` 新增 `fix_key`：存**生成修复语句所需的额外标识**，由各规则自己填——索引类规则填**索引名**（现在它只存在于描述文字里，`DROP INDEX` 无法从库中读出），可疑字段类型填**命中的分支**（该规则有三个分支，语句形态不同）
 - **只支持 PostgreSQL 方言**：`ALTER COLUMN … TYPE` / `bigserial` 在 MySQL 上是另一套写法，而本仓库没有可验证的 MySQL 环境；非 PostgreSQL 数据源明确说明不支持，**不静默降级**
 - 问题清单页直接展示语句 + 「复制全部修复语句」；「需你决策」那两条给按钮按需生成
@@ -31,7 +31,7 @@
   - `src/apps/datasource/rules/context.py`、`rules/definitions.py`：索引类规则填 `object_name`
   - `src/apps/datasource/models.py` + `sql/pg_struct.sql` + `sql/patch.sql`：`catalog_issue.object_name`
   - `src/apps/datasource/serializers.py`、`services.py`、`views.py`：问题清单带上修复语句
-  - `src/apps/nl2sql/`（**复用**其模型接入做「参考语句」）
+  - `src/apps/nl2sql/`（**复用**其模型接入做「AI 修复语句」）
   - `static/src/views/datasource/issues.vue`
   - `docs/datasource.md`
 - 无新依赖、无部署形态变化

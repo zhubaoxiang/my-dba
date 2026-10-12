@@ -442,7 +442,7 @@ class CatalogView(baseviews.AnyLogin):
     @action(detail=False, methods=["POST"], url_path="issues/reference")
     def issue_reference(self, request):
         """
-        给一条「无唯一答案」的问题生成**参考语句**
+        给一条「无唯一答案」的问题生成**AI 修复语句**
 
         **按需触发**——它要调模型，有延迟与成本，且只在那两条上用得着（超大表、
         大对象拆表）。模型不可用时返回 `available: false` 与原因，不是接口错误。

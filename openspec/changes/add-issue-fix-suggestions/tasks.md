@@ -17,9 +17,9 @@
 ## 3. 接口
 
 - [x] 3.1 问题清单接口的每条问题带上 `fix`：`{sql, caveat, source: "rule"}` 或 `{source: "model_required"}`
-- [x] 3.2 新增参考语句接口（调 `nl2sql` 的模型接入）：入参为问题标识，返回 `{available, sql, premise, note}`
+- [x] 3.2 新增 AI 修复语句接口（调 `nl2sql` 的模型接入）：入参为问题标识，返回 `{available, sql, premise, note}`
 - [x] 3.3 未配置对话模型时如实说明，模板部分不受影响
-- [x] 3.4 单测：清单带模板语句；无对话模型时模板照常、参考语句如实说明
+- [x] 3.4 单测：清单带模板语句；无对话模型时模板照常、 AI 修复语句如实说明
 - [x] 3.5 单测：响应不含凭据
 
 ## 4. 前端
@@ -49,7 +49,7 @@
 
 - [x] 7.1 **字段名 `object_name` → `fix_key`**：索引类规则要填的是「索引名」，但**可疑字段类型那条规则有三个分支**（字符存时间 / 超长 varchar / 大对象），可修的那两个语句形态完全不同，而表里没有 `data_type` 可分——那一列存的其实是**命中的分支**。叫 `object_name` 是撒谎
 - [x] 7.2 **只支持 PostgreSQL 方言**：`ALTER COLUMN … TYPE` / `bigserial` 在 MySQL 上是另一套写法，而本仓库没有可验证的 MySQL 环境。非 PostgreSQL 数据源标 `unsupported` 并说明原因，**不静默降级为模型建议**——那会让 MySQL 用户以为拿到的东西与 PostgreSQL 用户同等可靠
-- [x] 7.3 **参考语句复用 `nl2sql.services.generate_sql()`**，不另起一套提示词与输出解析；**前提由后端给**（「分区键与归档周期取决于你的查询与保留策略」这句是恒定的，模型说不如我们说）。`datasource.services` 延迟导入 `nl2sql.services`——后者依赖前者的 `list_snapshot_tables`，模块级导入会成环
+- [x] 7.3 **AI 修复语句复用 `nl2sql.services.generate_sql()`**，不另起一套提示词与输出解析；**前提由后端给**（「分区键与归档周期取决于你的查询与保留策略」这句是恒定的，模型说不如我们说）。`datasource.services` 延迟导入 `nl2sql.services`——后者依赖前者的 `list_snapshot_tables`，模块级导入会成环
 - [x] 7.4 **「复制本页修复语句」而不是「复制全部」**：跨页拼一份看起来像完整脚本的东西，反而容易被整段执行；而且那要多发一次请求
 
 ## 8. 真机核对抓到的一处**危害**（本次改动里最要紧的一条）

@@ -89,7 +89,7 @@ export const catalogApi = {
   issues(params) {
     return request.get('/v1/catalog/issues', { params })
   },
-  // 给一条「无唯一答案」的问题生成参考语句（按需，会调模型）
+  // 给一条「无唯一答案」的问题生成 AI 修复语句（按需，会调模型）
   issueReference(data) {
     return request.post('/v1/catalog/issues/reference', data, { timeout: SLOW_TIMEOUT })
   },

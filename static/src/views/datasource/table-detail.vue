@@ -70,7 +70,7 @@
                 </el-table-column>
                 <el-table-column prop="name" label="约束名" min-width="160" show-overflow-tooltip />
               </el-table>
-              <div v-else class="relation-empty">没有引用任何表</div>
+              <div v-else class="relation-empty">本表未引用任何表</div>
             </div>
 
             <div class="relation-block">
@@ -92,7 +92,7 @@
                 </el-table-column>
                 <el-table-column prop="name" label="约束名" min-width="160" show-overflow-tooltip />
               </el-table>
-              <div v-else class="relation-empty">没有被任何表引用</div>
+              <div v-else class="relation-empty">未被任何表引用</div>
             </div>
           </el-tab-pane>
         </el-tabs>
