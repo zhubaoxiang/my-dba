@@ -300,13 +300,21 @@ class CatalogView(baseviews.AnyLogin):
         rule_code = (request.query_params.get("rule_code") or "").strip()
         if rule_code:
             queryset = queryset.filter(rule_code=rule_code)
+        # 本次问题所属的数据源。**必须在静音过滤之前取**——否则整页问题全被静音时
+        # 这里取不到值，连带下面的 muted_total 也变成 0，界面上就再也看不到「已静音几条」
+        owner_id = queryset.values_list("datasource_id", flat=True).first()
+
+        # 静音的问题**默认不出现**——它们的存在意义就是让清单只剩新问题。
+        # 与问题统计走同一个 `muted_filter()`，两处口径必须一致
+        include_muted = (request.query_params.get("include_muted") or "").lower() in ("1", "true", "yes")
+        muted = services.muted_filter()
+        if not include_muted and muted is not None:
+            queryset = queryset.exclude(muted)
+
         queryset = queryset.order_by("issue_level", "rule_code", "id")
 
         page = self.paginate_queryset(queryset)
         items = list(page) if page is not None else list(queryset)
-
-        # 修复语句按**目标库的方言**生成，故取本次问题所属数据源的库类型
-        owner_id = queryset.values_list("datasource_id", flat=True).first()
         brief = services.datasource_brief(owner_id) if owner_id else None
         db_type = (brief or {}).get("db_type")
         for item, fix in zip(items, fixes.fixes_for(items, db_type), strict=False):
@@ -314,10 +322,15 @@ class CatalogView(baseviews.AnyLogin):
 
         self.serializer_class = serializers.CatalogIssueSerializer
         serializer = self.get_serializer(items, many=True)
+        # 「已静音 N 条」：界面上要常驻这个数——静音会让数字变小，不说明会被当成问题解决了
+        muted_total = services.count_mutes(owner_id) if owner_id else 0
         if page is None:
-            return baseviews.ResponseOK({"results": serializer.data, "total": len(serializer.data)})
+            return baseviews.ResponseOK(
+                {"results": serializer.data, "total": len(serializer.data), "muted_total": muted_total}
+            )
         result = self.get_paginated_response(serializer.data).data
         result["total"] = result["count"]
+        result["muted_total"] = muted_total
         return baseviews.ResponseOK(result)
 
     @action(detail=False, methods=["GET"], url_path="summary")
@@ -369,6 +382,57 @@ class CatalogView(baseviews.AnyLogin):
         if base is None or target is None:
             return baseviews.ResponseNotFound("快照不存在")
         return baseviews.ResponseOK(differ.diff_snapshots(base.raw_data, target.raw_data))
+
+    @action(detail=False, methods=["POST"], url_path="issues/mute")
+    def mute_issue(self, request):
+        """
+        静音一处问题（幂等）
+
+        **只影响这一处**——要让整条规则不再运行，那是「停用规则」，影响面差一个数量级。
+        """
+        datasource_id = _to_int(request.data.get("datasource_id"))
+        rule_code = (request.data.get("rule_code") or "").strip()
+        if datasource_id is None or not rule_code:
+            return baseviews.ResponseBadRequest("缺少参数 datasource_id 或 rule_code")
+        try:
+            row = services.mute_issue(
+                datasource_id,
+                rule_code,
+                table_name=(request.data.get("table_name") or "").strip(),
+                column_name=(request.data.get("column_name") or "").strip(),
+                creator=getattr(getattr(request, "user", None), "username", "") or "",
+            )
+        except services.InvalidMuteKey as exc:
+            return baseviews.ResponseBadRequest(str(exc))
+        except services.DatasourceUnavailable as exc:
+            return baseviews.ResponseNotFound(str(exc))
+        return baseviews.ResponseOK(serializers.IssueMuteSerializer(row).data)
+
+    @action(detail=False, methods=["DELETE"], url_path=r"issues/mute/(?P<mute_id>\d+)")
+    def unmute_issue(self, request, mute_id=None):
+        """
+        取消静音
+        """
+        datasource_id = _to_int(request.query_params.get("datasource_id"))
+        if datasource_id is None:
+            return baseviews.ResponseBadRequest("缺少参数 datasource_id")
+        try:
+            services.unmute_issue(datasource_id, int(mute_id))
+        except services.DatasourceUnavailable as exc:
+            return baseviews.ResponseNotFound(str(exc))
+        return baseviews.ResponseOK({"id": int(mute_id)})
+
+    @action(detail=False, methods=["GET"], url_path="issues/muted")
+    def muted_issues(self, request):
+        """
+        已静音的条目（供「查看已静音」与取消静音）
+        """
+        datasource_id = _to_int(request.query_params.get("datasource_id"))
+        if datasource_id is None:
+            return baseviews.ResponseBadRequest("缺少参数 datasource_id")
+        rows = services.list_mutes(datasource_id)
+        self.serializer_class = serializers.IssueMuteSerializer
+        return baseviews.ResponseOK({"results": self.get_serializer(rows, many=True).data, "total": len(rows)})
 
     @action(detail=False, methods=["POST"], url_path="issues/reference")
     def issue_reference(self, request):

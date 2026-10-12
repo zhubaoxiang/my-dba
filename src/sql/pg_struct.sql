@@ -118,6 +118,28 @@ CREATE INDEX IF NOT EXISTS idx_catalog_issue_snapshot ON catalog_issue (snapshot
 -- datasource_id 外键的前导索引（由本模块的分析规则发现缺失后补齐）
 CREATE INDEX IF NOT EXISTS idx_catalog_issue_datasource ON catalog_issue (datasource_id);
 
+-- 已静音的问题：按「数据源 + 规则 + 表 + 列」记住「这一处不再报」。
+-- **独立的表**：catalog_issue 的行每次采集全量重建，标记加在那上面活不过一次采集。
+-- 键取的都是稳定值（rule_code 稳定、表名列名来自库），重新采集后静音仍然生效。
+CREATE TABLE IF NOT EXISTS issue_mute (
+    id            serial       PRIMARY KEY,
+    datasource_id integer      NOT NULL REFERENCES datasource (id),
+    rule_code     varchar(64)  NOT NULL,
+    table_name    varchar(128) NOT NULL DEFAULT '',
+    column_name   varchar(128) NOT NULL DEFAULT '',
+    create_time   timestamp    NOT NULL DEFAULT now(),
+    update_time   timestamp    NOT NULL DEFAULT now(),
+    creator       varchar(32)  NOT NULL DEFAULT '',
+    is_deleted    boolean      NOT NULL DEFAULT false
+);
+
+COMMENT ON TABLE issue_mute IS '已静音的问题，键为数据源+规则+表+列；静音全局生效，清单与统计同口径';
+
+-- 唯一性由部分唯一索引保证（未删除范围内唯一），与 analysis_rule 同款写法，
+-- 避免软删除后同一处无法重新静音
+CREATE UNIQUE INDEX IF NOT EXISTS uk_issue_mute_key
+    ON issue_mute (datasource_id, rule_code, table_name, column_name) WHERE is_deleted = false;
+
 -- 分析规则的可覆盖项（规则清单与默认值来自代码声明，本表只存运行时可改的部分）
 CREATE TABLE IF NOT EXISTS analysis_rule (
     id            serial       PRIMARY KEY,

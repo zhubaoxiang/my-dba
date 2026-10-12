@@ -107,6 +107,31 @@ class CatalogIssue(AbstractTimeFiledModel):
         db_table = "catalog_issue"
 
 
+class IssueMute(AbstractTimeFiledModel):
+    """
+    已静音的问题
+
+    按「数据源 + 规则 + 表 + 列」记住「这一处不再报」。**必须是一张独立的表**：
+    `catalog_issue` 的行每次采集都会全量重建，标记加在那上面活不过一次采集。
+
+    静音是**全局生效**的——问题清单与各处的问题统计都排除它。只在清单里隐藏、首页照算
+    会立刻造出「首页 7 条、清单 5 条」，那是两处口径打架。
+
+    键取的都是**稳定值**（`rule_code` 是稳定标识；表名列名来自库），不取 `target`
+    这类拼接串——那样重新采集后静音就会失效。
+    """
+
+    datasource = models.ForeignKey(
+        Datasource, on_delete=models.DO_NOTHING, db_column="datasource_id", verbose_name="数据源"
+    )
+    rule_code = models.CharField(max_length=64, verbose_name="规则标识")
+    table_name = models.CharField(max_length=128, default="", blank=True, verbose_name="表名")
+    column_name = models.CharField(max_length=128, default="", blank=True, verbose_name="列名")
+
+    class Meta:
+        db_table = "issue_mute"
+
+
 class DatasourceMetric(AbstractTimeFiledModel):
     """
     数据源的一次指标探测，一行 = 一个库的一次探测

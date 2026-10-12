@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 import psycopg2
 import pymysql
-from django.db.models import Count
+from django.db.models import Count, Q
 
 from apps.datasource import analyzer, models
 from apps.datasource.collectors import get_collector
@@ -512,6 +512,105 @@ def rule_counts() -> dict:
     return {"total": len(rule_registry.all_rules())}
 
 
+def mute_key(rule_code, table_name, column_name) -> tuple:
+    """
+    静音的键：**规则 + 表 + 列**，三者都是稳定值
+
+    不取 `target` 这类拼接串——它是给界面显示用的，格式一变静音就失效了。
+    """
+    return (rule_code or "", table_name or "", column_name or "")
+
+
+def muted_filter():
+    """
+    把全部静音项拼成一个查询条件；**没有任何静音项时返回 None**
+
+    **问题清单与问题统计都走它**——这个项目一路在躲的就是「两处口径打架」
+    （首页 7 条、清单 5 条）。过滤逻辑写两遍，迟早会分叉。
+
+    **为什么空的时候返回 None 而不是空的 `Q()`**：空 `Q()` 在 Django 里是**中性**的，
+    `.filter(Q())` 匹配**全部**行。拿它去做「减法」会把所有问题一起减掉——首页数字归零。
+    调用方必须显式判 `None`，宁可多一行判断，不要一个静默的清零。
+    """
+    condition = None
+    for row in models.IssueMute.objects.filter(is_deleted=False):
+        item = Q(
+            datasource_id=row.datasource_id,
+            rule_code=row.rule_code,
+            table_name=row.table_name,
+            column_name=row.column_name,
+        )
+        condition = item if condition is None else condition | item
+    return condition
+
+
+class InvalidMuteKey(Exception):
+    """
+    静音的键不合法（规则不存在）
+    """
+
+
+def mute_issue(
+    datasource_id: int, rule_code: str, table_name: str = "", column_name: str = "", creator: str = ""
+) -> "models.IssueMute":
+    """
+    静音一处问题
+
+    **幂等**：重复静音同一处不报错——使用者连点两下不该看到失败。
+
+    **只影响这一处**：同一张表上的其他问题、其他表上的同类问题照常报出。要让整条规则
+    从此不再运行，那是「停用规则」（规则清单页），影响面差一个数量级。
+    """
+    if rule_registry.get_rule(rule_code) is None:
+        raise InvalidMuteKey(f"规则 {rule_code} 不存在")
+    if datasource_brief(datasource_id) is None:
+        raise DatasourceUnavailable(f"数据源 {datasource_id} 不存在或已删除")
+
+    row = models.IssueMute.objects.filter(
+        is_deleted=False,
+        datasource_id=datasource_id,
+        rule_code=rule_code,
+        table_name=table_name,
+        column_name=column_name,
+    ).first()
+    if row is None:
+        row = models.IssueMute.objects.create(
+            datasource_id=datasource_id,
+            rule_code=rule_code,
+            table_name=table_name,
+            column_name=column_name,
+            creator=creator,
+        )
+    return row
+
+
+def unmute_issue(datasource_id: int, mute_id: int) -> None:
+    """
+    取消静音（软删除）
+
+    软删除而不是物理删除：与全项目一致，且能靠部分唯一索引让同一处可以**重新**静音。
+    """
+    row = models.IssueMute.objects.filter(is_deleted=False, id=mute_id, datasource_id=datasource_id).first()
+    if row is None:
+        raise DatasourceUnavailable("静音记录不存在或不属于该数据源")
+    row.is_deleted = True
+    row.save(update_fields=["is_deleted", "update_time"])
+
+
+def list_mutes(datasource_id: int) -> list:
+    """
+    某数据源的已静音条目（供「查看已静音」）
+    """
+    return list(models.IssueMute.objects.filter(is_deleted=False, datasource_id=datasource_id).order_by("-id"))
+
+
+def count_mutes(datasource_id: int) -> int:
+    """
+    某数据源已静音的条数——界面顶部的「已静音 N 条」用它
+    """
+    return models.IssueMute.objects.filter(is_deleted=False, datasource_id=datasource_id).count()
+
+
 def list_datasource_status() -> list:
     """
     每个数据源的采集状态与**最近快照**的问题分级统计
@@ -537,12 +636,16 @@ def list_datasource_status() -> list:
     counts = {}
     snapshot_ids = [snapshot.id for snapshot in latest_snapshot.values()]
     if snapshot_ids:
-        rows = (
-            models.CatalogIssue.objects.filter(is_deleted=False, snapshot_id__in=snapshot_ids)
-            .values("snapshot_id", "issue_level")
-            .annotate(total=Count("id"))
-        )
+        counted = models.CatalogIssue.objects.filter(is_deleted=False, snapshot_id__in=snapshot_ids)
+        rows = counted.values("snapshot_id", "issue_level").annotate(total=Count("id"))
         counts = {(row["snapshot_id"], row["issue_level"]): row["total"] for row in rows}
+        # **排除已静音的**——与问题清单走同一个过滤器，两处各写一遍就是口径分叉的来源
+        muted = muted_filter()
+        if muted is not None:
+            muted_rows = counted.filter(muted).values("snapshot_id", "issue_level").annotate(total=Count("id"))
+            for row in muted_rows:
+                key = (row["snapshot_id"], row["issue_level"])
+                counts[key] = max(counts.get(key, 0) - row["total"], 0)
 
     items = []
     for datasource in datasources:

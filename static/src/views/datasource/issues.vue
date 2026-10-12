@@ -16,6 +16,10 @@
             <el-select v-model="ruleCode" placeholder="全部规则" clearable style="width: 190px" @change="reload">
               <el-option v-for="item in rules" :key="item.code" :value="item.code" :label="item.name" />
             </el-select>
+            <!-- 常驻这个数：静音会让数字变小，不说明会被当成「问题解决了」 -->
+            <el-button link type="primary" :disabled="!datasourceId" @click="openMuted">
+              已静音 {{ mutedTotal }} 条
+            </el-button>
             <el-button @click="copyPageFixes" :disabled="!rows.length">复制本页修复语句</el-button>
             <el-button @click="reload" :disabled="!datasourceId">刷新</el-button>
           </div>
@@ -87,9 +91,12 @@
               <div v-else class="fix-hint">—</div>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="110" fixed="right">
+          <el-table-column label="操作" width="150" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" :disabled="!row.table_name" @click="openTable(row)">查看表</el-button>
+              <el-tooltip content="只让这一处不再报；要让整条规则都不跑，请到「分析规则」页停用规则" placement="top">
+                <el-button link type="primary" @click="muteRow(row)">静音</el-button>
+              </el-tooltip>
             </template>
           </el-table-column>
         </el-table>
@@ -107,6 +114,25 @@
         />
       </template>
     </el-card>
+
+    <!-- 已静音的条目：能看、能取消。静音**不表示问题消失了**，只是不再报 -->
+    <el-dialog v-model="mutedVisible" title="已静音的问题" width="760px">
+      <div class="muted-note">
+        静音只让这些条目不再出现，<b>它们并没有被修复</b>；这些条目也不再计入各处的问题统计。
+      </div>
+      <el-table :data="mutedRows" v-loading="mutedLoading" border size="small">
+        <el-table-column prop="rule_name" label="规则" width="140" />
+        <el-table-column prop="table_name" label="表" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="column_name" label="列" min-width="140" show-overflow-tooltip />
+        <el-table-column prop="create_time" label="静音于" width="160" />
+        <el-table-column label="操作" width="100">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="unmuteRow(row)">取消静音</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-if="!mutedLoading && !mutedRows.length" description="还没有静音任何问题" :image-size="60" />
+    </el-dialog>
   </div>
 </template>
 
@@ -129,6 +155,39 @@ const total = ref(0)
 const loading = ref(false)
 const loaded = ref(false)
 const query = reactive({ page: 1, page_size: 20 })
+const mutedTotal = ref(0)
+const mutedVisible = ref(false)
+const mutedRows = ref([])
+const mutedLoading = ref(false)
+
+// 静音只让**这一处**不再报。与「停用规则」是两回事——后者是全局的，影响面差一个数量级
+async function muteRow(row) {
+  await catalogApi.muteIssue({
+    datasource_id: datasourceId.value,
+    rule_code: row.rule_code,
+    table_name: row.table_name || '',
+    column_name: row.column_name || ''
+  })
+  ElMessage.success('已静音，该处不再出现在清单与统计里')
+  await loadIssues()
+}
+
+async function openMuted() {
+  mutedVisible.value = true
+  mutedLoading.value = true
+  try {
+    const data = await catalogApi.mutedIssues({ datasource_id: datasourceId.value })
+    mutedRows.value = data.results || []
+  } finally {
+    mutedLoading.value = false
+  }
+}
+
+async function unmuteRow(row) {
+  await catalogApi.unmuteIssue(row.id, { datasource_id: datasourceId.value })
+  ElMessage.success('已取消静音')
+  await Promise.all([openMuted(), loadIssues()])
+}
 // 正在生成参考语句的那一行（它要调模型，有延迟）
 const referencing = ref(null)
 
@@ -199,6 +258,7 @@ async function loadIssues() {
     const data = await catalogApi.issues(params)
     rows.value = data.results || []
     total.value = data.total || 0
+    mutedTotal.value = data.muted_total || 0
     loaded.value = true
   } catch (err) {
     rows.value = []
@@ -293,6 +353,13 @@ onMounted(async () => {
 .fix-caveat,
 .fix-hint {
   margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.6;
+}
+
+.muted-note {
+  margin-bottom: 10px;
   font-size: 12px;
   color: #909399;
   line-height: 1.6;

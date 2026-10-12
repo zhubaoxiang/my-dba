@@ -307,3 +307,28 @@ ALTER TABLE analysis_rule DROP COLUMN IF EXISTS object_level;
 ALTER TABLE catalog_issue ADD COLUMN IF NOT EXISTS fix_key varchar(128) NOT NULL DEFAULT '';
 
 COMMENT ON COLUMN catalog_issue.fix_key IS '修复语句所需的额外标识：索引名 / 字段类型分支';
+
+
+-- ============================================================
+-- 新增已静音问题表（openspec: add-issue-mute）
+-- ============================================================
+
+-- 问题行每次采集全量重建，所以静音标记**不能**加在 catalog_issue 上（活不过一次采集），
+-- 必须是这张独立的表。键为「数据源 + 规则 + 表 + 列」，都是稳定值。
+CREATE TABLE IF NOT EXISTS issue_mute (
+    id            serial       PRIMARY KEY,
+    datasource_id integer      NOT NULL REFERENCES datasource (id),
+    rule_code     varchar(64)  NOT NULL,
+    table_name    varchar(128) NOT NULL DEFAULT '',
+    column_name   varchar(128) NOT NULL DEFAULT '',
+    create_time   timestamp    NOT NULL DEFAULT now(),
+    update_time   timestamp    NOT NULL DEFAULT now(),
+    creator       varchar(32)  NOT NULL DEFAULT '',
+    is_deleted    boolean      NOT NULL DEFAULT false
+);
+
+COMMENT ON TABLE issue_mute IS '已静音的问题，键为数据源+规则+表+列；静音全局生效，清单与统计同口径';
+
+-- 未删除范围内唯一，避免软删除后同一处无法重新静音
+CREATE UNIQUE INDEX IF NOT EXISTS uk_issue_mute_key
+    ON issue_mute (datasource_id, rule_code, table_name, column_name) WHERE is_deleted = false;

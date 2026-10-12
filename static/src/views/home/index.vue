@@ -37,9 +37,12 @@
         <div class="stat-value" :class="{ 'text-high': summary.issue_total > 0 }">
           {{ dash(summary.issue_total) }}
         </div>
-        <div class="stat-label">
-          问题合计<template v-if="summary.issue_high_total"> · 高危 {{ summary.issue_high_total }}</template>
-        </div>
+        <!-- 静音会让这个数变小。不说明的话，数字下降会被当成「问题解决了」 -->
+        <el-tooltip content="已静音的问题不计入" placement="top">
+          <div class="stat-label">
+            问题合计<template v-if="summary.issue_high_total"> · 高危 {{ summary.issue_high_total }}</template>
+          </div>
+        </el-tooltip>
       </div>
       <div class="stat">
         <div class="stat-value">{{ dash(summary.knowledge_base_total) }}</div>

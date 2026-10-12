@@ -137,6 +137,26 @@ class CatalogIssueSerializer(serializers.ModelSerializer):
         return custom_enum.ObjectLevelEnum(obj.object_level).label
 
 
+class IssueMuteSerializer(serializers.ModelSerializer):
+    """
+    已静音的问题
+
+    规则名从**代码声明**取，库里不存副本——这是模块里踩过的坑：存了副本就会
+    「规则改名后清单永远显示旧名字」。
+    """
+
+    create_time = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S")
+    rule_name = serializers.SerializerMethodField(label="规则名称")
+
+    class Meta:
+        model = models.IssueMute
+        exclude = ["update_time"]
+
+    def get_rule_name(self, obj):
+        declared = registry.get_rule(obj.rule_code)
+        return declared.name if declared else obj.rule_code
+
+
 class AnalysisRuleSerializer(serializers.ModelSerializer):
     """
     规则查询序列化

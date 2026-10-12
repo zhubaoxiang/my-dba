@@ -1348,3 +1348,232 @@ class ReferenceFixTests(TestCase):
         )
         with self.assertRaises(services.DatasourceUnavailable):
             services.reference_fix(other.id, self.issue.id)
+
+
+class IssueMuteTests(TestCase):
+    """
+    静音：**跨快照生效**，且**清单与统计同口径**
+
+    后者是这次最容易做错的地方——只在清单里隐藏、首页照算，会立刻造出
+    「首页 7 条、清单 5 条」这种两处打架。
+    """
+
+    def setUp(self):
+        self.datasource = models.Datasource.objects.create(
+            name="ds",
+            db_type=custom_enum.DbTypeEnum.POSTGRESQL.value,
+            host="127.0.0.1",
+            port=5432,
+            db_name="d",
+            username="u",
+            password="p",
+        )
+        self.snapshot = models.MetadataSnapshot.objects.create(
+            datasource_id=self.datasource.id, collect_time=datetime.now(), raw_data={"tables": []}
+        )
+
+    def add_issue(self, rule_code="no_primary_key", table_name="t", column_name="c", snapshot=None):
+        return models.CatalogIssue.objects.create(
+            datasource_id=self.datasource.id,
+            snapshot_id=(snapshot or self.snapshot).id,
+            issue_level=custom_enum.IssueLevelEnum.HIGH.value,
+            rule_code=rule_code,
+            rule_name="规则",
+            object_level=custom_enum.ObjectLevelEnum.TABLE.value,
+            table_name=table_name,
+            column_name=column_name,
+        )
+
+    def listed(self, include_muted=False):
+        queryset = models.CatalogIssue.objects.filter(is_deleted=False)
+        muted = services.muted_filter()
+        if not include_muted and muted is not None:
+            queryset = queryset.exclude(muted)
+        return queryset.count()
+
+    def counted(self):
+        counts = services.list_datasource_status()[0]["issue_counts"]
+        return sum(counts.values())
+
+    def test_mute_is_idempotent(self):
+        first = services.mute_issue(self.datasource.id, "no_primary_key", "t", "c")
+        second = services.mute_issue(self.datasource.id, "no_primary_key", "t", "c")
+        self.assertEqual(first.id, second.id)
+        self.assertEqual(models.IssueMute.objects.filter(is_deleted=False).count(), 1)
+
+    def test_unknown_rule_is_rejected(self):
+        with self.assertRaises(services.InvalidMuteKey):
+            services.mute_issue(self.datasource.id, "no_such_rule")
+
+    def test_mute_drops_both_the_list_and_the_count_by_one(self):
+        """**两个数字必须同时动**——这是本变更最容易做错的地方"""
+        self.add_issue()
+        self.add_issue(rule_code="isolated_table", table_name="u")
+        before_listed, before_counted = self.listed(), self.counted()
+        self.assertEqual((before_listed, before_counted), (2, 2))
+
+        services.mute_issue(self.datasource.id, "no_primary_key", "t", "c")
+
+        after_listed, after_counted = self.listed(), self.counted()
+        self.assertEqual(after_listed, before_listed - 1, "清单要少一条")
+        self.assertEqual(after_counted, before_counted - 1, "统计也要少一条，不能只动一边")
+
+    def test_no_mutes_does_not_zero_the_counts(self):
+        """
+        没有静音项时**一个数都不能少**
+
+        空 `Q()` 在 Django 里是中性的，`.filter(Q())` 匹配全部行——拿它去做减法会把
+        所有问题一起减掉、首页数字归零。这条用例就是钉住那个坑。
+        """
+        self.add_issue()
+        self.assertIsNone(services.muted_filter(), "没有静音项时应当返回 None 而不是空 Q")
+        self.assertEqual(self.counted(), 1)
+        self.assertEqual(self.listed(), 1)
+
+    def test_mute_survives_recollect(self):
+        """问题行每次采集都会重建，静音**必须跨快照生效**"""
+        self.add_issue()
+        services.mute_issue(self.datasource.id, "no_primary_key", "t", "c")
+
+        # 模拟重新采集：旧问题随旧快照一起作废，新快照产出同键的新问题
+        new_snapshot = models.MetadataSnapshot.objects.create(
+            datasource_id=self.datasource.id, collect_time=datetime.now(), raw_data={"tables": []}
+        )
+        models.CatalogIssue.objects.filter(snapshot_id=self.snapshot.id).update(is_deleted=True)
+        self.add_issue(snapshot=new_snapshot)
+
+        self.assertEqual(self.listed(), 0, "重新采集后静音仍应生效")
+        self.assertEqual(self.counted(), 0)
+
+    def test_mute_only_affects_that_one_place(self):
+        """**只影响这一处**：同表其他问题、他表同类问题照常报"""
+        self.add_issue(column_name="c")  # 被静音的这处
+        self.add_issue(column_name="d")  # 同表、同规则、别的列
+        self.add_issue(table_name="u", column_name="c")  # 他表、同规则
+        services.mute_issue(self.datasource.id, "no_primary_key", "t", "c")
+        self.assertEqual(self.listed(), 2)
+
+    def test_unmute_brings_it_back(self):
+        self.add_issue()
+        row = services.mute_issue(self.datasource.id, "no_primary_key", "t", "c")
+        self.assertEqual(self.listed(), 0)
+        services.unmute_issue(self.datasource.id, row.id)
+        self.assertEqual(self.listed(), 1)
+
+    def test_can_mute_again_after_unmute(self):
+        """软删除 + 部分唯一索引：同一处取消后还能重新静音"""
+        row = services.mute_issue(self.datasource.id, "no_primary_key", "t", "c")
+        services.unmute_issue(self.datasource.id, row.id)
+        again = services.mute_issue(self.datasource.id, "no_primary_key", "t", "c")
+        self.assertNotEqual(again.id, row.id)
+        self.assertEqual(models.IssueMute.objects.filter(is_deleted=False).count(), 1)
+
+    def test_unmute_rejects_another_datasources_record(self):
+        other = models.Datasource.objects.create(
+            name="other",
+            db_type=custom_enum.DbTypeEnum.POSTGRESQL.value,
+            host="127.0.0.1",
+            port=5432,
+            db_name="d",
+            username="u",
+            password="p",
+        )
+        row = services.mute_issue(self.datasource.id, "no_primary_key", "t", "c")
+        with self.assertRaises(services.DatasourceUnavailable):
+            services.unmute_issue(other.id, row.id)
+
+    def test_mute_rule_name_comes_from_the_declaration(self):
+        """规则名不存副本——库里的副本会「规则改名后永远显示旧名字」"""
+        row = services.mute_issue(self.datasource.id, "no_primary_key")
+        data = serializers.IssueMuteSerializer(row).data
+        self.assertEqual(data["rule_name"], registry.get_rule("no_primary_key").name)
+
+
+class IssueMuteApiTests(TestCase):
+    """
+    静音的接口：幂等、权限边界、口径一致
+    """
+
+    CATALOG = "/my-dba/v1/catalog"
+
+    def setUp(self):
+        self.client = APIClient()
+        self.datasource = models.Datasource.objects.create(
+            name="ds",
+            db_type=custom_enum.DbTypeEnum.POSTGRESQL.value,
+            host="127.0.0.1",
+            port=5432,
+            db_name="d",
+            username="u",
+            password="p",
+        )
+        self.snapshot = models.MetadataSnapshot.objects.create(
+            datasource_id=self.datasource.id, collect_time=datetime.now(), raw_data={"tables": []}
+        )
+        models.CatalogIssue.objects.create(
+            datasource_id=self.datasource.id,
+            snapshot_id=self.snapshot.id,
+            issue_level=custom_enum.IssueLevelEnum.HIGH.value,
+            rule_code="no_primary_key",
+            rule_name="无主键表",
+            object_level=custom_enum.ObjectLevelEnum.TABLE.value,
+            table_name="t",
+            column_name="c",
+        )
+
+    def mute(self, **extra):
+        body = {"datasource_id": self.datasource.id, "rule_code": "no_primary_key", "table_name": "t"}
+        return self.client.post(f"{self.CATALOG}/issues/mute", {**body, **extra}, format="json").json()
+
+    def issues(self):
+        return self.client.get(f"{self.CATALOG}/issues?datasource_id={self.datasource.id}").json()["data"]
+
+    def test_mute_hides_the_issue_and_reports_the_muted_count(self):
+        self.assertEqual(self.issues()["total"], 1)
+        self.assertEqual(self.mute(column_name="c")["code"], 2000)
+        data = self.issues()
+        self.assertEqual(data["total"], 0, "静音的默认不出现")
+        self.assertEqual(data["muted_total"], 1, "但要给出数量，否则静音就成了无声的遗忘")
+
+    def test_mute_is_idempotent_over_the_api(self):
+        self.mute(column_name="c")
+        self.assertEqual(self.mute(column_name="c")["code"], 2000)
+        self.assertEqual(self.mute(column_name="c")["code"], 2000)
+        self.assertEqual(models.IssueMute.objects.filter(is_deleted=False).count(), 1)
+
+    def test_include_muted_shows_them_again(self):
+        self.mute(column_name="c")
+        payload = self.client.get(
+            f"{self.CATALOG}/issues?datasource_id={self.datasource.id}&include_muted=true"
+        ).json()["data"]
+        self.assertEqual(payload["total"], 1)
+
+    def test_muted_list_and_unmute(self):
+        row_id = self.mute(column_name="c")["data"]["id"]
+        listed = self.client.get(f"{self.CATALOG}/issues/muted?datasource_id={self.datasource.id}").json()["data"]
+        self.assertEqual(listed["total"], 1)
+        self.assertEqual(listed["results"][0]["rule_name"], "无主键表")
+
+        payload = self.client.delete(f"{self.CATALOG}/issues/mute/{row_id}?datasource_id={self.datasource.id}").json()
+        self.assertEqual(payload["code"], 2000)
+        self.assertEqual(self.issues()["total"], 1, "取消后要回来")
+
+    def test_unknown_rule_is_rejected(self):
+        self.assertEqual(self.mute(rule_code="no_such_rule")["code"], 4000)
+
+    def test_missing_parameters_are_rejected(self):
+        self.assertEqual(self.client.post(f"{self.CATALOG}/issues/mute", {}, format="json").json()["code"], 4000)
+
+    def test_unknown_datasource_returns_not_found(self):
+        payload = self.client.post(
+            f"{self.CATALOG}/issues/mute",
+            {"datasource_id": 999999, "rule_code": "no_primary_key"},
+            format="json",
+        ).json()
+        self.assertEqual(payload["code"], 4004)
+
+    def test_response_does_not_leak_credentials(self):
+        self.mute(column_name="c")
+        rendered = str(self.client.get(f"{self.CATALOG}/issues/muted?datasource_id={self.datasource.id}").json())
+        for key in ("password", "api_key"):
+            self.assertNotIn(key, rendered)

@@ -93,6 +93,18 @@ export const catalogApi = {
   issueReference(data) {
     return request.post('/v1/catalog/issues/reference', data, { timeout: SLOW_TIMEOUT })
   },
+  // 静音一处问题（幂等）。只影响这一处，与「停用规则」是两回事
+  muteIssue(data) {
+    return request.post('/v1/catalog/issues/mute', data)
+  },
+  // 取消静音
+  unmuteIssue(muteId, params) {
+    return request.delete(`/v1/catalog/issues/mute/${muteId}`, { params })
+  },
+  // 已静音的条目
+  mutedIssues(params) {
+    return request.get('/v1/catalog/issues/muted', { params })
+  },
   // 两个快照的结构差异
   diff(params) {
     return request.get('/v1/catalog/diff', { params })
