@@ -15,10 +15,21 @@
         text-color="#bfcbd9"
         active-text-color="#409EFF"
       >
-        <template v-for="route in menuRoutes" :key="route.path">
-          <el-menu-item :index="route.path">
-            <el-icon><component :is="route.meta.icon" /></el-icon>
-            <template #title>{{ route.meta.title }}</template>
+        <template v-for="entry in menuEntries" :key="entry.key">
+          <!-- 带分组的项收在 el-sub-menu 下；不带分组的（首页）直接平铺 -->
+          <el-sub-menu v-if="entry.children" :index="entry.key">
+            <template #title>
+              <el-icon><component :is="entry.icon" /></el-icon>
+              <span>{{ entry.title }}</span>
+            </template>
+            <el-menu-item v-for="child in entry.children" :key="child.path" :index="child.path">
+              <el-icon><component :is="child.meta.icon" /></el-icon>
+              <template #title>{{ child.meta.title }}</template>
+            </el-menu-item>
+          </el-sub-menu>
+          <el-menu-item v-else :index="entry.path">
+            <el-icon><component :is="entry.meta.icon" /></el-icon>
+            <template #title>{{ entry.meta.title }}</template>
           </el-menu-item>
         </template>
       </el-menu>
@@ -75,20 +86,46 @@ const isCollapse = ref(false)
 const route = useRoute()
 const router = useRouter()
 
-// 从路由配置的 children 中筛选需要展示在菜单中的项（meta.showInMenu !== false）
-// 并拼接父路由与子路由，得到完整路径作为菜单跳转 index
-const menuRoutes = computed(() => {
-  const items = []
-  router.options.routes.forEach((r) => {
-    if (!r.children) return
-    const parent = r.path.endsWith('/') ? r.path.slice(0, -1) : r.path
-    r.children.forEach((c) => {
-      if (c.meta && c.meta.showInMenu !== false) {
-        items.push({ ...c, path: `${parent}/${c.path}` })
+// 分组名 → 图标。集中在这里而不是散到各路由的 meta 里——那样「菜单长什么样」就没有一处能看全了
+const MENU_GROUP_ICONS = {
+  库表: 'Coin',
+  SQL: 'MagicStick',
+  知识: 'Collection',
+  系统: 'Setting'
+}
+
+// 从路由配置的 children 中筛选需要展示在菜单中的项（`meta.showInMenu !== false`），
+// 拼接父路由与子路由得到完整路径，再按 `meta.group` 归到分组下。
+//
+// **顺序即声明顺序**：组按首次出现的先后排，组内同序。这样菜单顺序只有路由表一处定义。
+const menuEntries = computed(() => {
+  const entries = []
+  const groups = new Map()
+  router.options.routes.forEach((root) => {
+    if (!root.children) return
+    const parent = root.path.endsWith('/') ? root.path.slice(0, -1) : root.path
+    root.children.forEach((child) => {
+      if (!child.meta || child.meta.showInMenu === false) return
+      const item = { ...child, path: `${parent}/${child.path}` }
+      const name = item.meta.group
+      if (!name) {
+        entries.push({ key: item.path, ...item })
+        return
       }
+      if (!groups.has(name)) {
+        const entry = {
+          key: `group:${name}`,
+          title: name,
+          icon: MENU_GROUP_ICONS[name] || 'Menu',
+          children: []
+        }
+        groups.set(name, entry)
+        entries.push(entry)
+      }
+      groups.get(name).children.push(item)
     })
   })
-  return items
+  return entries
 })
 
 // 当前激活的菜单项
