@@ -380,6 +380,61 @@ def list_snapshot_tables(datasource_id: int, keyword: str = "") -> list:
     return result
 
 
+def _table_key(schema, name) -> tuple:
+    """
+    表的定位键。模式名与表名都可能大小写不一，比较时不区分
+    """
+    return ((schema or "").lower(), (name or "").lower())
+
+
+def table_relations(tables: list, schema: str, table_name: str) -> dict:
+    """
+    某张表的外键关系：它**引用了哪些表**、又被哪些表引用
+
+    **「被引用」必须扫全库推导。** 外键是**单向声明**的——`orders.user_id → app_user.id`
+    只写在 `orders` 上，`app_user` 自身可能一个外键都没有，却被十几张表引用。只读本表
+    会得到「无关系」这个**错误的**结论。
+
+    纯计算，输入是快照里的表清单（`raw_data["tables"]`）。
+
+    每一项带 `resolvable`：对方表是否也在本快照中——不在时界面只显示名字、不给跳转，
+    否则点过去会落空。
+    """
+    wanted = _table_key(schema, table_name)
+    known = {_table_key(item.get("schema"), item.get("name")) for item in tables or ()}
+    references = []
+    referenced_by = []
+
+    for table in tables or ():
+        source = _table_key(table.get("schema"), table.get("name"))
+        for foreign_key in table.get("foreign_keys") or ():
+            # 目标表的模式：采集器给了 ref_schema；缺失时退回本表所在模式
+            target = _table_key(foreign_key.get("ref_schema") or table.get("schema"), foreign_key.get("ref_table"))
+            if source == wanted:
+                references.append(
+                    {
+                        "name": foreign_key.get("name") or "",
+                        "schema": foreign_key.get("ref_schema") or "",
+                        "table": foreign_key.get("ref_table") or "",
+                        "columns": list(foreign_key.get("columns") or ()),
+                        "ref_columns": list(foreign_key.get("ref_columns") or ()),
+                        "resolvable": target in known,
+                    }
+                )
+            if target == wanted:
+                referenced_by.append(
+                    {
+                        "name": foreign_key.get("name") or "",
+                        "schema": table.get("schema") or "",
+                        "table": table.get("name") or "",
+                        "columns": list(foreign_key.get("columns") or ()),
+                        "ref_columns": list(foreign_key.get("ref_columns") or ()),
+                        "resolvable": source in known,
+                    }
+                )
+    return {"references": references, "referenced_by": referenced_by}
+
+
 def list_datasource_metrics() -> dict:
     """
     每个数据源的**最新指标**与近期连接数趋势

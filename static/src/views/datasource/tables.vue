@@ -108,7 +108,13 @@
       </template>
     </el-card>
 
-    <table-detail v-model="detailVisible" :snapshot-id="snapshot?.id" :table="currentTable" />
+    <!-- 从「关系」里点对方表：直接把 currentTable 换掉，抽屉保持打开 -->
+    <table-detail
+      v-model="detailVisible"
+      :snapshot-id="snapshot?.id"
+      :table="currentTable"
+      @navigate="openDetail"
+    />
   </div>
 </template>
 

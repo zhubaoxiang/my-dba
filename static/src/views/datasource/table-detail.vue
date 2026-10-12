@@ -51,18 +51,49 @@
             </el-table>
           </el-tab-pane>
 
-          <el-tab-pane :label="`外键关联（${(detail.foreign_keys || []).length}）`">
-            <el-table :data="detail.foreign_keys" border size="small" max-height="360">
-              <el-table-column prop="name" label="约束名" min-width="180" />
-              <el-table-column label="本表列" min-width="150">
-                <template #default="{ row }">{{ (row.columns || []).join(', ') }}</template>
-              </el-table-column>
-              <el-table-column label="引用" min-width="220">
-                <template #default="{ row }">
-                  {{ row.ref_schema }}.{{ row.ref_table }}({{ (row.ref_columns || []).join(', ') }})
-                </template>
-              </el-table-column>
-            </el-table>
+          <el-tab-pane :label="`关系（${relationCount}）`">
+            <!-- 两个方向**分开列**：本表的外键只说明「它引用了谁」；
+                 「谁引用了它」必须扫全库才知道——外键是单向声明的，本表可能一个外键都没有。 -->
+            <div class="relation-block">
+              <div class="relation-title">引用了哪些表（{{ relations.references.length }}）</div>
+              <el-table v-if="relations.references.length" :data="relations.references" border size="small">
+                <el-table-column label="本表列" min-width="140">
+                  <template #default="{ row }">{{ (row.columns || []).join(', ') }}</template>
+                </el-table-column>
+                <el-table-column label="引用" min-width="240">
+                  <template #default="{ row }">
+                    <el-button v-if="row.resolvable" link type="primary" size="small" @click="goTo(row)">
+                      {{ targetLabel(row) }}
+                    </el-button>
+                    <span v-else class="muted">{{ targetLabel(row) }}（不在本次快照中）</span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="name" label="约束名" min-width="160" show-overflow-tooltip />
+              </el-table>
+              <div v-else class="relation-empty">没有引用任何表</div>
+            </div>
+
+            <div class="relation-block">
+              <div class="relation-title">被哪些表引用（{{ relations.referenced_by.length }}）</div>
+              <el-table v-if="relations.referenced_by.length" :data="relations.referenced_by" border size="small">
+                <el-table-column label="来源" min-width="240">
+                  <template #default="{ row }">
+                    <el-button v-if="row.resolvable" link type="primary" size="small" @click="goTo(row)">
+                      {{ targetLabel(row) }}
+                    </el-button>
+                    <span v-else class="muted">{{ targetLabel(row) }}（不在本次快照中）</span>
+                  </template>
+                </el-table-column>
+                <el-table-column label="来源列" min-width="130">
+                  <template #default="{ row }">{{ (row.columns || []).join(', ') }}</template>
+                </el-table-column>
+                <el-table-column label="本表列" min-width="130">
+                  <template #default="{ row }">{{ (row.ref_columns || []).join(', ') }}</template>
+                </el-table-column>
+                <el-table-column prop="name" label="约束名" min-width="160" show-overflow-tooltip />
+              </el-table>
+              <div v-else class="relation-empty">没有被任何表引用</div>
+            </div>
           </el-tab-pane>
         </el-tabs>
       </template>
@@ -71,7 +102,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { catalogApi } from '@/api/datasource'
 import { formatBytes, formatRows } from '@/utils/format'
 
@@ -80,7 +111,7 @@ const props = defineProps({
   snapshotId: { type: [Number, String], default: null },
   table: { type: Object, default: null }
 })
-const emit = defineEmits(['update:modelValue'])
+const emit = defineEmits(['update:modelValue', 'navigate'])
 
 const visible = computed({
   get: () => props.modelValue,
@@ -106,11 +137,56 @@ async function load() {
   }
 }
 
+// 关系两侧都要能跳：对方在本次快照中时才给链接，不在就只显示名字（点了会落空）
+const relations = computed(
+  () => (detail.value && detail.value.relations) || { references: [], referenced_by: [] }
+)
+const relationCount = computed(() => relations.value.references.length + relations.value.referenced_by.length)
+
+function targetLabel(row) {
+  return row.schema ? `${row.schema}.${row.table}` : row.table
+}
+
+function goTo(row) {
+  emit('navigate', { schema: row.schema, name: row.table })
+}
+
+// 从「关系」跳到另一张表时抽屉**是开着的**，`@open` 不会再触发，得跟着 props 重新加载
+watch(
+  () => props.table,
+  (value) => {
+    if (value && props.modelValue) load()
+  }
+)
+
 defineExpose({ load })
 </script>
 
 <style scoped>
 .detail-tabs {
   margin-top: 16px;
+}
+
+/* 两个方向分开列，各自带标题与条数 */
+.relation-block + .relation-block {
+  margin-top: 18px;
+}
+
+.relation-title {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.relation-empty {
+  padding: 10px 0;
+  font-size: 12px;
+  color: #909399;
+}
+
+.muted {
+  font-size: 12px;
+  color: #909399;
 }
 </style>

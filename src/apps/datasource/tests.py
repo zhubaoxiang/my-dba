@@ -1577,3 +1577,82 @@ class IssueMuteApiTests(TestCase):
         rendered = str(self.client.get(f"{self.CATALOG}/issues/muted?datasource_id={self.datasource.id}").json())
         for key in ("password", "api_key"):
             self.assertNotIn(key, rendered)
+
+
+class TableRelationTests(SimpleTestCase):
+    """
+    表的外键关系：纯计算
+
+    最关键的用例是**本表一个外键都没有、却被别的表引用**——外键是单向声明的，
+    只读本表会得出「无关系」这个**错误**结论。
+    """
+
+    def table(self, name, schema="public", foreign_keys=None):
+        return {"schema": schema, "name": name, "columns": [], "foreign_keys": foreign_keys or []}
+
+    def fk(self, columns, ref_table, ref_schema="public", ref_columns=None):
+        return {
+            "name": f"fk_{ref_table}",
+            "columns": columns,
+            "ref_schema": ref_schema,
+            "ref_table": ref_table,
+            "ref_columns": ref_columns or ["id"],
+        }
+
+    def test_both_directions(self):
+        tables = [
+            self.table("orders", foreign_keys=[self.fk(["user_id"], "app_user")]),
+            self.table("app_user"),
+            self.table("order_items", foreign_keys=[self.fk(["order_id"], "orders")]),
+        ]
+        rel = services.table_relations(tables, "public", "orders")
+        self.assertEqual([item["table"] for item in rel["references"]], ["app_user"])
+        self.assertEqual([item["table"] for item in rel["referenced_by"]], ["order_items"])
+
+    def test_referenced_by_comes_from_the_whole_snapshot(self):
+        """本表**没有任何外键**，却被引用——只看本表会得到「无关系」这个错误结论"""
+        tables = [
+            self.table("app_user"),
+            self.table("orders", foreign_keys=[self.fk(["user_id"], "app_user")]),
+        ]
+        rel = services.table_relations(tables, "public", "app_user")
+        self.assertEqual(rel["references"], [])
+        self.assertEqual([item["table"] for item in rel["referenced_by"]], ["orders"])
+
+    def test_columns_travel_with_the_relation(self):
+        """要能显示「orders.user_id → app_user.id」，两侧列名都得带上"""
+        tables = [
+            self.table(
+                "orders",
+                foreign_keys=[self.fk(["user_id", "tenant_id"], "app_user", ref_columns=["id", "tenant_id"])],
+            ),
+            self.table("app_user"),
+        ]
+        item = services.table_relations(tables, "public", "orders")["references"][0]
+        self.assertEqual(item["columns"], ["user_id", "tenant_id"])
+        self.assertEqual(item["ref_columns"], ["id", "tenant_id"])
+
+    def test_no_relations_at_all(self):
+        rel = services.table_relations([self.table("lonely")], "public", "lonely")
+        self.assertEqual(rel, {"references": [], "referenced_by": []})
+
+    def test_case_is_ignored(self):
+        tables = [self.table("App_User"), self.table("orders", foreign_keys=[self.fk(["u"], "APP_USER")])]
+        self.assertEqual(len(services.table_relations(tables, "public", "app_user")["referenced_by"]), 1)
+
+    def test_same_name_across_schemas_is_not_confused(self):
+        """同名表跨模式必须按「模式 + 表名」对齐，否则会指错表"""
+        tables = [
+            self.table("orders", schema="shop"),
+            self.table("orders", schema="archive"),
+            self.table("items", schema="shop", foreign_keys=[self.fk(["order_id"], "orders", ref_schema="shop")]),
+        ]
+        self.assertEqual(services.table_relations(tables, "archive", "orders")["referenced_by"], [])
+        self.assertEqual(len(services.table_relations(tables, "shop", "orders")["referenced_by"]), 1)
+
+    def test_relation_to_a_table_outside_the_snapshot_is_marked_unresolvable(self):
+        """指向快照里没有的表：名字照给，但标成不可跳转——否则点过去会落空"""
+        tables = [self.table("orders", foreign_keys=[self.fk(["u"], "gone", ref_schema="other")])]
+        item = services.table_relations(tables, "public", "orders")["references"][0]
+        self.assertEqual(item["table"], "gone")
+        self.assertFalse(item["resolvable"])

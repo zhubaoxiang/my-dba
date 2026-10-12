@@ -263,7 +263,12 @@ class CatalogView(baseviews.AnyLogin):
             return baseviews.ResponseBadRequest("缺少参数 table")
         for table in snapshot.raw_data.get("tables") or []:
             if table.get("name") == table_name and (not schema or table.get("schema") == schema):
-                return baseviews.ResponseOK(table)
+                # 浅拷贝一份再挂关系：快照里的对象是缓存着的，就地改会污染后续请求
+                payload = dict(table)
+                payload["relations"] = services.table_relations(
+                    snapshot.raw_data.get("tables") or [], table.get("schema"), table.get("name")
+                )
+                return baseviews.ResponseOK(payload)
         return baseviews.ResponseNotFound("表不存在")
 
     @action(detail=False, methods=["GET"], url_path="issues")
