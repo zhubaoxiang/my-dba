@@ -26,6 +26,17 @@ _LARGE_OBJECT_TYPES = {"blob", "tinyblob", "mediumblob", "longblob", "bytea", "m
 
 _BYTES_PER_MB = 1024 * 1024
 
+# 浮点族。**只用于「金额类字段」的判定**——浮点在科学计算与统计指标里是正确选择，
+# 不报所有浮点列（design.md D1）
+_FLOAT_TYPES = {"real", "double precision", "float", "double", "float4", "float8"}
+
+# 金额语义的列名/注释。**刻意不收 total**——`total_count` 是数量不是金额，收进来会误报。
+# 词表放宽的方向是漏报（可接受），不是误报
+_MONEY_NAME_PATTERN = re.compile(r"amount|price|fee|cost|balance|money|金额|价格|费用|余额")
+
+# 采集侧已把外键动作归一成这套名字（见 collectors/base.py）
+_CASCADE = "CASCADE"
+
 
 @dataclass(frozen=True)
 class RuleDefinition:
@@ -269,6 +280,168 @@ def _check_isolated_tables(ctx):
 # 规则清单
 # ----------------------------------------------------------------------
 
+
+def _check_money_float(ctx):
+    """
+    金额类字段用了浮点：会丢精度，且越晚改越贵
+
+    **只对「类型是浮点 + 名字或注释说是钱」的列报**。一律报所有浮点列会立刻把这条规则
+    变成噪音源——浮点在科学计算里是对的。这条规则的代价是**漏报**（列叫 total 又没注释
+    就判不出），那是刻意的取舍。
+    """
+    issues = []
+    for table in ctx.tables:
+        for column in table.get("columns") or []:
+            if (column.get("data_type") or "").lower() not in _FLOAT_TYPES:
+                continue
+            text = f"{column.get('name') or ''} {column.get('comment') or ''}"
+            if not _MONEY_NAME_PATTERN.search(text):
+                continue
+            issues.append(
+                ctx.issue(
+                    table=table,
+                    column_name=column.get("name") or "",
+                    description=f"列 {column.get('name')} 语义上是金额，却使用浮点类型 "
+                    f"{column.get('data_type')}。浮点无法精确表示小数，累加与比较会出现"
+                    f"对不上账的误差。",
+                    suggestion="改用 numeric / decimal 类型，精度按业务定。",
+                )
+            )
+    return issues
+
+
+def _check_long_text_primary_key(ctx):
+    """
+    主键用了长字符类型
+
+    主键会被**所有**引用它的外键与索引各复制一份——主键越宽，引用它的表每行就多背多少字节。
+    """
+    limit = ctx.thresholds["primary_key_max_length"]
+    issues = []
+    for table in ctx.tables:
+        primary_key = table.get("primary_key") or {}
+        key_columns = set(primary_key.get("columns") or [])
+        if not key_columns:
+            continue
+        for column in table.get("columns") or []:
+            if column.get("name") not in key_columns:
+                continue
+            data_type = (column.get("data_type") or "").lower()
+            if data_type not in _CHAR_TYPES:
+                continue
+            length = int(column.get("length") or -1)
+            # 长度为 -1 表示无界（PostgreSQL 把不限长的字符列报成 -1）
+            if length != -1 and length <= limit:
+                continue
+            actual = "无长度上限" if length == -1 else f"长度 {length}"
+            issues.append(
+                ctx.issue(
+                    table=table,
+                    column_name=column.get("name") or "",
+                    description=f"主键列 {column.get('name')} 是字符类型（{data_type}，{actual}）。"
+                    f"主键会被所有引用它的外键与索引各复制一份，主键越宽，那些表每行就多背多少字节。",
+                    suggestion="改用整型代理键；确需保留业务键时，优先把长度收窄。",
+                )
+            )
+    return issues
+
+
+def _check_wide_table(ctx):
+    """
+    列数过多（宽表）
+
+    列数多通常意味着建模没有拆开，整行读写与 SELECT * 都会变重。
+    """
+    limit = ctx.thresholds["wide_table_max_columns"]
+    issues = []
+    for table in ctx.tables:
+        count = len(table.get("columns") or [])
+        if count <= limit:
+            continue
+        issues.append(
+            ctx.issue(
+                table=table,
+                description=f"表有 {count} 列，超过 {limit}。列数过多通常意味着建模没有拆开，"
+                f"整行读写与 SELECT * 都会变重。",
+                suggestion="评估把低频使用的列拆到扩展表，或按访问模式分开存放。",
+            )
+        )
+    return issues
+
+
+def _check_index_larger_than_data(ctx):
+    """
+    索引占用超过数据占用
+
+    整表视角：与逐索引的「重复或冗余索引」「疑似未使用索引」互补——那两条指出具体是哪个
+    索引，这条指出这张表的索引整体失衡。
+    """
+    issues = []
+    for table in ctx.tables:
+        # 空表的数据占用接近 0，索引稍大是正常形态，不是问题
+        if int(table.get("row_count") or 0) <= 0:
+            continue
+        data_size = int(table.get("data_size") or 0)
+        index_size = int(table.get("index_size") or 0)
+        if index_size <= data_size:
+            continue
+        issues.append(
+            ctx.issue(
+                table=table,
+                description=f"索引占用 {index_size // _BYTES_PER_MB} MB，超过数据本身的 "
+                f"{data_size // _BYTES_PER_MB} MB。索引比数据还大，说明索引过多或过宽，"
+                f"每一项都在拖慢写入。",
+                suggestion="看「重复或冗余索引」与「疑似未使用索引」列出的具体索引。",
+            )
+        )
+    return issues
+
+
+def _check_cascade_delete_chain(ctx):
+    """
+    跨表的级联删除链
+
+    **只报跨两层以上的传递删除**：本表的 `ON DELETE CASCADE` 指向的表**自己也有**
+    CASCADE 出边。不报单层级联（那是 CASCADE 的字面意思）与自引用级联（`parent_id →
+    本表` 是树形结构的常规做法）——见 design.md D6。
+
+    外键动作缺失时（本次补采之前的老快照）判不出来，按「没有级联」处理、不产出问题。
+    """
+    cascades = {}
+    for table in ctx.tables:
+        key = (table.get("schema") or "", table.get("name") or "")
+        targets = {
+            (foreign_key.get("ref_schema") or key[0], foreign_key.get("ref_table") or "")
+            for foreign_key in table.get("foreign_keys") or []
+            if (foreign_key.get("on_delete") or "").upper() == _CASCADE
+        }
+        if targets:
+            cascades[key] = targets
+
+    issues = []
+    for table in ctx.tables:
+        key = (table.get("schema") or "", table.get("name") or "")
+        downstream = cascades.get(key)
+        if not downstream:
+            continue
+        # 下游里**自己也有级联出边**的，才会继续往下传
+        # 注意 `target` 是整体解出来的 (schema, table) 元组——写成 `for t, name in ...`
+        # 会把元组拆开，再拿 schema 去比整张表的键，永远比不上
+        chain = sorted(target[1] for target in downstream if target in cascades and target != key)
+        if not chain:
+            continue
+        issues.append(
+            ctx.issue(
+                table=table,
+                description=f"本表的外键是 ON DELETE CASCADE，而它指向的 "
+                f"{'、'.join(chain)} 自己也有级联删除——删除本表的一行会跨两层继续往下删，"
+                f"影响面不翻约束定义看不出来。",
+                suggestion="确认这条传递删除是你想要的；若不是，把链上某一段改为 RESTRICT 或 SET NULL。",
+            )
+        )
+    return issues
+
+
 RULES = (
     RuleDefinition(
         code="no_primary_key",
@@ -328,5 +501,48 @@ RULES = (
         default_level=custom_enum.IssueLevelEnum.LOW,
         object_level=custom_enum.ObjectLevelEnum.TABLE,
         handler=_check_isolated_tables,
+    ),
+    # ---- 表设计层（add-table-design-rules）----
+    RuleDefinition(
+        code="float_money_column",
+        name="金额字段用浮点类型",
+        description="金额类字段使用浮点类型，无法精确表示小数，累加与比较会出现对不上账的误差。",
+        default_level=custom_enum.IssueLevelEnum.HIGH,
+        object_level=custom_enum.ObjectLevelEnum.COLUMN,
+        handler=_check_money_float,
+    ),
+    RuleDefinition(
+        code="long_text_primary_key",
+        name="主键用长字符类型",
+        description="主键列是长字符类型，会被所有引用它的外键与索引各复制一份。",
+        default_level=custom_enum.IssueLevelEnum.MEDIUM,
+        object_level=custom_enum.ObjectLevelEnum.COLUMN,
+        handler=_check_long_text_primary_key,
+        default_thresholds={"primary_key_max_length": 64},
+    ),
+    RuleDefinition(
+        code="wide_table",
+        name="宽表",
+        description="列数过多，通常意味着建模没有拆开，整行读写与 SELECT * 都会变重。",
+        default_level=custom_enum.IssueLevelEnum.MEDIUM,
+        object_level=custom_enum.ObjectLevelEnum.TABLE,
+        handler=_check_wide_table,
+        default_thresholds={"wide_table_max_columns": 50},
+    ),
+    RuleDefinition(
+        code="index_larger_than_data",
+        name="索引体积超过数据",
+        description="索引占用大于数据占用，说明索引过多或过宽，每一项都在拖慢写入。",
+        default_level=custom_enum.IssueLevelEnum.MEDIUM,
+        object_level=custom_enum.ObjectLevelEnum.TABLE,
+        handler=_check_index_larger_than_data,
+    ),
+    RuleDefinition(
+        code="cascade_delete_chain",
+        name="跨表的级联删除链",
+        description="删除会沿 ON DELETE CASCADE 跨两层以上传递下去，影响面不翻约束定义看不出来。",
+        default_level=custom_enum.IssueLevelEnum.MEDIUM,
+        object_level=custom_enum.ObjectLevelEnum.TABLE,
+        handler=_check_cascade_delete_chain,
     ),
 )

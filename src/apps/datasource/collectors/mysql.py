@@ -69,18 +69,24 @@ WHERE CONSTRAINT_NAME = 'PRIMARY' AND {_SCHEMA_FILTER}
 ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION
 """
 
-_FOREIGN_KEYS_SQL = f"""
-SELECT TABLE_SCHEMA AS schema_name,
-       TABLE_NAME AS table_name,
-       CONSTRAINT_NAME AS constraint_name,
-       COLUMN_NAME AS column_name,
-       ORDINAL_POSITION AS ordinal,
-       REFERENCED_TABLE_SCHEMA AS ref_schema,
-       REFERENCED_TABLE_NAME AS ref_table,
-       REFERENCED_COLUMN_NAME AS ref_column
-FROM information_schema.KEY_COLUMN_USAGE
-WHERE REFERENCED_TABLE_NAME IS NOT NULL AND {_SCHEMA_FILTER}
-ORDER BY TABLE_SCHEMA, TABLE_NAME, CONSTRAINT_NAME, ORDINAL_POSITION
+_FOREIGN_KEYS_SQL = """
+SELECT k.TABLE_SCHEMA AS schema_name,
+       k.TABLE_NAME AS table_name,
+       k.CONSTRAINT_NAME AS constraint_name,
+       k.COLUMN_NAME AS column_name,
+       k.ORDINAL_POSITION AS ordinal,
+       k.REFERENCED_TABLE_SCHEMA AS ref_schema,
+       k.REFERENCED_TABLE_NAME AS ref_table,
+       k.REFERENCED_COLUMN_NAME AS ref_column,
+       rc.DELETE_RULE AS on_delete,
+       rc.UPDATE_RULE AS on_update
+FROM information_schema.KEY_COLUMN_USAGE k
+-- 删除/更新动作在 REFERENTIAL_CONSTRAINTS 里，按约束名关联
+JOIN information_schema.REFERENTIAL_CONSTRAINTS rc
+  ON rc.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA AND rc.CONSTRAINT_NAME = k.CONSTRAINT_NAME
+WHERE k.REFERENCED_TABLE_NAME IS NOT NULL
+  AND k.TABLE_SCHEMA NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
+ORDER BY k.TABLE_SCHEMA, k.TABLE_NAME, k.CONSTRAINT_NAME, k.ORDINAL_POSITION
 """
 
 # 索引使用统计：MySQL 5.7+ / 8.0 可用；performance_schema 关闭或无权限时降级
@@ -240,6 +246,10 @@ class MySQLCollector(BaseCollector):
                     "ref_schema": row["ref_schema"],
                     "ref_table": row["ref_table"],
                     "ref_columns": [],
+                    # 与 PostgreSQL 侧同形的字段名与取值；取不到时是空串（判不了），
+                    # 不是 NO ACTION
+                    "on_delete": row.get("on_delete") or "",
+                    "on_update": row.get("on_update") or "",
                 }
                 grouped[key] = entry
             entry["columns"].append(row["column_name"])

@@ -13,6 +13,17 @@ from utils import custom_enum
 
 _EXCLUDED_SCHEMAS = ("pg_catalog", "information_schema")
 
+# pg_constraint 的 confdeltype / confupdtype 是单字符码。映射成与 MySQL 的
+# DELETE_RULE / UPDATE_RULE **同形**的名字，使分析侧不必分方言。
+# 认不出的码回退成空串——空串表示「判不了」，**不能当成 NO ACTION 或 CASCADE**
+_FOREIGN_KEY_ACTIONS = {
+    "a": "NO ACTION",
+    "r": "RESTRICT",
+    "c": "CASCADE",
+    "n": "SET NULL",
+    "d": "SET DEFAULT",
+}
+
 _SCHEMA_FILTER = """
     n.nspname NOT IN ('pg_catalog', 'information_schema')
     AND n.nspname NOT LIKE 'pg\\_temp%'
@@ -100,7 +111,9 @@ SELECT n.nspname  AS schema_name,
        ARRAY(SELECT a.attname
              FROM unnest(con.confkey) WITH ORDINALITY AS k(attnum, ord)
              JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum
-             ORDER BY k.ord) AS ref_columns
+             ORDER BY k.ord) AS ref_columns,
+       con.confdeltype AS on_delete,
+       con.confupdtype AS on_update
 FROM pg_constraint con
 JOIN pg_class t ON t.oid = con.conrelid
 JOIN pg_namespace n ON n.oid = t.relnamespace
@@ -224,6 +237,9 @@ class PostgresCollector(BaseCollector):
                 "ref_schema": row["ref_schema"],
                 "ref_table": row["ref_table"],
                 "ref_columns": list(row["ref_columns"]),
+                # 认不出的码回退成空串——空串是「判不了」，**不是** NO ACTION
+                "on_delete": _FOREIGN_KEY_ACTIONS.get(row["on_delete"], ""),
+                "on_update": _FOREIGN_KEY_ACTIONS.get(row["on_update"], ""),
             }
             for row in self._rows(_FOREIGN_KEYS_SQL)
         ]

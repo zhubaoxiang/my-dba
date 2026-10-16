@@ -117,6 +117,17 @@ def _char_to_timestamp(issue) -> tuple:
     )
 
 
+def _money_to_numeric(issue) -> tuple:
+    column = _of(issue, "column_name")
+    if not column:
+        return None
+    target = _qualified(_of(issue, "schema_name"), _of(issue, "table_name"))
+    return (
+        f"ALTER TABLE {target} ALTER COLUMN {_quote(column)} TYPE numeric(19, 4);",
+        "精度与标度按业务定（示例取 19,4）；浮点已经丢掉的精度找不回来，转换前先核对现网数据是否已经对不上账。",
+    )
+
+
 def _shrink_varchar(issue, limit: int) -> tuple:
     column = _of(issue, "column_name")
     if not column:
@@ -153,6 +164,8 @@ def _template(issue, limit: int):
         return _drop_index(issue, "需先观察一个完整业务周期（含月末、季末等周期场景）确认确实无用，再执行。")
     if code == "no_primary_key":
         return _add_surrogate_key(issue)
+    if code == "float_money_column":
+        return _money_to_numeric(issue)
     if code == "suspicious_column_type":
         branch = _of(issue, "fix_key")
         if branch == _BRANCH_CHAR_TIME:
@@ -176,15 +189,19 @@ def _advisory(note: str) -> dict:
     return {"sql": "", "caveat": "", "source": SOURCE_ADVISORY, "note": note}
 
 
-# **这一条规则刻意不产出语句**，理由值得写下来：
+# **这几条规则刻意不产出语句**，理由值得写下来。两类情形：
 #
-# `isolated_table` 判的是「既没有外键，也没有被任何表引用」。但**大量正常库根本不建外键**——
-# 真机核对时遇到过：一个不建外键的库，23 张表**全被**判成「孤立」，包括那些显然是业务表的。
+# 一、判定依据不足——`isolated_table` 判的是「既没有外键，也没有被任何表引用」。但**大量
+# 正常库根本不建外键**：真机核对时遇到过，一个不建外键的库，23 张表**全被**判成「孤立」，
+# 包括那些显然是业务表的。「没有外键」与「没人用」之间隔着一整个业务上下文，把它变成一条
+# 可执行的 `DROP TABLE`，是**把一个弱证据伪装成确定结论**，而那条语句又不可逆。
 #
-# 「没有外键」与「没人用」之间隔着一整个业务上下文。把它变成一条可执行的 `DROP TABLE`，
-# 是**把一个弱证据伪装成确定结论**；而这条语句又是**不可逆**的。宁可只留排查建议。
+# 二、修复动作取决于**别处的逐项判断**——`index_larger_than_data` 只知道「这张表的索引整体
+# 失衡」，删哪个要看逐索引的分析，而那个判断已经有两条规则在做且能给具体语句。让模型再猜
+# 一遍只会重复，不如把人指过去。
 _ADVISORY_RULES = {
     "isolated_table": "「孤立」仅表示该表没有外键关系，不代表没有业务在使用；因此不自动给出语句，请按排查建议人工确认。",
+    "index_larger_than_data": "索引整体失衡，但删哪个要看逐索引的判断——见「重复或冗余索引」与「疑似未使用索引」列出的条目。",
 }
 
 

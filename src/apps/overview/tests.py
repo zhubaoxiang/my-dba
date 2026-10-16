@@ -425,19 +425,19 @@ class RuleCountTests(TestCase):
 
     def test_counts_do_not_depend_on_synced_rows(self):
         """
-        `analysis_rule` 表只有同步过才有行。数它会在「还没点过同步」时得到 0——
-        而那时规则其实有 7 条、分析也照常跑（代码声明是全集，库只是覆盖层）。
-        **数出 0 是把「没同步」说成了「没有规则」。**
+        `analysis_rule` 表只在某条规则被调整过之后才有行。数它会在一条都没调过时得到 0——
+        而那时规则其实有 12 条、分析也照常跑（代码声明是全集，库只是覆盖层）。
+        **数出 0 是把「没调整过」说成了「没有规则」。**
         """
         self.assertFalse(ds_models.AnalysisRule.objects.exists(), "本用例的前提是库里没有规则行")
         self.assertGreater(services.datasource_services.rule_counts()["total"], 0)
 
     def test_current_counts(self):
         """
-        当前是 7 与 18。增减规则时来改这一行——让条数变化是有意的，
+        当前是 12 与 18。增减规则时来改这一行——让条数变化是有意的，
         而不是某天悄悄漂移掉
         """
-        self.assertEqual(services.datasource_services.rule_counts(), {"total": 7})
+        self.assertEqual(services.datasource_services.rule_counts(), {"total": 12})
         self.assertEqual(services.sqlanalysis_services.rule_counts(), {"total": 18})
 
 
@@ -449,7 +449,7 @@ class RulesBlockTests(TestCase):
     def test_block_reports_both_counts(self):
         block = services.build_overview()["rules"]
         self.assertTrue(block["available"])
-        self.assertEqual(block["datasource_total"], 7)
+        self.assertEqual(block["datasource_total"], 12)
         self.assertEqual(block["sql_total"], 18)
 
     def test_failure_gives_none_not_zero(self):

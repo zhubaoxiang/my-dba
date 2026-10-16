@@ -165,6 +165,8 @@ _RULE_OVERRIDES = {
     "unused_index": {"thresholds": {"unused_index_min_rows": 100}},
     "big_table": {"thresholds": {"big_table_rows": 1000, "big_table_size_mb": 1}},
     "suspicious_column_type": {"thresholds": {"varchar_max_length": 255}},
+    # 列数阈值调小，免得为了测宽表去凑 51 列
+    "wide_table": {"thresholds": {"wide_table_max_columns": 3}},
 }
 
 
@@ -1656,3 +1658,145 @@ class TableRelationTests(SimpleTestCase):
         item = services.table_relations(tables, "public", "orders")["references"][0]
         self.assertEqual(item["table"], "gone")
         self.assertFalse(item["resolvable"])
+
+
+class TableDesignRuleTests(SimpleTestCase):
+    """
+    表设计层的 5 条规则：每条都写正例与反例
+
+    **反例比正例重要**——这几条规则的代价全在误报上：报所有浮点列、报所有级联、
+    报所有宽表，都会立刻把清单变成噪音源，而「清单里全是噪音就再也不看了」正是
+    这个项目一路在防的。
+    """
+
+    def analyze(self, tables):
+        return analyzer.CatalogAnalyzer(_snapshot(tables), rule_overrides=_RULE_OVERRIDES).analyze()
+
+    def types_of(self, issues):
+        return [issue["rule_code"] for issue in issues]
+
+    # ---------------------------------------------------------------- 金额字段用浮点
+
+    def test_float_money_column_detected(self):
+        table = _table("orders", columns=[_column("total_amount", "double precision")])
+        self.assertIn("float_money_column", self.types_of(self.analyze([table])))
+
+    def test_money_in_comment_is_detected_too(self):
+        column = _column("v", "real")
+        column["comment"] = "订单金额"
+        self.assertIn("float_money_column", self.types_of(self.analyze([_table("t", columns=[column])])))
+
+    def test_float_without_money_semantics_is_not_reported(self):
+        """浮点在科学计算与统计指标里是正确选择——一律报会立刻变噪音"""
+        table = _table("metrics", columns=[_column("score", "double precision"), _column("ratio", "float")])
+        self.assertNotIn("float_money_column", self.types_of(self.analyze([table])))
+
+    def test_numeric_money_column_is_not_reported(self):
+        table = _table("orders", columns=[_column("total_amount", "numeric")])
+        self.assertNotIn("float_money_column", self.types_of(self.analyze([table])))
+
+    def test_total_count_is_not_money(self):
+        """`total` 刻意不在词表里——`total_count` 是数量不是金额"""
+        table = _table("t", columns=[_column("total_count", "double precision")])
+        self.assertNotIn("float_money_column", self.types_of(self.analyze([table])))
+
+    # ---------------------------------------------------------------- 主键用长字符
+
+    def test_long_varchar_primary_key_detected(self):
+        table = _table(
+            "t",
+            columns=[_column("code", "varchar", length=255)],
+            primary_key={"name": "pk_t", "columns": ["code"]},
+        )
+        self.assertIn("long_text_primary_key", self.types_of(self.analyze([table])))
+
+    def test_short_varchar_primary_key_is_fine(self):
+        table = _table(
+            "t",
+            columns=[_column("code", "varchar", length=32)],
+            primary_key={"name": "pk_t", "columns": ["code"]},
+        )
+        self.assertNotIn("long_text_primary_key", self.types_of(self.analyze([table])))
+
+    def test_integer_primary_key_is_fine(self):
+        self.assertNotIn("long_text_primary_key", self.types_of(self.analyze([_table("t")])))
+
+    def test_unbounded_text_primary_key_detected(self):
+        """长度为 -1 表示无界（PostgreSQL 把不限长的字符列报成 -1）"""
+        table = _table(
+            "t",
+            columns=[_column("code", "character varying", length=-1)],
+            primary_key={"name": "pk_t", "columns": ["code"]},
+        )
+        self.assertIn("long_text_primary_key", self.types_of(self.analyze([table])))
+
+    # ---------------------------------------------------------------- 宽表
+
+    def test_wide_table_detected(self):
+        table = _table("t", columns=[_column(f"c{i}") for i in range(4)])
+        self.assertIn("wide_table", self.types_of(self.analyze([table])))
+
+    def test_narrow_table_is_fine(self):
+        table = _table("t", columns=[_column(f"c{i}") for i in range(3)])
+        self.assertNotIn("wide_table", self.types_of(self.analyze([table])))
+
+    # ---------------------------------------------------------------- 索引体积超过数据
+
+    def test_index_larger_than_data_detected(self):
+        table = _table("t", data_size=1024 * 1024, index_size=2 * 1024 * 1024)
+        self.assertIn("index_larger_than_data", self.types_of(self.analyze([table])))
+
+    def test_empty_table_with_larger_index_is_not_reported(self):
+        """空表的数据占用接近 0，索引稍大是正常形态，不是问题"""
+        table = _table("t", row_count=0, data_size=0, index_size=8192)
+        self.assertNotIn("index_larger_than_data", self.types_of(self.analyze([table])))
+
+    def test_normal_index_size_is_fine(self):
+        table = _table("t", data_size=10 * 1024 * 1024, index_size=1024 * 1024)
+        self.assertNotIn("index_larger_than_data", self.types_of(self.analyze([table])))
+
+    # ---------------------------------------------------------------- 跨表级联删除链
+
+    def fk(self, name, columns, ref_table, on_delete=""):
+        return {
+            "name": name,
+            "columns": columns,
+            "ref_schema": "public",
+            "ref_table": ref_table,
+            "ref_columns": ["id"],
+            "on_delete": on_delete,
+        }
+
+    def test_two_level_cascade_chain_detected(self):
+        """A→B→C：删 A 的一行会跨两层继续往下删"""
+        tables = [
+            _table("a", foreign_keys=[self.fk("fk_b", ["b_id"], "b", on_delete="CASCADE")]),
+            _table("b", foreign_keys=[self.fk("fk_c", ["c_id"], "c", on_delete="CASCADE")]),
+            _table("c"),
+        ]
+        issues = self.analyze(tables)
+        self.assertEqual(
+            [item["table_name"] for item in issues if item["rule_code"] == "cascade_delete_chain"],
+            ["a"],
+            "只有 a 的两层下游里还有级联；b 的下游 c 没有级联出边",
+        )
+
+    def test_single_level_cascade_is_not_reported(self):
+        """单层级联就是 CASCADE 的字面意思，是声明者的本意"""
+        tables = [
+            _table("a", foreign_keys=[self.fk("fk_b", ["b_id"], "b", on_delete="CASCADE")]),
+            _table("b"),
+        ]
+        self.assertNotIn("cascade_delete_chain", self.types_of(self.analyze(tables)))
+
+    def test_self_referencing_cascade_is_not_reported(self):
+        """`parent_id → 本表` 是树形结构（部门树、评论树）的常规做法"""
+        tables = [_table("tree", foreign_keys=[self.fk("fk_parent", ["parent_id"], "tree", on_delete="CASCADE")])]
+        self.assertNotIn("cascade_delete_chain", self.types_of(self.analyze(tables)))
+
+    def test_missing_action_field_is_not_treated_as_cascade(self):
+        """本次补采之前的老快照没有动作字段——那是「判不了」，不是 CASCADE"""
+        legacy = {"name": "fk", "columns": ["x"], "ref_schema": "public", "ref_table": "b", "ref_columns": ["id"]}
+        legacy2 = {"name": "fk2", "columns": ["y"], "ref_schema": "public", "ref_table": "c", "ref_columns": ["id"]}
+        tables = [_table("a", foreign_keys=[legacy]), _table("b", foreign_keys=[legacy2]), _table("c")]
+        self.assertNotIn("cascade_delete_chain", self.types_of(self.analyze(tables)))

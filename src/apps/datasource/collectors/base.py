@@ -94,6 +94,14 @@ class BaseCollector:
         raise NotImplementedError
 
     def _foreign_keys(self) -> list:
+        """
+        外键关联。每项含 `name` / `columns` / `ref_schema` / `ref_table` / `ref_columns`，
+        以及**删除与更新动作** `on_delete` / `on_update`
+
+        动作名由各子类**归一成同一套**（`CASCADE` / `SET NULL` / `RESTRICT` /
+        `NO ACTION` / `SET DEFAULT`），使分析侧不必分方言。
+        **取不到时是空串**——空串表示「判不了」，不能当成 `NO ACTION`。
+        """
         raise NotImplementedError
 
     def _primary_keys(self) -> list:
