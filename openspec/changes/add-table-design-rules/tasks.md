@@ -46,7 +46,7 @@
 - [x] 6.1 `python .ci/custom-checks/scaffold_check.py`
 - [x] 6.2 `ruff check` 与 `ruff format --check`（带 `.ci/lint-rules/ruff.toml`）
 - [x] 6.3 `ENV_TYPE=test python manage.py test apps.datasource apps.overview`
-- [ ] 6.4 **真实接口核对**：重新采集一个数据源 → 核对 5 条新规则产出的问题；
+- [x] 6.4 **真实接口核对**（见第 8 组）：重新采集一个数据源 → 核对 5 条新规则产出的问题；
        **逐条看有没有误报**（这是本次最主要的核对目标——新规则的代价全在误报上）
 - [ ] 6.5 **真实页面核对**：规则清单页能看到 12 条；新规则的修复语句与来源标注正确
 - [x] 6.6 `openspec validate add-table-design-rules --strict --no-interactive`
@@ -55,3 +55,14 @@
 
 - [x] 7.1 **测试抓到我一个真 bug**：级联链那段的 `for t, name in downstream` 把 `(schema, table)` 元组**拆成了两个变量**，于是 `t in cascades` 拿 schema 去比整张表的键，永远不成立——链永远为空、规则永不触发。改成 `for target in downstream` 后正常。**写单测的价值就在这**：这个错误读代码时看不出来，跑一遍立刻现形
 - [x] 7.2 MySQL 侧的 `REFERENTIAL_CONSTRAINTS` 关联查询**只在 PostgreSQL 上验证过**（本条记进 `docs/datasource.md` 的已知限制）
+
+## 8. 6.4 真机核对抓到的误报（本次最主要的核对目标）
+
+对一个已被采集的数据源重新采集（31 张表），逐条看 5 条新规则的产出。
+
+- [x] 8.1 **抓到 6 条误报**：`index_larger_than_data` 报出来的全是 `data=8192` 字节、1~42 行的小表，措辞还显示成「索引占用 0 MB，超过数据本身的 0 MB」。根因是判据只比大小、**没有体量下限**——而小表的 `index > data` 是**必然形态**（索引有固定的页开销）
+- [x] 8.2 修复：加阈值 `index_overweight_min_data_mb`（默认 100），数据占用不到这个体量就不判；补一条小表的反例单测
+- [x] 8.3 复验：同一份真实快照重跑，该规则 **6 → 0 条**
+- [x] 8.4 **确认其余三条的 0 条是数据使然**，不是规则静默失效：库里**一条浮点列都没有**（金额那条无从触发）、最大表 **19 列**（阈值 50）、唯一的字符主键是 `varchar(40)`（阈值 64，正好卡在阈值内）
+- [x] 8.5 **确认 `cascade_delete_chain` 的 0 条是判对了**：库里唯一那条 CASCADE 指向的表自己没有任何外键（单层级联，不该报）
+- [x] 8.6 **顺带验证了新采集 SQL**：重采成功（`status=3`），说明新加的 `confdeltype` / `confupdtype` 取数在真实 PostgreSQL 上跑得通；采到 9 条外键，动作分布 `NO ACTION 7 / CASCADE 1 / SET NULL 1`

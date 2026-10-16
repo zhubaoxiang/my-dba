@@ -375,7 +375,12 @@ def _check_index_larger_than_data(ctx):
 
     整表视角：与逐索引的「重复或冗余索引」「疑似未使用索引」互补——那两条指出具体是哪个
     索引，这条指出这张表的索引整体失衡。
+
+    **有体量下限**：小表的 `index > data` 是**必然形态**（索引有固定的页开销），比值没有
+    意义。这一条是 6.4 真机核对逼出来的——第一次跑出来 6 条，全是 `data=8192` 字节、
+    几十行的小表，报出来只会刷屏。
     """
+    min_data = ctx.thresholds["index_overweight_min_data_mb"] * _BYTES_PER_MB
     issues = []
     for table in ctx.tables:
         # 空表的数据占用接近 0，索引稍大是正常形态，不是问题
@@ -383,6 +388,8 @@ def _check_index_larger_than_data(ctx):
             continue
         data_size = int(table.get("data_size") or 0)
         index_size = int(table.get("index_size") or 0)
+        if data_size < min_data:
+            continue
         if index_size <= data_size:
             continue
         issues.append(
@@ -536,6 +543,7 @@ RULES = (
         default_level=custom_enum.IssueLevelEnum.MEDIUM,
         object_level=custom_enum.ObjectLevelEnum.TABLE,
         handler=_check_index_larger_than_data,
+        default_thresholds={"index_overweight_min_data_mb": 100},
     ),
     RuleDefinition(
         code="cascade_delete_chain",

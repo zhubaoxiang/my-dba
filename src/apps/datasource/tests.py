@@ -167,6 +167,8 @@ _RULE_OVERRIDES = {
     "suspicious_column_type": {"thresholds": {"varchar_max_length": 255}},
     # 列数阈值调小，免得为了测宽表去凑 51 列
     "wide_table": {"thresholds": {"wide_table_max_columns": 3}},
+    # 体量下限调到 1MB，免得为了测这条去凑 100MB 的假数据
+    "index_larger_than_data": {"thresholds": {"index_overweight_min_data_mb": 1}},
 }
 
 
@@ -1745,6 +1747,16 @@ class TableDesignRuleTests(SimpleTestCase):
     def test_index_larger_than_data_detected(self):
         table = _table("t", data_size=1024 * 1024, index_size=2 * 1024 * 1024)
         self.assertIn("index_larger_than_data", self.types_of(self.analyze([table])))
+
+    def test_small_table_with_larger_index_is_not_reported(self):
+        """
+        小表的 `index > data` 是**必然形态**（索引有固定的页开销），比值没有意义
+
+        这条反例是 6.4 真机核对逼出来的：第一次跑出来 6 条，全是 `data=8192` 字节、
+        1~42 行的小表，措辞还会显示成「索引占用 0 MB，超过数据本身的 0 MB」。
+        """
+        table = _table("tiny", data_size=8192, index_size=16384)
+        self.assertNotIn("index_larger_than_data", self.types_of(self.analyze([table])))
 
     def test_empty_table_with_larger_index_is_not_reported(self):
         """空表的数据占用接近 0，索引稍大是正常形态，不是问题"""
