@@ -42,6 +42,7 @@ TBD - created by archiving change add-homepage-overview. Update Purpose after ar
 - **WHEN** 某数据源有采集快照
 - **THEN** MUST 显示其表数量、按严重级别的问题数量，以及该快照的采集时间
 - **AND** 问题数 MUST 基于**最近一次快照**统计，MUST NOT 累计历史快照
+- **AND** MUST 排除已被静音的问题，与问题清单采用同一口径
 
 #### Scenario: 未采集或采集失败的库不显示问题分级
 
@@ -90,6 +91,7 @@ TBD - created by archiving change add-homepage-overview. Update Purpose after ar
 - **WHEN** 首页加载完成
 - **THEN** MUST 给出已纳管库总数、其中在线数、问题合计与知识库概况
 - **AND** 在线数 MUST 以「在线数 / 总数」的形式呈现，使异常比例一眼可见
+- **AND** 问题合计 MUST 排除已被静音的问题，与问题清单采用同一口径
 
 ### Requirement: 知识库的状态总览
 
