@@ -65,6 +65,12 @@ const routes = [
         meta: { title: 'SQL 生成', icon: 'EditPen', showInMenu: true, group: 'SQL' }
       },
       {
+        path: 'ddlreview',
+        name: 'DdlReview',
+        component: () => import('@/views/ddlreview/index.vue'),
+        meta: { title: 'DDL 评审', icon: 'DocumentChecked', showInMenu: true, group: 'SQL' }
+      },
+      {
         path: 'datasource/rules',
         name: 'AnalysisRules',
         component: () => import('@/views/datasource/rules.vue'),

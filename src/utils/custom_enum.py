@@ -64,6 +64,18 @@ class ObjectLevelEnum(models.IntegerChoices):
     COLUMN = 4, "列"
 
 
+class RuleScopeEnum(models.IntegerChoices):
+    """
+    规则的分析作用域
+
+    作用域是**声明**的一部分：新增规则默认只用于快照分析，要参与 DDL 评审必须显式声明，
+    避免「一条需要运行时统计的规则被拿到尚未执行的建表语句上跑」。
+    """
+
+    SNAPSHOT = 1, "快照分析"
+    DDL = 2, "DDL 评审"
+
+
 class ProviderTypeEnum(models.IntegerChoices):
     """
     大模型接入的接口类型

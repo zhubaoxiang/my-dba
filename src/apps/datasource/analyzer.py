@@ -19,23 +19,29 @@ class CatalogAnalyzer:
     基于采集快照产出库表健康问题清单
     """
 
-    def __init__(self, snapshot_data: dict, rule_overrides: dict = None):
+    def __init__(self, snapshot_data: dict, rule_overrides: dict = None, rule_codes=None, scope=None):
         """
         :param snapshot_data: 采集快照的原始结构
         :param rule_overrides: 按规则 code 的覆盖项 `{code: {"enabled"/"level"/"thresholds"}}`。
             **留空（None）时从 `analysis_rule` 表读**；显式传字典（含空字典）则不查库，
             供测试与将来的「规则试运行」注入
+        :param rule_codes: 只跑这些规则；留空表示该作用域的全部规则
+        :param scope: 只跑该作用域的规则（DDL 评审传 `RuleScopeEnum.DDL`）
         """
         self.data = snapshot_data or {}
         self.rule_overrides = rule_overrides
+        self.rule_codes = set(rule_codes) if rule_codes is not None else None
+        self.scope = scope
         # 本次实际参与评估的规则 code，供总览统计与「规则集变化可被察觉」使用
         self.evaluated_rules = []
 
     def analyze(self) -> list:
         issues = []
-        for effective in registry.load_effective_rules(self.rule_overrides):
+        for effective in registry.load_effective_rules(self.rule_overrides, scope=self.scope):
             # 停用的规则直接跳过，不调用 handler（design.md D6：不影响历史数据）
             if not effective.enabled:
+                continue
+            if self.rule_codes is not None and effective.code not in self.rule_codes:
                 continue
             ctx = RuleContext(self.data, effective.definition, thresholds=effective.thresholds, level=effective.level)
             self.evaluated_rules.append(effective.code)

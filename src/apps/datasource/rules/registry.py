@@ -31,6 +31,15 @@ def rule_codes() -> list:
     return [rule.code for rule in RULES]
 
 
+def rules_for_scope(scope) -> tuple:
+    """
+    某个分析作用域适用的规则声明
+
+    作用域来自 `RuleDefinition.scopes`；调用方**不要**自己维护适用规则清单。
+    """
+    return tuple(rule for rule in RULES if scope in rule.scopes)
+
+
 def get_rule(code: str):
     """
     按 code 查找规则声明，不存在返回 None
@@ -165,7 +174,7 @@ def _load_overrides_from_db() -> dict:
     }
 
 
-def load_effective_rules(injected: dict = None) -> list:
+def load_effective_rules(injected: dict = None, scope=None) -> list:
     """
     本次分析生效的规则清单
 
@@ -173,11 +182,14 @@ def load_effective_rules(injected: dict = None) -> list:
         传 `None`（默认）表示从 `analysis_rule` 表读；传字典则**完全不查库**——
         分析器的既有测试是 `SimpleTestCase`（不碰数据库），靠它注入；将来的「规则试运行」
         也用同一入口预览改动后的效果。
+    :param scope: 只取该作用域的规则；留空表示全部。DDL 评审传 `RuleScopeEnum.DDL`，
+        不自己维护适用规则清单。
     """
     overrides = _load_overrides_from_db() if injected is None else injected
+    rules = RULES if scope is None else rules_for_scope(scope)
 
     effective = []
-    for rule in RULES:
+    for rule in rules:
         row = overrides.get(rule.code) or {}
         effective.append(
             EffectiveRule(

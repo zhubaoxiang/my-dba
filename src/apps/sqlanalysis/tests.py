@@ -12,7 +12,7 @@ from django.test import SimpleTestCase, TestCase
 from rest_framework.test import APIClient
 
 from apps.datasource import models
-from apps.sqlanalysis import analyzer, explain, formatting, interpret, parse, schema, views
+from apps.sqlanalysis import analyzer, explain, formatting, interpret, parse, schema, services, views
 from apps.sqlanalysis.rules import registry
 from apps.sqlanalysis.schema import SchemaIndex, SchemaUnavailable, families_conflict, type_family
 from utils import custom_enum
@@ -1299,3 +1299,25 @@ class NoFalsePositiveTests(SimpleTestCase):
                 [],
                 f"这条 SQL 是正确的，不该报问题：{sql}",
             )
+
+
+class ParseServiceTests(SimpleTestCase):
+    """
+    解析契约：别的模块（DDL 评审）只通过服务层拿语法树，不直接 import parse
+    """
+
+    def test_returns_parse_result(self):
+        result = services.parse_sql("CREATE TABLE t (id bigint PRIMARY KEY)", custom_enum.DbTypeEnum.POSTGRESQL)
+        self.assertTrue(result.ok)
+        self.assertEqual(len(result.statements), 1)
+        self.assertEqual(result.statements[0].kind, DDL)
+
+    def test_syntax_error_is_not_an_exception(self):
+        result = services.parse_sql("CREATE TABLE", custom_enum.DbTypeEnum.POSTGRESQL)
+        self.assertFalse(result.ok)
+        self.assertTrue(result.errors)
+
+    def test_mysql_dialect_is_passed_through(self):
+        result = services.parse_sql("CREATE TABLE t (id bigint PRIMARY KEY)", custom_enum.DbTypeEnum.MYSQL)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.statements[0].kind, DDL)

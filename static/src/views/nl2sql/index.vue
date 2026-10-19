@@ -117,6 +117,9 @@
           <el-tooltip :content="runTip" placement="top">
             <el-button size="small" type="primary" :loading="running" @click="runSql">试运行</el-button>
           </el-tooltip>
+          <el-button v-if="result.is_ddl" size="small" type="success" @click="goDdlReview">
+            去 DDL 评审
+          </el-button>
         </div>
 
         <!-- 这条必须常驻：能力越像「智能」，越容易被把「结构没问题」读成「结果没问题」 -->
@@ -169,11 +172,14 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { datasourceApi, catalogApi } from '@/api/datasource'
 import { nl2sqlApi } from '@/api/nl2sql'
 import { sqlAnalysisApi } from '@/api/sqlAnalysis'
 
+const DDL_DRAFT_KEY = 'my-dba:ddl-review-draft'
+const router = useRouter()
 const LEVEL_LABELS = { 1: '高', 2: '中', 3: '低' }
 const LEVEL_TYPES = { 1: 'danger', 2: 'warning', 3: 'info' }
 
@@ -277,6 +283,15 @@ async function copySql() {
   } catch {
     ElMessage.warning('复制失败，请手动选中复制')
   }
+}
+
+// 生成与评审是两件事：这里只交接输入，评审结论在独立页面给出
+function goDdlReview() {
+  sessionStorage.setItem(
+    DDL_DRAFT_KEY,
+    JSON.stringify({ sql: result.value.sql, datasource_id: datasourceId.value || null })
+  )
+  router.push('/ddlreview')
 }
 
 onMounted(loadDatasources)

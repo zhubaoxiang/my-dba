@@ -128,6 +128,7 @@ def _unavailable(note: str, structure: dict, dialect_label: str, label: str = "�
         "repair": {"applied": False, "problems": [], "before_sql": "", "note": ""},
         "issues": [],
         "modifies_data": False,
+        "is_ddl": False,
         # 「没能生成」与「生成了但有问题」是两回事，结论要如实反映
         "verdict": {"level": custom_enum.IssueLevelEnum.HIGH.value, "label": label, "text": note},
         # 没生成语句也就没做结构校验——但**必须说明原因**，空 note 会被读成「校验过了、没问题」
@@ -260,6 +261,11 @@ def generate_sql(datasource_id: int, question: str, tables=None, dialect=None) -
         "verdict": analysis["verdict"],
         # 由后端算好给界面用：写语句要标明「不会被执行」，前端不维护语句类别枚举
         "modifies_data": _modifies_data(analysis["syntax"]),
+        # DDL 的设计评审在独立页面；这里只负责告诉前端「该显示交接入口了」
+        "is_ddl": any(
+            item.get("kind") == custom_enum.StatementKindEnum.DDL.value
+            for item in analysis["syntax"].get("statements") or ()
+        ),
         # 校验只覆盖结构——「未做校验」时必须说明原因，不能呈现成「未发现问题」
         "schema_check": analysis["schema_check"],
         "evaluated_rules": analysis["evaluated_rules"],

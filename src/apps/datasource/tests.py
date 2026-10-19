@@ -1812,3 +1812,152 @@ class TableDesignRuleTests(SimpleTestCase):
         legacy2 = {"name": "fk2", "columns": ["y"], "ref_schema": "public", "ref_table": "c", "ref_columns": ["id"]}
         tables = [_table("a", foreign_keys=[legacy]), _table("b", foreign_keys=[legacy2]), _table("c")]
         self.assertNotIn("cascade_delete_chain", self.types_of(self.analyze(tables)))
+
+
+class RuleScopeTests(SimpleTestCase):
+    """
+    规则作用域是**声明**：DDL 评审不能自己维护第二份适用规则清单
+    """
+
+    DDL_RULE_CODES = {
+        "no_primary_key",
+        "fk_without_index",
+        "duplicate_index",
+        "suspicious_column_type",
+        "float_money_column",
+        "long_text_primary_key",
+        "wide_table",
+        "cascade_delete_chain",
+    }
+
+    def test_default_scope_is_snapshot_only(self):
+        """未声明作用域的规则只用于快照分析，不能被 DDL 评审隐式启用"""
+        for rule in registry.all_rules():
+            if rule.code not in self.DDL_RULE_CODES:
+                self.assertEqual(rule.scopes, (custom_enum.RuleScopeEnum.SNAPSHOT,), rule.code)
+
+    def test_ddl_rules_are_declared(self):
+        rules = registry.rules_for_scope(custom_enum.RuleScopeEnum.DDL)
+        self.assertEqual({rule.code for rule in rules}, self.DDL_RULE_CODES)
+
+    def test_runtime_rules_are_not_ddl_scoped(self):
+        """需要行数 / 使用统计的规则与新建表天然孤立的规则不参与 DDL 评审"""
+        codes = {rule.code for rule in registry.rules_for_scope(custom_enum.RuleScopeEnum.DDL)}
+        for code in ("big_table", "unused_index", "index_larger_than_data", "isolated_table"):
+            self.assertNotIn(code, codes)
+
+    def test_load_effective_rules_filters_by_scope(self):
+        """注入覆盖项时不查库；作用域过滤与规则清单同源"""
+        rules = registry.load_effective_rules({}, scope=custom_enum.RuleScopeEnum.DDL)
+        self.assertEqual({rule.code for rule in rules}, self.DDL_RULE_CODES)
+
+    def test_snapshot_scope_still_has_all_rules(self):
+        rules = registry.load_effective_rules({}, scope=custom_enum.RuleScopeEnum.SNAPSHOT)
+        self.assertEqual(len(rules), len(registry.all_rules()))
+
+
+class SnapshotDataServiceTests(SimpleTestCase):
+    """
+    DDL 评审需要的**完整**快照形态数据与表规则入口
+
+    `list_snapshot_tables()` 是裁剪过的，跑不了规则；这里单独验证能拿到完整结构。
+    """
+
+    def test_analyze_snapshot_data_runs_only_requested_scope(self):
+        data = {
+            "tables": [
+                {
+                    "schema": "public",
+                    "name": "orders",
+                    "row_count": 20_000_000,
+                    "columns": [{"name": "id", "data_type": "bigint", "nullable": False}],
+                    "indexes": [],
+                    "primary_key": None,
+                    "foreign_keys": [],
+                }
+            ]
+        }
+        issues = services.analyze_snapshot_data(data, scope=custom_enum.RuleScopeEnum.DDL, rule_overrides={})
+        codes = {item["rule_code"] for item in issues}
+        self.assertIn("no_primary_key", codes)
+        self.assertNotIn("big_table", codes, "超大表需要运行时体量，不属于 DDL 作用域")
+
+    def test_analyze_snapshot_data_filters_by_codes(self):
+        data = {
+            "tables": [
+                {
+                    "schema": "public",
+                    "name": "orders",
+                    "columns": [{"name": "id", "data_type": "bigint", "nullable": False}],
+                    "indexes": [],
+                    "primary_key": None,
+                    "foreign_keys": [],
+                }
+            ]
+        }
+        issues = services.analyze_snapshot_data(data, rule_codes=["no_primary_key"], rule_overrides={})
+        self.assertEqual({item["rule_code"] for item in issues}, {"no_primary_key"})
+
+    def test_analyze_snapshot_data_respects_disabled_rule(self):
+        data = {
+            "tables": [
+                {
+                    "schema": "public",
+                    "name": "orders",
+                    "columns": [{"name": "id", "data_type": "bigint", "nullable": False}],
+                    "indexes": [],
+                    "primary_key": None,
+                    "foreign_keys": [],
+                }
+            ]
+        }
+        issues = services.analyze_snapshot_data(
+            data,
+            scope=custom_enum.RuleScopeEnum.DDL,
+            rule_overrides={"no_primary_key": {"enabled": False}},
+        )
+        self.assertEqual(issues, [])
+
+
+class SnapshotDataShapeTests(SimpleTestCase):
+    """
+    `latest_snapshot_data()` 返回的是**完整**快照，而不是 `list_snapshot_tables()` 的裁剪契约。
+    取数本身是既有函数，这里只验证形状与不泄露凭据。
+    """
+
+    def test_returns_full_snapshot_data(self):
+        raw = {
+            "database_version": "PostgreSQL 16.2",
+            "tables": [
+                {
+                    "schema": "public",
+                    "name": "orders",
+                    "row_count": 12,
+                    "columns": [{"name": "id", "data_type": "bigint", "nullable": False}],
+                    "indexes": [{"name": "pk_orders", "columns": ["id"], "primary": True}],
+                    "primary_key": {"name": "pk_orders", "columns": ["id"]},
+                    "foreign_keys": [
+                        {
+                            "name": "fk_user",
+                            "columns": ["user_id"],
+                            "ref_schema": "public",
+                            "ref_table": "app_user",
+                            "ref_columns": ["id"],
+                            "on_delete": "CASCADE",
+                        }
+                    ],
+                }
+            ],
+            "unavailable": [],
+        }
+        snapshot = SimpleNamespace(raw_data=raw, collect_time=datetime(2026, 10, 19, 10, 0, 0))
+        with mock.patch.object(services, "latest_snapshot", return_value=snapshot):
+            data = services.latest_snapshot_data(1)
+        self.assertEqual(data["tables"][0]["indexes"][0]["name"], "pk_orders")
+        self.assertEqual(data["tables"][0]["foreign_keys"][0]["on_delete"], "CASCADE")
+        self.assertEqual(data["collect_time"], "2026-10-19 10:00:00")
+        self.assertNotIn("password", data)
+
+    def test_returns_none_when_never_collected(self):
+        with mock.patch.object(services, "latest_snapshot", return_value=None):
+            self.assertIsNone(services.latest_snapshot_data(1))

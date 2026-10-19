@@ -340,6 +340,31 @@ def latest_snapshot(datasource_id: int):
     )
 
 
+def latest_snapshot_data(datasource_id: int):
+    """
+    取某数据源最近快照的**完整**数据（含索引、外键动作、体积、版本信息）
+
+    与 `list_snapshot_tables()` 的区别：那是给展示用的裁剪契约，跑不了规则；
+    DDL 评审需要完整结构，故单独开放这一项。返回副本，调用方可以安全地改。
+    """
+    snapshot = latest_snapshot(datasource_id)
+    if snapshot is None:
+        return None
+    data = dict(snapshot.raw_data or {})
+    data["collect_time"] = snapshot.collect_time.strftime("%Y-%m-%d %H:%M:%S")
+    return data
+
+
+def analyze_snapshot_data(data: dict, rule_codes=None, scope=None, rule_overrides=None) -> list:
+    """
+    对「快照形态」的数据跑表规则
+
+    DDL 评审把 DDL 合并进内存快照后，用这个入口复用同一套规则；
+    不查快照、不写库，纯计算。
+    """
+    return analyzer.CatalogAnalyzer(data, rule_overrides=rule_overrides, rule_codes=rule_codes, scope=scope).analyze()
+
+
 def list_snapshot_tables(datasource_id: int, keyword: str = "") -> list:
     """
     取某数据源最近快照中的表摘要
