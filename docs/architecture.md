@@ -110,7 +110,7 @@ src/                          # 后端代码根目录
 │   │   ├── services.py       #   聚合各块数据 + 概览数字 + 分块兜底
 │   │   └── views.py          #   GET /v1/overview（StatelessView）
 │   ├── sqlanalysis/          # SQL 规范与性能分析 → docs/sql-analysis.md
-│   │   ├── services.py       #   跨模块只读契约（当前只有 rule_counts）
+│   │   ├── services.py       #   跨模块只读契约（解析 / 类型归族 / 分析结果 / 规则清单）
 │   │   ├── parse.py          #   按方言解析、语句分类（只读 / DML / DDL / 其他）
 │   │   ├── formatting.py     #   从语法树重新生成排版
 │   │   ├── rules/            #   18 条规则的声明与判定
@@ -119,6 +119,13 @@ src/                          # 后端代码根目录
 │   │   ├── explain.py        #   试运行与执行计划
 │   │   ├── interpret.py      #   模型解读（与规则判定分区）
 │   │   └── views.py          #   SqlAnalysisView（stateless，不落库）
+│   ├── ddlreview/            # DDL 评审（建表 / 改表语句预检）→ docs/ddl-review.md
+│   │   ├── parser.py         #   DDL → 语句类别与语法树，判定形态是否受支持
+│   │   ├── types.py          #   sqlglot 类型 → 快照 data_type 词表映射
+│   │   ├── merge.py          #   按顺序把 DDL 合并进内存快照
+│   │   ├── risks.py          #   语句级风险（阻断 / 依赖 / 大表）
+│   │   ├── services.py       #   编排、问题增量、结论
+│   │   └── views.py          #   DdlReviewView（StatelessView，不落库、不执行）
 │   └── test/                 # 脚手架示例模块（见 development.md 附录）
 │
 ├── utils/                    # 通用能力（扁平结构，禁止业务模块自建工具类）

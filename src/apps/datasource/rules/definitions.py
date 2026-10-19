@@ -55,6 +55,8 @@ class RuleDefinition:
     object_level: "custom_enum.ObjectLevelEnum"
     handler: Callable
     default_thresholds: dict = field(default_factory=dict)
+    # 默认只用于快照分析；DDL 评审必须由规则显式声明，理由见 DDL 评审设计 D4
+    scopes: tuple = (custom_enum.RuleScopeEnum.SNAPSHOT,)
 
 
 # ----------------------------------------------------------------------
@@ -457,6 +459,7 @@ RULES = (
         default_level=custom_enum.IssueLevelEnum.HIGH,
         object_level=custom_enum.ObjectLevelEnum.TABLE,
         handler=_check_no_primary_key,
+        scopes=(custom_enum.RuleScopeEnum.SNAPSHOT, custom_enum.RuleScopeEnum.DDL),
     ),
     RuleDefinition(
         code="fk_without_index",
@@ -465,6 +468,7 @@ RULES = (
         default_level=custom_enum.IssueLevelEnum.MEDIUM,
         object_level=custom_enum.ObjectLevelEnum.TABLE,
         handler=_check_foreign_key_index,
+        scopes=(custom_enum.RuleScopeEnum.SNAPSHOT, custom_enum.RuleScopeEnum.DDL),
     ),
     RuleDefinition(
         code="duplicate_index",
@@ -473,6 +477,7 @@ RULES = (
         default_level=custom_enum.IssueLevelEnum.MEDIUM,
         object_level=custom_enum.ObjectLevelEnum.TABLE,
         handler=_check_duplicate_index,
+        scopes=(custom_enum.RuleScopeEnum.SNAPSHOT, custom_enum.RuleScopeEnum.DDL),
     ),
     RuleDefinition(
         code="unused_index",
@@ -500,6 +505,7 @@ RULES = (
         object_level=custom_enum.ObjectLevelEnum.COLUMN,
         handler=_check_column_types,
         default_thresholds={"varchar_max_length": 2000},
+        scopes=(custom_enum.RuleScopeEnum.SNAPSHOT, custom_enum.RuleScopeEnum.DDL),
     ),
     RuleDefinition(
         code="isolated_table",
@@ -517,6 +523,7 @@ RULES = (
         default_level=custom_enum.IssueLevelEnum.HIGH,
         object_level=custom_enum.ObjectLevelEnum.COLUMN,
         handler=_check_money_float,
+        scopes=(custom_enum.RuleScopeEnum.SNAPSHOT, custom_enum.RuleScopeEnum.DDL),
     ),
     RuleDefinition(
         code="long_text_primary_key",
@@ -526,6 +533,7 @@ RULES = (
         object_level=custom_enum.ObjectLevelEnum.COLUMN,
         handler=_check_long_text_primary_key,
         default_thresholds={"primary_key_max_length": 64},
+        scopes=(custom_enum.RuleScopeEnum.SNAPSHOT, custom_enum.RuleScopeEnum.DDL),
     ),
     RuleDefinition(
         code="wide_table",
@@ -535,6 +543,7 @@ RULES = (
         object_level=custom_enum.ObjectLevelEnum.TABLE,
         handler=_check_wide_table,
         default_thresholds={"wide_table_max_columns": 50},
+        scopes=(custom_enum.RuleScopeEnum.SNAPSHOT, custom_enum.RuleScopeEnum.DDL),
     ),
     RuleDefinition(
         code="index_larger_than_data",
@@ -552,5 +561,6 @@ RULES = (
         default_level=custom_enum.IssueLevelEnum.MEDIUM,
         object_level=custom_enum.ObjectLevelEnum.TABLE,
         handler=_check_cascade_delete_chain,
+        scopes=(custom_enum.RuleScopeEnum.SNAPSHOT, custom_enum.RuleScopeEnum.DDL),
     ),
 )

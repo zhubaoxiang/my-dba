@@ -175,6 +175,7 @@ class AnalysisRuleSerializer(serializers.ModelSerializer):
     level_label = serializers.SerializerMethodField(label="严重级别")
     object_level_label = serializers.SerializerMethodField(label="适用层级")
     is_overridden = serializers.SerializerMethodField(label="可覆盖项是否被改过")
+    applies_to_ddl = serializers.SerializerMethodField(label="是否用于 DDL 评审")
 
     class Meta:
         model = models.AnalysisRule
@@ -195,6 +196,10 @@ class AnalysisRuleSerializer(serializers.ModelSerializer):
             or obj.level != declared.default_level.value
             or (obj.thresholds or {}) != declared.default_thresholds
         )
+
+    def get_applies_to_ddl(self, obj):
+        declared = registry.get_rule(obj.code)
+        return bool(declared and custom_enum.RuleScopeEnum.DDL in declared.scopes)
 
 
 class AnalysisRuleUpdateSerializer(serializers.Serializer):

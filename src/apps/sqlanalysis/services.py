@@ -12,6 +12,23 @@ from apps.sqlanalysis import analyzer, parse, schema
 from apps.sqlanalysis.rules import registry as rule_registry
 
 
+def parse_sql(sql: str, dialect=None):
+    """
+    解析契约
+
+    别的模块（DDL 评审）只通过这里拿语法树，不直接 import 本模块的 `parse`。
+    解析失败不抛异常，返回带行列错误的 `ParseResult`。
+    """
+    return parse.parse_sql(sql, dialect)
+
+
+def type_family(data_type: str) -> str:
+    """
+    类型归族契约（DDL 评审判断改类型是否跨族时用）
+    """
+    return schema.type_family(data_type)
+
+
 def syntax_of(result) -> dict:
     """
     解析结果的对外形态（`format` 与 `analyze` 共用，故为公开函数）

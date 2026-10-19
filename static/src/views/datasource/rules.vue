@@ -17,7 +17,20 @@
         <el-tab-pane :label="`库表规则 ${dsTotal}`" name="datasource">
           <el-table :data="dsRows" v-loading="dsLoading" border>
             <el-table-column prop="code" label="规则标识" min-width="180" />
-            <el-table-column prop="name" label="名称" min-width="150" />
+            <el-table-column label="名称" min-width="180">
+              <template #default="{ row }">
+                <span>{{ row.name }}</span>
+                <el-tag
+                  v-if="row.applies_to_ddl"
+                  type="success"
+                  size="small"
+                  effect="plain"
+                  class="scope-tag"
+                >
+                  DDL 评审
+                </el-tag>
+              </template>
+            </el-table-column>
             <el-table-column prop="description" label="说明" min-width="240" show-overflow-tooltip />
             <el-table-column prop="object_level_label" label="适用层级" width="100" />
             <el-table-column label="严重级别" width="130">
@@ -250,6 +263,10 @@ onMounted(() => {
   color: #909399;
   font-size: 12px;
   margin-right: 6px;
+}
+
+.scope-tag {
+  margin-left: 6px;
 }
 
 .actions {

@@ -336,11 +336,13 @@ class Nl2SqlGenerateTests(TestCase):
         self._stub_model(generated="SELECT id FROM app_user")
         data = services.generate_sql(self.datasource.id, "查用户 id")
         self.assertFalse(data["modifies_data"])
+        self.assertFalse(data["is_ddl"])
 
     def test_ddl_counts_as_modifying_data(self):
         self._stub_model(generated="CREATE TABLE t (id bigint)")
         data = services.generate_sql(self.datasource.id, "建一张表")
         self.assertTrue(data["modifies_data"])
+        self.assertTrue(data["is_ddl"], "前端据此显示「去 DDL 评审」入口")
 
     def test_dangerous_write_does_not_trigger_repair(self):
         """
