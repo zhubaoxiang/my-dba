@@ -5,7 +5,7 @@ TBD - created by archiving change add-analysis-rule-registry. Update Purpose aft
 ## Requirements
 ### Requirement: 规则的代码声明
 
-每条分析规则 MUST 以声明方式在代码中定义，至少包含：稳定的字符串 `code`、名称、说明、默认严重级别、适用层级、默认阈值与判定函数。声明 MUST 是规则默认值的唯一来源；规则判定逻辑 MUST 是代码，MUST NOT 通过表达式、脚本或配置动态求值。
+每条分析规则 MUST 以声明方式在代码中定义，至少包含：稳定的字符串 `code`、名称、说明、默认严重级别、适用层级、适用范围（快照分析 / DDL 评审）、默认阈值与判定函数。声明 MUST 是规则默认值的唯一来源；规则判定逻辑 MUST 是代码，MUST NOT 通过表达式、脚本或配置动态求值。
 
 #### Scenario: 新增规则只改一处
 
@@ -21,6 +21,18 @@ TBD - created by archiving change add-analysis-rule-registry. Update Purpose aft
 
 - **WHEN** 查看规则清单或问题记录
 - **THEN** 每条规则以其字符串 `code` 与名称标识，`code` 不随规则增删而改变
+
+#### Scenario: 声明适用范围
+
+- **WHEN** 一条规则未显式声明适用范围
+- **THEN** 它 MUST 默认只适用于快照分析
+- **AND** MUST NOT 被其他分析场景隐式启用
+
+#### Scenario: DDL 适用范围由声明决定
+
+- **WHEN** 一条规则声明同时适用于快照分析与 DDL 评审
+- **THEN** 两种场景都 MUST 能取到该规则
+- **AND** 该适用范围 MUST NOT 由调用方维护第二份清单
 
 ### Requirement: 规则可覆盖项持久化
 
@@ -48,7 +60,7 @@ TBD - created by archiving change add-analysis-rule-registry. Update Purpose aft
 
 ### Requirement: 规则管理接口
 
-系统 SHALL 提供规则清单查询与管理接口：规则清单 MUST 以**代码声明为基底**、叠加库中已存的覆盖项后返回，使从未落库的规则也出现在清单中并展示代码默认值；MUST 支持修改启用状态、修改级别、修改阈值、恢复默认。规则 MUST 以其 `code` 定位，MUST NOT 依赖数据库自增主键。列表查询 MUST 分页。
+系统 SHALL 提供规则清单查询与管理接口：规则清单 MUST 以**代码声明为基底**、叠加库中已存的覆盖项后返回，使从未落库的规则也出现在清单中并展示代码默认值；MUST 支持修改启用状态、修改级别、修改阈值、恢复默认。规则 MUST 以其 `code` 定位，MUST NOT 依赖数据库自增主键。列表查询 MUST 分页。规则清单 MUST 返回每条规则的适用范围，使使用者能看出它是否参与 DDL 评审。
 
 #### Scenario: 查询规则清单（含尚未落库的规则）
 
@@ -59,6 +71,11 @@ TBD - created by archiving change add-analysis-rule-registry. Update Purpose aft
 
 - **WHEN** 某条规则的级别已被人工调整后请求规则清单
 - **THEN** 该规则展示调整后的值，并标明该规则已被调整
+
+#### Scenario: 清单返回适用范围
+
+- **WHEN** 请求规则清单
+- **THEN** 每条规则 MUST 带出适用范围，至少能区分「仅快照分析」与「同时用于 DDL 评审」
 
 #### Scenario: 修改启用状态
 
@@ -101,7 +118,7 @@ TBD - created by archiving change add-analysis-rule-registry. Update Purpose aft
 
 ### Requirement: 规则管理界面
 
-系统 SHALL 提供前端页面用于查看与调整规则，页面 MUST 在同一处呈现**库表分析规则**与 **SQL 分析规则**两组清单，并显示各自的规则条数。两组 MUST 都给出每条规则的说明。库表规则组 MUST 提供启用开关、级别调整与阈值编辑入口；SQL 规则组 MUST 只读展示。一组内不具备的能力 MUST NOT 以禁用（置灰）控件伪装。
+系统 SHALL 提供前端页面用于查看与调整规则，页面 MUST 在同一处呈现**库表分析规则**与 **SQL 分析规则**两组清单，并显示各自的规则条数。两组 MUST 都给出每条规则的说明。库表规则组 MUST 提供启用开关、级别调整与阈值编辑入口，并 MUST 标明哪些规则同时适用于 DDL 评审；SQL 规则组 MUST 只读展示。一组内不具备的能力 MUST NOT 以禁用（置灰）控件伪装。
 
 #### Scenario: 两组规则同页可见
 
@@ -117,6 +134,12 @@ TBD - created by archiving change add-analysis-rule-registry. Update Purpose aft
 
 - **WHEN** 用户在库表规则组中停用某条规则
 - **THEN** 页面反映该规则已停用，后续分析不再产出该规则的问题
+
+#### Scenario: DDL 适用范围可见
+
+- **WHEN** 用户查看库表规则组
+- **THEN** 同时适用于 DDL 评审的规则 MUST 有可见标识
+- **AND** 仅用于快照分析的规则 MUST NOT 带上该标识
 
 #### Scenario: SQL 规则只读
 
