@@ -48,7 +48,7 @@
 - [x] 6.3 `ENV_TYPE=test python manage.py test apps.datasource apps.overview`
 - [x] 6.4 **真实接口核对**（见第 8 组）：重新采集一个数据源 → 核对 5 条新规则产出的问题；
        **逐条看有没有误报**（这是本次最主要的核对目标——新规则的代价全在误报上）
-- [ ] 6.5 **真实页面核对**：规则清单页能看到 12 条；新规则的修复语句与来源标注正确
+- [x] 6.5 **真实页面核对**：规则清单页能看到 12 条；新规则的修复语句与来源标注正确（已核对通过）
 - [x] 6.6 `openspec validate add-table-design-rules --strict --no-interactive`
 
 ## 7. 实现时的两处
