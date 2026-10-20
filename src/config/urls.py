@@ -13,7 +13,6 @@ Including a URLconf
 """
 
 # from django.contrib import admin
-from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from apps.datasource import views as datasource_views
@@ -22,17 +21,13 @@ from apps.knowledge import views as knowledge_views
 from apps.nl2sql import views as nl2sql_views
 from apps.overview import views as overview_views
 from apps.sqlanalysis import views as sqlanalysis_views
-from apps.test import views as test_views
 
 # System name prefix for URL paths (change this when initializing the project)
 SYS_NAME = "my-dba"
 
-urlpatterns = [
-    path(f"{SYS_NAME}/api/test", test_views.index),
-]
+urlpatterns = []
 
 router = DefaultRouter(trailing_slash=False)
-router.register(rf"{SYS_NAME}/api/v1/test", test_views.TestView, basename="test")
 router.register(rf"{SYS_NAME}/v1/datasource", datasource_views.DatasourceView, basename="datasource")
 router.register(rf"{SYS_NAME}/v1/catalog", datasource_views.CatalogView, basename="catalog")
 router.register(rf"{SYS_NAME}/v1/analysis-rule", datasource_views.AnalysisRuleView, basename="analysis_rule")

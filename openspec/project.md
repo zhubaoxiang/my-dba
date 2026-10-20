@@ -127,8 +127,6 @@
 
 - `src/config/conf.ini` **已被 git 跟踪且含真实数据库地址与口令**，违反 [security.md](../.ai-harness/rules/security.md) 的凭据管理要求。应改为提交 `conf.ini.example`、将 `conf.ini` 加入 `.gitignore`，并轮换已泄露的口令
 - `settings/settings.py` 中 `SECRET_KEY` 硬编码（security.md 已标注为已知问题），`JWT_SECRET` 为空字符串
-- `src/apps/test/` 没有 `tests.py`。CLAUDE.md 中的 `GoodsTestCase` 与 README 中的 `apps/test/tests.py` 均不存在，属过期文档
-- `src/apps/test/models.py` 的 `MavenEnforcerRules` 未显式声明主键类型，触发 `models.W042` 警告
-- `manage.py check` 的输出**不稳定**：由于模型靠导入副作用注册（见上文），Django 的 `apps.get_models()` 结果可能缓存于模型被导入之前，导致同样的代码有时报 `no issues`、有时报 1 条 `models.W042`。判定 CI 是否通过时不要依赖该命令的输出条数
+- `manage.py check` 的输出**不稳定**：由于模型靠导入副作用注册（见上文），Django 的 `apps.get_models()` 结果可能缓存于模型被导入之前，导致同样的代码有时报 `no issues`、有时报 `models.W042`。判定 CI 是否通过时不要依赖该命令的输出条数
 - `package.py:24` 的注释中含一段 GitLab OAuth2 令牌明文（`oauth2:zRddW7Z9hhGfEkSkqrhG@...`），已进入 git 历史。虽为注释，仍应视为凭据泄露并轮换
 - `hooks/install.py`、`hooks/uninstall.py` 以子进程方式调用已删除的 `scripts/bsa_register_menu.py`，如将来启用平台化部署需连同该脚本一并恢复
