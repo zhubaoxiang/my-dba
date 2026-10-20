@@ -126,7 +126,6 @@ src/                          # 后端代码根目录
 │   │   ├── risks.py          #   语句级风险（阻断 / 依赖 / 大表）
 │   │   ├── services.py       #   编排、问题增量、结论
 │   │   └── views.py          #   DdlReviewView（StatelessView，不落库、不执行）
-│   └── test/                 # 脚手架示例模块（见 development.md 附录）
 │
 ├── utils/                    # 通用能力（扁平结构，禁止业务模块自建工具类）
 │   ├── authentication.py     # JWT 认证（JwtAuthentication、AuthedUser）

@@ -47,7 +47,6 @@ ENV_TYPE=test python manage.py runserver
 
 # 运行测试
 python manage.py test
-python manage.py test apps.test.tests.GoodsTestCase
 
 # DDL 更新（禁止 Django migration，DDL 写 sql/pg_struct.sql）
 # 新建/修改表结构 → 在 sql/pg_struct.sql 中编写 DDL

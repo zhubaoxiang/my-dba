@@ -7,22 +7,6 @@
 from django.db import models
 
 
-class TaskTypeEnum(models.IntegerChoices):
-    """
-    任务类型
-    """
-
-    HOST = 1, "主机扫描"
-    WEB = 2, "WEB扫描"
-
-    @classmethod
-    def get_value_by_label(cls, label):
-        data_dict = {}
-        for choice in cls.choices:
-            data_dict[choice[1]] = choice[0]
-        return data_dict.get(label)
-
-
 class DbTypeEnum(models.IntegerChoices):
     """
     数据源数据库类型
