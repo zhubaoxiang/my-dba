@@ -83,7 +83,7 @@
 ## Domain Context
 
 - **部署**：**docker compose**（`Dockerfile` + `docker-compose.yml`），未使用容器编排平台
-- **访问控制**：接口不做应用层鉴权（本仓库无 Token 来源），依赖**网络隔离**——只允许内网部署
+- **访问控制**：业务接口要求 JWT 登录（LDAP 优先 + 本地 Django 账号兜底）；服务仍建议只部署在内网或受控网络
 - **BSA 底座平台（当前未使用，保留备查）**：项目原设计运行于 BSA 平台之上。相关资产 `utils/bsa.py`、`hooks/install.py`、`hooks/uninstall.py`、`src/right_config.json` **目前均未接入、无调用方**，新增功能不要依赖它们。`package.py` 是**仍在使用的统一编译打包脚本**（镜像 → chart → dat），取件路径写在脚本开头。`scripts/bsa_register_menu.py`、`service.json`、`service-mgr-tool/` 已删除
 - **URL 前缀**：`SYS_NAME`（定义在 `src/config/urls.py`）是系统的对外路径前缀，当前为 `my-dba`。约定 ViewSet 路由为 `{SYS_NAME}/v1/{module}`，函数视图为 `{SYS_NAME}/api/{name}`
 - **知识问答**：文档摄入 → 切分 → 嵌入 → 存 Qdrant；提问时先检索、再交给单 agent 作答。**正文留在业务库内**（唯一事实来源），Qdrant 只是可重建的索引。对话模型与嵌入模型**分开配置**、各自独立选生效
@@ -126,7 +126,7 @@
 已知问题，供后续处理，不属于当前任何 change 的范围：
 
 - `src/config/conf.ini` **已被 git 跟踪且含真实数据库地址与口令**，违反 [security.md](../.ai-harness/rules/security.md) 的凭据管理要求。应改为提交 `conf.ini.example`、将 `conf.ini` 加入 `.gitignore`，并轮换已泄露的口令
-- `settings/settings.py` 中 `SECRET_KEY` 硬编码（security.md 已标注为已知问题），`JWT_SECRET` 为空字符串
+- `settings/settings.py` 中 `SECRET_KEY` 硬编码（security.md 已标注为已知问题）；`JWT_SECRET` 从 `[auth] jwt_secret` 读取，部署时必须设置为随机值，留空时登录会明确报配置缺失
 - `manage.py check` 的输出**不稳定**：由于模型靠导入副作用注册（见上文），Django 的 `apps.get_models()` 结果可能缓存于模型被导入之前，导致同样的代码有时报 `no issues`、有时报 `models.W042`。判定 CI 是否通过时不要依赖该命令的输出条数
 - `package.py:24` 的注释中含一段 GitLab OAuth2 令牌明文（`oauth2:zRddW7Z9hhGfEkSkqrhG@...`），已进入 git 历史。虽为注释，仍应视为凭据泄露并轮换
 - `hooks/install.py`、`hooks/uninstall.py` 以子进程方式调用已删除的 `scripts/bsa_register_menu.py`，如将来启用平台化部署需连同该脚本一并恢复

@@ -15,6 +15,7 @@ Including a URLconf
 # from django.contrib import admin
 from rest_framework.routers import DefaultRouter
 
+from apps.accounts import views as accounts_views
 from apps.datasource import views as datasource_views
 from apps.ddlreview import views as ddlreview_views
 from apps.knowledge import views as knowledge_views
@@ -28,6 +29,7 @@ SYS_NAME = "my-dba"
 urlpatterns = []
 
 router = DefaultRouter(trailing_slash=False)
+router.register(rf"{SYS_NAME}/v1/auth", accounts_views.AuthView, basename="auth")
 router.register(rf"{SYS_NAME}/v1/datasource", datasource_views.DatasourceView, basename="datasource")
 router.register(rf"{SYS_NAME}/v1/catalog", datasource_views.CatalogView, basename="catalog")
 router.register(rf"{SYS_NAME}/v1/analysis-rule", datasource_views.AnalysisRuleView, basename="analysis_rule")

@@ -52,8 +52,10 @@ class JwtAuthentication(authentication.BaseAuthentication):
     def authenticate(self, request):
         try:
             return self.get_info_from_jwt(request)
-        except jwt.DecodeError:
-            raise exceptions.AuthenticationFailed("jwt decode error") from jwt.DecodeError
+        except jwt.ExpiredSignatureError as exc:
+            raise exceptions.AuthenticationFailed("登录已过期，请重新登录") from exc
+        except jwt.InvalidTokenError as exc:
+            raise exceptions.AuthenticationFailed("登录凭证无效") from exc
 
     def get_info_from_jwt(self, request):
         """
@@ -64,8 +66,15 @@ class JwtAuthentication(authentication.BaseAuthentication):
         token = request.headers.get("Token")
         if token and token != "undefined":
             login_user_info = JwtOperate().decode(token)
-            auth_user = AuthedUser(
-                user_id=login_user_info["id"], username=login_user_info["name"], role=login_user_info.get("role")
-            )
+            try:
+                auth_user = AuthedUser(
+                    user_id=login_user_info["id"],
+                    username=login_user_info["name"],
+                    role=login_user_info.get("role"),
+                )
+            except KeyError as exc:
+                raise jwt.InvalidTokenError("token payload incomplete") from exc
             return auth_user, None
-        return None, None
+        # 没有 Token 时返回 None，而不是 (None, None)：后者会让 DRF 把这次认证记为
+        # successful_authenticator，导致未登录被当成「已认证但无权限」。
+        return None

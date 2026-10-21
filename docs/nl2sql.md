@@ -133,7 +133,7 @@ NL2SQL 最容易错的地方是**表名列名**——模型会自信地编出 `u
 
 > `modifies_data` 由后端按 `sql-analysis` 的**同一判法**算：按最严格的一条算，认不出的语句类型一律当作会改动。判错一边只是多显示一句提示，另一边是让人以为「这条不会改数据」。
 
-> ⚠️ 与全项目一致，`/nl2sql/generate` 继承 `baseviews.StatelessView`，**不做认证与角色校验**。服务只能部署在内网——见 [architecture.md 的「认证与鉴权」](architecture.md#认证与鉴权)。
+> `/nl2sql/generate` 继承 `baseviews.StatelessView`，要求有效 JWT；未登录返回业务码 4003。登录与 LDAP 配置见 [auth.md](auth.md)。
 
 ## 配置
 

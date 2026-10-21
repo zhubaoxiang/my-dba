@@ -16,6 +16,7 @@ from apps.sqlanalysis import analyzer, explain, formatting, interpret, parse, sc
 from apps.sqlanalysis.rules import registry
 from apps.sqlanalysis.schema import SchemaIndex, SchemaUnavailable, families_conflict, type_family
 from utils import custom_enum
+from utils.authentication import AuthedUser
 
 READ_ONLY = custom_enum.StatementKindEnum.READ_ONLY
 DML = custom_enum.StatementKindEnum.DML
@@ -951,6 +952,7 @@ class SqlAnalysisApiTests(TestCase):
 
     def setUp(self):
         self.client = APIClient()
+        self.client.force_authenticate(user=AuthedUser(1, "tester", "admin"))
         self.interpretation = {
             "available": False,
             "note": "（测试替身）",

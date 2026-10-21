@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Layout from '@/layout/index.vue'
+import { useUserStore } from '@/store/user'
 
 // 路由表：所有页面通过 Layout 包裹，菜单项由子路由 meta.showInMenu 控制
 //
@@ -109,6 +110,12 @@ const routes = [
     ]
   },
   {
+    path: '/login',
+    name: 'Login',
+    component: () => import('@/views/login/index.vue'),
+    meta: { title: '登录', showInMenu: false }
+  },
+  {
     path: '/:pathMatch(.*)*',
     name: 'NotFound',
     component: () => import('@/views/error/404.vue'),
@@ -119,6 +126,19 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes
+})
+
+// 未登录只能进登录页；已登录访问登录页则回首页。
+// token 是否过期由后续接口的 4003 兜底，避免每次跳转都先打一次 me 接口。
+router.beforeEach((to) => {
+  const userStore = useUserStore()
+  if (to.path === '/login') {
+    return userStore.token ? { path: '/home' } : true
+  }
+  if (!userStore.token) {
+    return { path: '/login', query: { redirect: to.fullPath } }
+  }
+  return true
 })
 
 export default router

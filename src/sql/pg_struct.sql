@@ -334,3 +334,28 @@ COMMENT ON COLUMN qa_message.is_fallback IS '是否由通用模型回退产生�
 COMMENT ON COLUMN qa_message.is_complete IS '回答是否生成完整；流式生成被中止或断连时为 false';
 
 CREATE INDEX IF NOT EXISTS idx_qa_message_session ON qa_message (session_id, id);
+
+-- ============================================================
+-- 登录认证（add-login-auth）
+--
+-- 只补本地账号登录所需的最小表：本地兜底认证只查 auth_user + check_password。
+-- JWT 不依赖 session 表；项目不使用 Django admin / 权限系统，因此不建
+-- auth_group / auth_permission / django_content_type / django_session。
+-- 若将来启用 Django admin 或 has_perm()，需要补齐完整 auth 表。
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS auth_user (
+    id           serial       PRIMARY KEY,
+    password     varchar(128) NOT NULL,
+    last_login   timestamp    NULL,
+    is_superuser boolean      NOT NULL,
+    username     varchar(150) NOT NULL UNIQUE,
+    first_name   varchar(150) NOT NULL,
+    last_name    varchar(150) NOT NULL,
+    email        varchar(254) NOT NULL,
+    is_staff     boolean      NOT NULL,
+    is_active    boolean      NOT NULL,
+    date_joined  timestamp    NOT NULL
+);
+
+COMMENT ON TABLE auth_user IS 'Django 本地账号，仅用于本地兜底登录；LDAP 用户不落此表';
