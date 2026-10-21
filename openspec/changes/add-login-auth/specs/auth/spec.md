@@ -24,29 +24,44 @@
 - **WHEN** 系统签发 JWT
 - **THEN** token 中 MUST 包含 `exp`，有效期取配置项 `[auth] token_ttl_hours`（默认 8 小时）
 
-### Requirement: LDAP 认证与本地兜底
+### Requirement: 本地账号优先与 LDAP 兜底
 
-系统 SHALL 在配置了 LDAP 时优先使用 `username@domain` 做 UPN bind。LDAP 明确拒绝密码时 MUST NOT 回落到本地密码；LDAP 未配置或服务器不可达时 SHALL 回落到 Django 本地认证。
+系统 SHALL 先检查本地 `auth_user` 是否存在该用户。存在时 MUST 只校验本地密码；不存在时 SHALL 尝试 LDAP。本地存在同名用户但密码错误时 MUST NOT 再用 LDAP 密码尝试。
+
+#### Scenario: 本地账号认证成功
+
+- **WHEN** 本地 `auth_user` 存在该用户且密码正确
+- **THEN** 系统签发 JWT，角色按 `is_staff` / `is_superuser` 映射为 `admin`，否则为 `user`
+
+#### Scenario: 本地账号密码错误
+
+- **WHEN** 本地存在该用户但密码错误
+- **THEN** 系统返回 4003，MUST NOT 再尝试 LDAP
+
+#### Scenario: 本地不存在该用户时走 LDAP
+
+- **WHEN** 本地没有该用户且 LDAP 已配置
+- **THEN** 系统使用 `username@domain` 做 UPN bind
 
 #### Scenario: LDAP 认证成功
 
-- **WHEN** LDAP 已配置且 `username@domain` 与密码 bind 成功
+- **WHEN** 本地没有该用户，且 `username@domain` 与密码 bind 成功
 - **THEN** 系统签发 JWT，角色为 `user`，不创建本地 Django 用户
 
 #### Scenario: LDAP 密码错误
 
-- **WHEN** LDAP 已配置且 bind 因密码错误失败
-- **THEN** 系统返回 4003，MUST NOT 再尝试本地密码
+- **WHEN** 本地没有该用户，且 LDAP bind 因密码错误失败
+- **THEN** 系统返回 4003
 
 #### Scenario: LDAP 服务器不可达
 
-- **WHEN** LDAP 已配置但连接异常或超时
-- **THEN** 系统记录告警并回落到本地 Django 认证
+- **WHEN** 本地没有该用户，且 LDAP 已配置但连接异常或超时
+- **THEN** 系统返回 4017，说明 LDAP 不可达
 
-#### Scenario: LDAP 未配置
+#### Scenario: LDAP 未配置且本地无该用户
 
-- **WHEN** `[auth] ldap_server` 为空
-- **THEN** 系统直接使用本地 Django 认证
+- **WHEN** 本地没有该用户且 `[auth] ldap_server` 为空
+- **THEN** 系统返回 4003
 
 #### Scenario: LDAP 配置不完整
 

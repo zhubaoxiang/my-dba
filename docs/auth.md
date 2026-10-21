@@ -2,7 +2,7 @@
 
 系统使用 **JWT** 做登录态：登录成功后签发 token，前端放在 `Token` 请求头里；所有业务接口要求有效 token，只有登录接口公开。
 
-域账号通过 LDAP 的 UPN（`username@domain`）认证；LDAP 未配置或服务器不可达时，回落到本地 Django 账号。
+**本地 Django 账号优先**；只有本地不存在该用户时，才走 LDAP 的 UPN（`username@domain`）认证。
 
 对应模块：`src/apps/accounts/`。
 
@@ -11,11 +11,15 @@
 ```
 登录页 username / password
   → POST /my-dba/v1/auth/login
-      ├─ LDAP 已配置 → username@domain bind
-      │    ├─ 成功 → 签发 JWT（role=user）
-      │    ├─ 密码错误 → 4003（不回落本地）
-      │    └─ 不可达 → 回落本地 Django authenticate()
-      └─ LDAP 未配置 → 本地 Django authenticate()
+      ├─ 本地存在该用户 → Django authenticate()
+      │    ├─ 成功 → 签发 JWT（role=admin/user）
+      │    └─ 失败 → 4003（不再尝试 LDAP）
+      └─ 本地不存在该用户
+           ├─ LDAP 已配置 → username@domain bind
+           │    ├─ 成功 → 签发 JWT（role=user）
+           │    ├─ 密码错误 → 4003
+           │    └─ 不可达 → 4017
+           └─ LDAP 未配置 → 4003
   → {token, user}
   → 前端存 token / userInfo
   → 后续请求带 Token → JwtAuthentication → AuthedUser → IsAuthenticated
@@ -25,12 +29,16 @@
 
 | 情形 | 行为 |
 |------|------|
-| `ldap_server` 为空 | 未启用 LDAP，只走本地 Django 账号 |
-| `ldap_server` 有值、`ldap_domain` 为空 | 返回 4017，明确报配置不完整，不静默当作未配置 |
+| **本地存在该用户** | 只校验本地 Django 密码；成功登录，失败直接 4003，**不再尝试 LDAP** |
+| **本地不存在该用户** | 尝试 LDAP（若已配置） |
 | LDAP bind 成功 | 登录成功，角色 `user`；不创建本地 `auth_user` 记录 |
-| LDAP 明确拒绝密码 | 返回 4003，**不再尝试本地密码**，避免本地同名账号绕过域密码 |
-| LDAP 连接异常 / 超时 | 记告警并回落本地 Django 认证 |
+| LDAP 明确拒绝密码 | 返回 4003 |
+| LDAP 未配置 | 返回 4003（本地也没有该用户） |
+| LDAP 连接异常 / 超时 | 返回 4017，说明 LDAP 不可达 |
+| `ldap_server` 有值、`ldap_domain` 为空 | 返回 4017，明确报配置不完整，不静默当作未配置 |
 | 空密码 | 不发起 LDAP bind，直接失败，避免匿名 bind |
+
+**本地账号优先是刻意的**：本地和 LDAP 同名时，本地密码优先；本地密码错误不会再用 LDAP 密码尝试。这样两套账号体系不会在同一个用户名上产生歧义，代价是本地账号忘记密码时需要先由管理员重置，不能靠 LDAP 密码绕过。
 
 LDAP 只做 UPN bind，不读取组属性；v1 不做 LDAP 组到角色的映射。
 
@@ -60,6 +68,9 @@ LDAP 只做 UPN bind，不读取组属性；v1 不做 LDAP 组到角色的映射
 | `ldap_port` | 默认 389 |
 | `ldap_domain` | UPN 后缀，例如 `corp.example.com`；启用 LDAP 时必填 |
 | `ldap_connect_timeout` | 连接超时（秒），默认 10 |
+| `ldap_use_ssl` | LDAPS（636 端口）设为 `true`；普通 389 设为 `false`（默认） |
+
+登录框支持三种账号写法：短账号（`alice`）、完整 UPN（`alice@corp.example.com`）、域前缀（`CORP\alice`）。短账号会自动拼成 `alice@<ldap_domain>`；完整 UPN 不会重复拼后缀。
 
 改动 `conf.ini` 必须重启进程（`CONF_ATTR` 在模块导入时载入）。
 
@@ -106,5 +117,5 @@ LDAP 用户不落 `auth_user`，因此本地表里不会出现域账号。
 - **v1 不做 RBAC**：任一登录用户都能改数据源、规则、知识库等；需要按角色收口时另行设计。
 - **token 不能服务端吊销**：退出后旧 token 在有效期内仍可用。
 - **LDAP 只做 UPN bind**：不读组、不做管理员组映射；域账号删除后，已签发 token 仍可用至过期。
-- **本地兜底只在 LDAP 不可达/未配置时生效**：LDAP 密码错误不会回落到本地。
+- **本地账号优先**：本地存在同名用户时不会再用 LDAP 密码尝试；本地账号密码错误需由管理员处理。
 - **`auth_user` 是最小表**：不启用 Django admin / 权限系统。

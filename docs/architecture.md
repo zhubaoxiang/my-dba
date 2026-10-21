@@ -208,7 +208,7 @@ return baseviews.ResponseExpectationFailed("该数据源已有采集任务在执
 - 登录接口 `POST /v1/auth/login` 签发 JWT；后续请求通过请求头 **`Token`** 传递（非标准的 `Authorization: Bearer`）
 - 解码后用户信息在 `request.user`（`AuthedUser`，含 `user_id` / `username` / `role`；`is_staff = (role == "admin")`）
 - `JWT_SECRET` 从 `conf.ini` 的 `[auth] jwt_secret` 读取；生产环境必须设置随机值，为空时登录明确报 4017，不会用空密钥签发
-- 认证策略：**LDAP 优先 + 本地 Django 账号兜底**；LDAP 明确拒绝密码时不回落本地。详见 [auth.md](auth.md)
+- 认证策略：**本地 Django 账号优先；本地不存在该用户时才走 LDAP**；本地同名用户密码错误时不回落 LDAP。详见 [auth.md](auth.md)
 
 ViewSet 基类（`apps/base/baseviews.py`）：
 

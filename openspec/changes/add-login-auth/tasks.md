@@ -1,7 +1,7 @@
 ## 1. 依赖、配置与 DDL
 
 - [x] 1.1 `src/requirements.txt` 增加 `ldap3==2.9.1`，并在 venv 中安装
-- [x] 1.2 `src/config/conf.ini` 增加 `[auth]`：`jwt_secret`（留空）、`token_ttl_hours=8`、`ldap_server`、`ldap_port=389`、`ldap_domain`、`ldap_connect_timeout=10`
+- [x] 1.2 `src/config/conf.ini` 增加 `[auth]`：`jwt_secret`（留空）、`token_ttl_hours=8`、`ldap_server`、`ldap_port=389`、`ldap_domain`、`ldap_connect_timeout=10`、`ldap_use_ssl=false`
 - [x] 1.3 `settings/settings.py` 的 `JWT_SECRET` 改为从 `CONF_ATTR` 读取
 - [x] 1.4 `settings/test.py` 设置测试专用 `JWT_SECRET`
 - [x] 1.5 `sql/pg_struct.sql` 补最小 `auth_user` 表（Django 3.2 字段）
@@ -13,7 +13,7 @@
 - [x] 2.1 新增 `src/apps/accounts/` 模块（`__init__.py` / `services.py` / `serializers.py` / `views.py` / `tests.py`）
 - [x] 2.2 `services.ldap_config()`：读取并校验 server / domain；server 为空返回 None，server 有值但 domain 为空报配置不完整
 - [x] 2.3 `services.ldap_authenticate()`：`ldap3` UPN bind；空密码直接失败；`LDAPBindError` → False；`LDAPException` → None
-- [x] 2.4 `services.login()`：LDAP 优先；密码错误不回落；未配置/不可达回落 Django `authenticate`
+- [x] 2.4 `services.login()`：本地账号优先；本地不存在该用户时才走 LDAP；本地同名用户密码错误不回落
 - [x] 2.5 本地用户映射 `role=admin`（is_staff/superuser），LDAP 用户 `role=user`
 - [x] 2.6 JWT 签发包含 `id` / `name` / `role` / `exp`；`token_ttl_hours` 可配
 - [x] 2.7 `AuthView`：login / me / logout；login 公开，me/logout 要求登录

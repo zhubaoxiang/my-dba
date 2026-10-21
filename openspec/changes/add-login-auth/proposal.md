@@ -13,9 +13,9 @@
   - `GET /v1/auth/me`：当前登录用户
   - `POST /v1/auth/logout`：客户端丢弃 token（JWT 无服务端会话）
 - 认证策略：
-  - **LDAP 优先**：配置了 LDAP 时，先用 `username@domain` 做 UPN bind
-  - **本地兜底**：LDAP 未配置或服务器不可达时，走 Django `authenticate()`
-  - **密码错误不回落**：LDAP 明确拒绝密码时直接失败，避免用本地密码绕过
+  - **本地优先**：本地 `auth_user` 存在该用户时，只校验本地密码
+  - **LDAP 兜底**：本地不存在该用户时，才用 `username@domain` 做 UPN bind
+  - **本地同名用户不回落**：本地密码错误直接失败，不再用 LDAP 密码尝试
   - LDAP 用户 `role=user`；本地 `is_staff` / `is_superuser` 用户 `role=admin`
   - v1 所有登录用户权限相同，不做细粒度 RBAC
 - 所有现有业务接口改为要求登录：`AnyLogin` 与 `StatelessView` 的权限从「无」改为 `IsAuthenticated`。

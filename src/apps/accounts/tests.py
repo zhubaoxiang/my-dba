@@ -56,8 +56,58 @@ class LdapConfigTests(SimpleTestCase):
         ):
             self.assertEqual(
                 services.ldap_config(),
-                {"server": "ldap.example.com", "port": 636, "domain": "example.com", "connect_timeout": 4},
+                {
+                    "server": "ldap.example.com",
+                    "port": 636,
+                    "domain": "example.com",
+                    "connect_timeout": 4,
+                    "use_ssl": False,
+                },
             )
+
+    def test_ldaps_flag(self):
+        with mock.patch.object(
+            services,
+            "CONF_ATTR",
+            {
+                "auth_ldap_server": "ldap.example.com",
+                "auth_ldap_domain": "example.com",
+                "auth_ldap_use_ssl": "true",
+            },
+        ):
+            self.assertTrue(services.ldap_config()["use_ssl"])
+
+    def test_ldap_scheme_is_stripped(self):
+        with mock.patch.object(
+            services,
+            "CONF_ATTR",
+            {"auth_ldap_server": "ldap://ldap.example.com", "auth_ldap_domain": "example.com"},
+        ):
+            config = services.ldap_config()
+        self.assertEqual(config["server"], "ldap.example.com")
+        self.assertFalse(config["use_ssl"])
+
+    def test_ldaps_scheme_sets_ssl(self):
+        with mock.patch.object(
+            services,
+            "CONF_ATTR",
+            {"auth_ldap_server": "ldaps://ldap.example.com", "auth_ldap_domain": "example.com"},
+        ):
+            config = services.ldap_config()
+        self.assertEqual(config["server"], "ldap.example.com")
+        self.assertTrue(config["use_ssl"])
+
+    def test_port_in_url_overrides_config(self):
+        with mock.patch.object(
+            services,
+            "CONF_ATTR",
+            {
+                "auth_ldap_server": "ldap://ldap.example.com:1389",
+                "auth_ldap_domain": "example.com",
+                "auth_ldap_port": "389",
+            },
+        ):
+            self.assertEqual(services.ldap_config()["port"], 1389)
 
 
 class LdapAuthenticateTests(SimpleTestCase):
@@ -75,6 +125,25 @@ class LdapAuthenticateTests(SimpleTestCase):
         ):
             connection.return_value.bind.return_value = True
             self.assertTrue(services.ldap_authenticate("alice", "secret", self.CONFIG))
+        self.assertEqual(connection.call_args.kwargs["user"], "alice@example.com")
+
+    def test_full_upn_is_not_suffixed_again(self):
+        with (
+            mock.patch.object(services.ldap3, "Server"),
+            mock.patch.object(services.ldap3, "Connection") as connection,
+        ):
+            connection.return_value.bind.return_value = True
+            services.ldap_authenticate("alice@example.com", "secret", self.CONFIG)
+        self.assertEqual(connection.call_args.kwargs["user"], "alice@example.com")
+
+    def test_domain_prefix_is_normalized(self):
+        with (
+            mock.patch.object(services.ldap3, "Server"),
+            mock.patch.object(services.ldap3, "Connection") as connection,
+        ):
+            connection.return_value.bind.return_value = True
+            services.ldap_authenticate(r"EXAMPLE\alice", "secret", self.CONFIG)
+        self.assertEqual(connection.call_args.kwargs["user"], "alice@example.com")
 
     def test_bind_false_is_rejected(self):
         with (
@@ -104,8 +173,31 @@ class LdapAuthenticateTests(SimpleTestCase):
 class AuthenticateUserTests(SimpleTestCase):
     CONFIG = {"server": "ldap.example.com", "port": 389, "domain": "example.com", "connect_timeout": 10}
 
-    def test_ldap_success_does_not_touch_local(self):
+    def test_local_user_success_does_not_touch_ldap(self):
         with (
+            mock.patch.object(services, "_find_local_user", return_value=_user(is_staff=True)),
+            mock.patch.object(services, "authenticate", return_value=_user(is_staff=True)),
+            mock.patch.object(services, "ldap_config") as ldap_config,
+        ):
+            user = services.authenticate_user("alice", "secret")
+        self.assertEqual(user.role, "admin")
+        self.assertTrue(user.is_staff)
+        ldap_config.assert_not_called()
+
+    def test_local_user_wrong_password_does_not_fall_back_to_ldap(self):
+        with (
+            mock.patch.object(services, "_find_local_user", return_value=_user()),
+            mock.patch.object(services, "authenticate", return_value=None),
+            mock.patch.object(services, "ldap_config") as ldap_config,
+            self.assertRaises(services.AuthError) as raised,
+        ):
+            services.authenticate_user("alice", "wrong")
+        self.assertEqual(raised.exception.code, 4003)
+        ldap_config.assert_not_called()
+
+    def test_local_user_absent_uses_ldap(self):
+        with (
+            mock.patch.object(services, "_find_local_user", return_value=None),
             mock.patch.object(services, "ldap_config", return_value=self.CONFIG),
             mock.patch.object(services, "ldap_authenticate", return_value=True),
             mock.patch.object(services, "authenticate") as local,
@@ -115,51 +207,45 @@ class AuthenticateUserTests(SimpleTestCase):
         self.assertEqual(user.username, "alice")
         local.assert_not_called()
 
-    def test_ldap_bad_password_does_not_fall_back(self):
+    def test_local_absent_ldap_bad_password_is_4003(self):
         with (
+            mock.patch.object(services, "_find_local_user", return_value=None),
             mock.patch.object(services, "ldap_config", return_value=self.CONFIG),
             mock.patch.object(services, "ldap_authenticate", return_value=False),
-            mock.patch.object(services, "authenticate") as local,
-            self.assertRaises(services.AuthError) as raised,
-        ):
-            services.authenticate_user("alice", "wrong")
-        self.assertEqual(raised.exception.code, 4003)
-        local.assert_not_called()
-
-    def test_ldap_unreachable_falls_back_to_local(self):
-        with (
-            mock.patch.object(services, "ldap_config", return_value=self.CONFIG),
-            mock.patch.object(services, "ldap_authenticate", return_value=None),
-            mock.patch.object(services, "authenticate", return_value=_user(is_staff=True)),
-        ):
-            user = services.authenticate_user("alice", "secret")
-        self.assertEqual(user.role, "admin")
-        self.assertTrue(user.is_staff)
-
-    def test_local_auth_when_ldap_not_configured(self):
-        with (
-            mock.patch.object(services, "ldap_config", return_value=None),
-            mock.patch.object(services, "authenticate", return_value=_user()),
-        ):
-            self.assertEqual(services.authenticate_user("alice", "secret").role, "user")
-
-    def test_local_failure_is_4003(self):
-        with (
-            mock.patch.object(services, "ldap_config", return_value=None),
-            mock.patch.object(services, "authenticate", return_value=None),
             self.assertRaises(services.AuthError) as raised,
         ):
             services.authenticate_user("alice", "wrong")
         self.assertEqual(raised.exception.code, 4003)
 
-    def test_inactive_local_user_is_rejected(self):
+    def test_local_absent_ldap_not_configured_is_4003(self):
         with (
+            mock.patch.object(services, "_find_local_user", return_value=None),
             mock.patch.object(services, "ldap_config", return_value=None),
-            mock.patch.object(services, "authenticate", return_value=_user(active=False)),
             self.assertRaises(services.AuthError) as raised,
         ):
             services.authenticate_user("alice", "secret")
         self.assertEqual(raised.exception.code, 4003)
+
+    def test_local_absent_ldap_unreachable_is_4017(self):
+        with (
+            mock.patch.object(services, "_find_local_user", return_value=None),
+            mock.patch.object(services, "ldap_config", return_value=self.CONFIG),
+            mock.patch.object(services, "ldap_authenticate", return_value=None),
+            self.assertRaises(services.AuthError) as raised,
+        ):
+            services.authenticate_user("alice", "secret")
+        self.assertEqual(raised.exception.code, 4017)
+
+    def test_inactive_local_user_is_rejected_without_ldap(self):
+        with (
+            mock.patch.object(services, "_find_local_user", return_value=_user(active=False)),
+            mock.patch.object(services, "authenticate", return_value=None),
+            mock.patch.object(services, "ldap_config") as ldap_config,
+            self.assertRaises(services.AuthError) as raised,
+        ):
+            services.authenticate_user("alice", "secret")
+        self.assertEqual(raised.exception.code, 4003)
+        ldap_config.assert_not_called()
 
 
 class TokenTests(SimpleTestCase):

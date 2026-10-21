@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 
 import ldap3
 from django.conf import settings
-from django.contrib.auth import authenticate
+from django.contrib.auth import authenticate, get_user_model
 
 from utils.authentication import AuthedUser, JwtOperate
 from utils.configure import CONF_ATTR
@@ -40,16 +40,37 @@ def ldap_config():
     `ldap_server` 为空表示未启用；有 server 但没有 domain 属于配置不完整，
     明确报错而不是静默当作未配置。
     """
-    server = (CONF_ATTR.get("auth_ldap_server") or "").strip()
-    if not server:
+    raw_server = (CONF_ATTR.get("auth_ldap_server") or "").strip()
+    if not raw_server:
         return None
 
     domain = (CONF_ATTR.get("auth_ldap_domain") or "").strip()
     if not domain:
         raise AuthError("LDAP 配置不完整：ldap_server 已设置，但缺少 ldap_domain。", 4017)
 
+    # 兼容 ldap://host、ldaps://host、host:port；ldap3.Server 只接受主机名
+    use_ssl = str(CONF_ATTR.get("auth_ldap_use_ssl") or "").strip().lower() in ("1", "true", "yes", "on")
+    lowered = raw_server.lower()
+    if lowered.startswith("ldaps://"):
+        use_ssl = True
+        raw_server = raw_server[8:]
+    elif lowered.startswith("ldap://"):
+        raw_server = raw_server[7:]
+    raw_server = raw_server.rstrip("/")
+
+    port_override = None
+    if ":" in raw_server:
+        raw_server, _, port_text = raw_server.partition(":")
+        try:
+            port_override = int(port_text)
+        except ValueError:
+            port_override = None
+    server = raw_server.strip()
+    if not server:
+        raise AuthError("LDAP 配置不完整：ldap_server 没有主机名。", 4017)
+
     try:
-        port = int(CONF_ATTR.get("auth_ldap_port") or 389)
+        port = port_override if port_override is not None else int(CONF_ATTR.get("auth_ldap_port") or 389)
     except (TypeError, ValueError):
         port = 389
     try:
@@ -57,7 +78,13 @@ def ldap_config():
     except (TypeError, ValueError):
         timeout = 10
 
-    return {"server": server, "port": port, "domain": domain, "connect_timeout": timeout}
+    return {
+        "server": server,
+        "port": port,
+        "domain": domain,
+        "connect_timeout": timeout,
+        "use_ssl": use_ssl,
+    }
 
 
 def ldap_authenticate(username: str, password: str, config: dict):
@@ -70,12 +97,17 @@ def ldap_authenticate(username: str, password: str, config: dict):
     if not username or not password:
         return False
 
-    upn = f"{username}@{config['domain']}"
+    # 兼容三种输入：短账号、完整 UPN、DOMAIN\user
+    account = username.strip()
+    if "\\" in account:
+        account = account.split("\\", 1)[1]
+    upn = account if "@" in account else f"{account}@{config['domain']}"
     conn = None
     try:
         server = ldap3.Server(
             config["server"],
             port=config["port"],
+            use_ssl=bool(config.get("use_ssl")),
             connect_timeout=config["connect_timeout"],
             get_info=ldap3.NONE,
         )
@@ -97,32 +129,44 @@ def ldap_authenticate(username: str, password: str, config: dict):
                 conn.unbind()
 
 
+def _find_local_user(username: str):
+    """
+    本地账号是否存在（不校验密码）
+
+    独立出来便于测试，也用于区分「本地没有该用户」与「本地有用户但密码错」。
+    """
+    return get_user_model().objects.filter(username=username).first()
+
+
 def authenticate_user(username: str, password: str) -> AuthedUser:
     """
-    按「LDAP 优先 + 本地兜底」返回登录用户
+    本地账号优先；本地没有该用户时才走 LDAP
 
-    LDAP 明确拒绝密码时抛 4003，不再看本地密码；LDAP 不可达时记告警并回落到本地。
+    本地存在同名用户时，即使密码错误也不再用 LDAP 密码尝试——按「本地没有该用户才走
+    LDAP」的口径，避免同名账号在两套账号体系之间产生歧义。
     """
-    config = ldap_config()
-    ldap_unreachable = False
-
-    if config is not None:
-        result = ldap_authenticate(username, password, config)
-        if result is True:
-            return AuthedUser(user_id=username, username=username, role="user")
-        if result is False:
+    local_user = _find_local_user(username)
+    if local_user is not None:
+        user = authenticate(username=username, password=password)
+        if user is None or not user.is_active:
+            LOGGER.warning("本地账号存在但认证失败，不再尝试 LDAP username=%s", username)
             raise AuthError("用户名或密码错误", 4003)
-        ldap_unreachable = True
-        LOGGER.warning("LDAP 不可达，尝试本地认证 username=%s", username)
+        LOGGER.info("本地认证成功 username=%s", username)
+        role = "admin" if (user.is_staff or user.is_superuser) else "user"
+        return AuthedUser(user_id=user.id, username=user.username, role=role)
 
-    user = authenticate(username=username, password=password)
-    if user is None or not user.is_active:
-        if ldap_unreachable:
-            raise AuthError("LDAP 服务不可达，本地认证也未通过。", 4017)
+    LOGGER.info("本地账号不存在，尝试 LDAP username=%s", username)
+    config = ldap_config()
+    if config is None:
+        LOGGER.warning("LDAP 未配置，且本地账号不存在 username=%s", username)
         raise AuthError("用户名或密码错误", 4003)
 
-    role = "admin" if (user.is_staff or user.is_superuser) else "user"
-    return AuthedUser(user_id=user.id, username=user.username, role=role)
+    result = ldap_authenticate(username, password, config)
+    if result is True:
+        return AuthedUser(user_id=username, username=username, role="user")
+    if result is False:
+        raise AuthError("用户名或密码错误", 4003)
+    raise AuthError("LDAP 服务不可达，且本地账号不存在。", 4017)
 
 
 def issue_token(user: AuthedUser) -> str:

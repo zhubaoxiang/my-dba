@@ -8,7 +8,7 @@
 
 - **Goals**
   - 用户名 + 密码登录，签发 JWT
-  - LDAP 优先，本地 Django 账号兜底
+  - 本地 Django 账号优先，本地不存在该用户时走 LDAP
   - 所有现有业务接口要求登录
   - 前端登录页、路由守卫、用户信息与退出
 - **Non-Goals**
@@ -25,15 +25,19 @@
 - **Why**：前端已有 localStorage token 与 `Token` 头；JWT 无 CSRF 配置负担，也适合前后端分离。Django 只用于本地账号的 `authenticate()` 与密码校验。
 - **Alternatives considered**：Django session（需要 CSRF、session 表、cookie 配置）。已在需求确认阶段否决。
 
-### D2: LDAP 优先，本地兜底；密码错误不回落
+### D2: 本地优先，LDAP 兜底；本地同名用户不回落 LDAP
 
 - **Decision**：
-  1. `[auth] ldap_server` 非空且 `ldap_domain` 非空 → LDAP 已配置。
-  2. 先做 UPN bind：`username@domain`。
-  3. bind 成功 → 登录成功（`role=user`）。
-  4. bind 明确失败（`LDAPBindError`）→ 直接返回「用户名或密码错误」，**不尝试本地密码**。
-  5. LDAP 未配置，或连接异常（`LDAPException` / 超时）→ 回落到 Django `authenticate()`。
-- **Why**：LDAP 密码错误时不回落实现在于避免「本地同名账号密码绕过域密码」；LDAP 不可达时允许本地管理员应急登录。
+  1. 先查本地 `auth_user` 是否存在该用户名。
+  2. 存在 → 只校验本地密码；成功登录（`role=admin/user`），失败直接返回 4003，**不再尝试 LDAP**。
+  3. 不存在 → 尝试 LDAP（若已配置）：短账号拼成 `username@domain`；完整 UPN 不重复拼；
+     `DOMAIN\user` 先取用户名；`[auth] ldap_use_ssl=true` 时走 LDAPS（636）。
+     - bind 成功 → 登录成功（`role=user`）
+     - bind 明确失败 → 4003
+     - 连接异常（`LDAPException` / 超时）→ 4017
+  4. 不存在且 LDAP 未配置 → 4003。
+- **Why**：使用者要求本地账号与 LDAP 账号共存。本地优先让本地账号作为确定性的入口；只有本地没有同名用户时才去 LDAP，避免同一个用户名在两套账号体系之间产生歧义。
+- **代价（明确接受）**：本地存在同名用户但密码错误时，不会再用 LDAP 密码尝试；本地账号忘记密码需由管理员重置。
 - **配置不完整**：`ldap_server` 有值但 `ldap_domain` 为空 → 返回 4017「LDAP 配置不完整」，不静默当作未配置。
 
 ### D3: LDAP 用户不落 `auth_user`
@@ -82,11 +86,15 @@
 ```
 登录页 username/password
   → POST /v1/auth/login
-      ├─ LDAP 已配置 → UPN bind
-      │    ├─ 成功 → JWT(role=user)
-      │    ├─ 密码错误 → 4003（不回落）
-      │    └─ 不可达 → 本地 authenticate()
-      └─ LDAP 未配置 → 本地 authenticate()
+      ├─ 本地存在该用户 → Django authenticate()
+      │    ├─ 成功 → JWT(role=admin/user)
+      │    └─ 失败 → 4003（不再尝试 LDAP）
+      └─ 本地不存在该用户
+           ├─ LDAP 已配置 → UPN bind
+           │    ├─ 成功 → JWT(role=user)
+           │    ├─ 密码错误 → 4003
+           │    └─ 不可达 → 4017
+           └─ LDAP 未配置 → 4003
   → {token, user}
   → 前端存 token / user
   → 后续请求带 Token 头 → JwtAuthentication → AuthedUser → IsAuthenticated
@@ -115,7 +123,7 @@
 | 风险 | 影响 | 缓解 |
 |------|------|------|
 | **JWT 密钥为空或泄露** | token 可被伪造 | 空密钥拒绝签发；密钥放 `conf.ini`，部署时替换随机值；文档强调 |
-| **本地兜底被用来绕过 LDAP** | 域密码策略失效 | LDAP 密码错误不回落；只有 LDAP 不可达/未配置才走本地 |
+| **本地同名账号挡住 LDAP** | 本地用户忘记密码时无法用域密码登录 | 管理员重置本地密码；或删除本地同名账号后改走 LDAP |
 | **所有用户同权限** | 任一登录用户可改数据源/规则 | v1 明确接受；后续按角色收口，接口已统一走 `IsAuthenticated` |
 | **现有测试全部无 token** | 改权限后大量测试 4003 | 测试统一加 `force_authenticate`；另测真实 JWT 登录 |
 | **auth_user DDL 不完整** | 启用 admin/权限系统时缺表 | 文档写明；当前只支持登录，不启用 admin |
