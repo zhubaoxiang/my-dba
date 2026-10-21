@@ -79,7 +79,7 @@ CORS_ORIGIN_ALLOW_ALL = True
 APPEND_SLASH = False
 
 
-JWT_SECRET = ""
+JWT_SECRET = CONF_ATTR.get("auth_jwt_secret", "")
 
 ROOT_URLCONF = "config.urls"
 

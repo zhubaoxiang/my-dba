@@ -13,6 +13,7 @@ from rest_framework.test import APIClient
 from apps.datasource import services as datasource_services
 from apps.ddlreview import merge, parser, risks, services, types
 from utils import custom_enum
+from utils.authentication import AuthedUser
 
 
 def _column(name, data_type="bigint", length=-1, nullable=True, default="", comment=""):
@@ -822,6 +823,7 @@ class DdlReviewApiTests(SimpleTestCase):
 
     def setUp(self):
         self.client = APIClient()
+        self.client.force_authenticate(user=AuthedUser(1, "tester", "admin"))
 
     def post(self, payload):
         # 接口测试不依赖 `analysis_rule` 表：规则清单与增量在这里打桩，编排另有专门测试

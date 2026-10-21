@@ -52,12 +52,12 @@
           <el-dropdown>
             <span class="user-info">
               <el-avatar :size="30" icon="UserFilled" />
-              <span class="username">管理员</span>
+              <span class="username">{{ userStore.userInfo.username || '用户' }}</span>
             </span>
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item>个人中心</el-dropdown-item>
-                <el-dropdown-item divided>退出登录</el-dropdown-item>
+                <el-dropdown-item divided @click="handleLogout">退出登录</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -77,14 +77,33 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Fold, Expand, House, InfoFilled } from '@element-plus/icons-vue'
+import { authApi } from '@/api/auth'
+import { useUserStore } from '@/store/user'
 
 // 侧边栏折叠状态
 const isCollapse = ref(false)
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
+
+function handleLogout() {
+  userStore.logout()
+  router.push('/login')
+}
+
+onMounted(async () => {
+  // 刷新后 token 还在但用户信息丢了：拉一次 me 恢复顶栏显示
+  if (userStore.token && !userStore.userInfo.username) {
+    try {
+      userStore.setUserInfo(await authApi.me())
+    } catch {
+      // 拦截器已处理登录失效；这里不阻塞页面渲染
+    }
+  }
+})
 
 // 分组名 → 图标。集中在这里而不是散到各路由的 meta 里——那样「菜单长什么样」就没有一处能看全了
 const MENU_GROUP_ICONS = {

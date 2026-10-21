@@ -332,3 +332,27 @@ COMMENT ON TABLE issue_mute IS '已静音的问题，键为数据源+规则+表+
 -- 未删除范围内唯一，避免软删除后同一处无法重新静音
 CREATE UNIQUE INDEX IF NOT EXISTS uk_issue_mute_key
     ON issue_mute (datasource_id, rule_code, table_name, column_name) WHERE is_deleted = false;
+
+
+-- ============================================================
+-- 2026-10-20  add-login-auth
+-- 本地兜底登录所需的最小 auth_user 表；LDAP 用户不落此表。
+-- JWT 不依赖 session 表；项目不使用 Django admin / 权限系统，
+-- 因此不建 auth_group / auth_permission / content_type / django_session。
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS auth_user (
+    id           serial       PRIMARY KEY,
+    password     varchar(128) NOT NULL,
+    last_login   timestamp    NULL,
+    is_superuser boolean      NOT NULL,
+    username     varchar(150) NOT NULL UNIQUE,
+    first_name   varchar(150) NOT NULL,
+    last_name    varchar(150) NOT NULL,
+    email        varchar(254) NOT NULL,
+    is_staff     boolean      NOT NULL,
+    is_active    boolean      NOT NULL,
+    date_joined  timestamp    NOT NULL
+);
+
+COMMENT ON TABLE auth_user IS 'Django 本地账号，仅用于本地兜底登录；LDAP 用户不落此表';

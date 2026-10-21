@@ -19,6 +19,7 @@ from apps.datasource import services as ds_services
 from apps.datasource.rules import registry
 from apps.nl2sql import services as nl2sql_services
 from utils import crypto, custom_enum
+from utils.authentication import AuthedUser
 
 
 class _FakeConf:
@@ -531,6 +532,7 @@ class AnalysisRuleApiTests(TestCase):
 
     def setUp(self):
         self.client = APIClient()
+        self.client.force_authenticate(user=AuthedUser(1, "tester", "admin"))
 
     def catalog(self):
         return self.client.get(f"{self.URL}?page=1&page_size=100").json()["data"]["results"]
@@ -731,6 +733,7 @@ class CatalogIssueApiTests(TestCase):
 
     def setUp(self):
         self.client = APIClient()
+        self.client.force_authenticate(user=AuthedUser(1, "tester", "admin"))
         self.datasource = models.Datasource.objects.create(
             name="ds",
             db_type=custom_enum.DbTypeEnum.POSTGRESQL.value,
@@ -1502,6 +1505,7 @@ class IssueMuteApiTests(TestCase):
 
     def setUp(self):
         self.client = APIClient()
+        self.client.force_authenticate(user=AuthedUser(1, "tester", "admin"))
         self.datasource = models.Datasource.objects.create(
             name="ds",
             db_type=custom_enum.DbTypeEnum.POSTGRESQL.value,

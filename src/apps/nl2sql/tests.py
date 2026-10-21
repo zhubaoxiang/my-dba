@@ -17,6 +17,7 @@ from rest_framework.test import APIClient
 from apps.datasource import models
 from apps.nl2sql import generator, services
 from utils import custom_enum
+from utils.authentication import AuthedUser
 
 
 def _column(name, data_type="varchar(64)", nullable=True, comment=""):
@@ -130,6 +131,7 @@ class Nl2SqlGenerateTests(TestCase):
 
     def setUp(self):
         self.client = APIClient()
+        self.client.force_authenticate(user=AuthedUser(1, "tester", "admin"))
         self.datasource = models.Datasource.objects.create(
             name="ds",
             db_type=custom_enum.DbTypeEnum.POSTGRESQL.value,
@@ -376,6 +378,7 @@ class Nl2SqlApiTests(TestCase):
 
     def setUp(self):
         self.client = APIClient()
+        self.client.force_authenticate(user=AuthedUser(1, "tester", "admin"))
         self.datasource = models.Datasource.objects.create(
             name="ds",
             db_type=custom_enum.DbTypeEnum.POSTGRESQL.value,

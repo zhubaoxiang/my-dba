@@ -16,8 +16,11 @@ class SuperUserView(ModelViewSet):
 
 
 class AnyLogin(ModelViewSet):
-    permission_classes = ()
-    authentication_classes = ()
+    """
+    历史名称；add-login-auth 之后要求有效 JWT，未登录返回 4003
+    """
+
+    permission_classes = (IsAuthenticated,)
 
 
 class StatelessView(GenericViewSet):
@@ -31,11 +34,10 @@ class StatelessView(GenericViewSet):
     但额外提供 `get_serializer` / `paginate_queryset` / `get_paginated_response`，
     使自定义 action 也能用 `pagination.paginate()` 返回分页列表。
 
-    权限与 `AnyLogin` 一致：本项目不做应用层鉴权，访问控制依赖网络隔离。
+    与 `AnyLogin` 一致：要求有效 JWT；需要公开的 action 用 `@action(permission_classes=[])` 单独放行。
     """
 
-    permission_classes = ()
-    authentication_classes = ()
+    permission_classes = (IsAuthenticated,)
 
 
 class FormatResponse(Response):

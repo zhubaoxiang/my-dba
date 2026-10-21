@@ -48,7 +48,7 @@ DDL 见 `src/sql/pg_struct.sql`（全量）与 `src/sql/patch.sql`（增量）�
 | GET | `/catalog/issues?datasource_id=&issue_level=` | 问题清单（按级别筛选） |
 | GET | `/catalog/diff?snapshot_id=&compare_snapshot_id=` | 两个快照的结构差异 |
 
-> ⚠️ 以上接口继承 `baseviews.AnyLogin`，**系统内不做任何认证与角色校验**。这意味着只要服务可达，任何人都能读写数据源配置（含目标库凭据）、触发采集、并借「连接测试」探测内网。**分析规则的写接口（`PUT` / `POST …/reset`）同样没有保护**——改一条规则会影响**所有使用者**看到的问题清单，例如把「无条件的 DELETE」这类高危规则关掉。**服务只能部署在内网**——完整说明见 [architecture.md 的「认证与鉴权」](architecture.md#认证与鉴权)。
+> 以上接口要求有效 JWT；未登录、token 无效或过期返回业务码 4003。数据源密码仍加密存储，接口响应不含凭据。登录与 LDAP 配置见 [auth.md](auth.md)。
 
 ## 健康分析规则
 

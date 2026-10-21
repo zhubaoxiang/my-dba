@@ -84,6 +84,10 @@ src/                          # 后端代码根目录
 │
 ├── apps/                     # 业务模块（单一 app，见「模块注册机制」）
 │   ├── base/                 # 基类：baseviews（ViewSet 基类 + 统一响应）、models（抽象基 Model）
+│   ├── accounts/             # 登录与认证（JWT + LDAP）→ docs/auth.md
+│   │   ├── services.py       #   LDAP UPN bind、本地 Django 认证、JWT 签发
+│   │   ├── serializers.py    #   登录入参
+│   │   └── views.py          #   AuthView（login / me / logout）
 │   ├── datasource/           # 数据源纳管与元数据采集 → docs/datasource.md
 │   │   ├── models.py         #   数据源 / 快照 / 采集任务 / 问题清单 / 分析规则
 │   │   ├── serializers.py
@@ -201,30 +205,28 @@ return baseviews.ResponseExpectationFailed("该数据源已有采集任务在执
 
 ## 认证与鉴权
 
-- JWT Token 通过请求头 **`Token`** 字段传递（非标准的 `Authorization: Bearer`）
+- 登录接口 `POST /v1/auth/login` 签发 JWT；后续请求通过请求头 **`Token`** 传递（非标准的 `Authorization: Bearer`）
 - 解码后用户信息在 `request.user`（`AuthedUser`，含 `user_id` / `username` / `role`；`is_staff = (role == "admin")`）
-- `JWT_SECRET` 在 `settings/settings.py`，生产环境必须设置
+- `JWT_SECRET` 从 `conf.ini` 的 `[auth] jwt_secret` 读取；生产环境必须设置随机值，为空时登录明确报 4017，不会用空密钥签发
+- 认证策略：**LDAP 优先 + 本地 Django 账号兜底**；LDAP 明确拒绝密码时不回落本地。详见 [auth.md](auth.md)
 
-ViewSet 基类（`apps/base/baseviews.py`）按权限分三档：
+ViewSet 基类（`apps/base/baseviews.py`）：
 
 | 基类 | 权限 | 适用场景 |
 |------|------|---------|
-| `AnyLogin` | 无认证、无权限 | **本项目统一采用**（原因见下） |
+| `AnyLogin` | `IsAuthenticated` | 历史名称；业务接口统一使用 |
 | `BaseView` / `OperatorView` | `IsAuthenticated` | 常规业务接口 |
 | `SuperUserView` | `IsAdminUser` | 系统管理接口 |
-| `StatelessView` | 无认证、无权限 | **不承载资源**、只有自定义 action 的接口（如 SQL 分析） |
+| `StatelessView` | `IsAuthenticated` | 不承载资源、只有自定义 action 的接口（如 SQL 分析） |
+| `AuthView` | 登录 action 公开；`me` / `logout` 要求登录 | 登录、当前用户、退出 |
 
 > `StatelessView` 是无模型的 ViewSet 基类。既有的四个基类都是 `ModelViewSet` 子类，继承它们会连同带上一套用不了的 list / detail / create 路由——路由注册了但访问即 500。不落库的接口用它。
 
-> ⚠️ **本项目所有接口继承 `AnyLogin`，系统内不做任何认证与角色校验。**
+> **所有业务接口要求有效 JWT**；未登录、token 无效或过期统一返回业务码 4003。登录接口是唯一公开的入口。
 >
-> 原因：**本仓库没有任何代码会产出 `Token` 头**——`utils/middleware.py` 的 `CustomMiddleware` 是空实现，前端无登录页、从不调用 `setToken`。因此 `IsAuthenticated` / `IsAdminUser` 会让接口恒返回 4003。
+> v1 所有登录用户权限相同，不做细粒度 RBAC：LDAP 用户 `role=user`，本地 `is_staff` / `is_superuser` 用户 `role=admin`。角色目前只用于展示与后续扩展。
 >
-> **代价**：只要服务可达，任何人都能读写数据源配置（含目标库凭据）、模型 API Key、知识库文档，并借「连接测试」探测内网。
->
-> **因此：服务只能部署在内网，不要直接暴露到公网或不可信网络。** 访问控制依赖网络隔离，不依赖应用层。若要对外开放，必须先补齐登录 / token 机制（属独立的变更）。
->
-> 决策背景：`openspec/changes/archive/2026-09-22-add-datasource-catalog/design.md` 的 D7。
+> 服务仍建议只部署在内网或受控网络，但访问控制不再依赖网络隔离。决策与配置见 [auth.md](auth.md) 与 `openspec/changes/add-login-auth/`。
 
 ## 后台任务
 

@@ -21,6 +21,7 @@ from rest_framework.test import APIClient
 from apps.knowledge import ingest, llm, models, serializers, views
 from apps.knowledge.qa import agent
 from utils import crypto, custom_enum
+from utils.authentication import AuthedUser
 
 _SQL_STRUCT = Path(__file__).resolve().parents[2] / "sql" / "pg_struct.sql"
 _SQL_PATCH = Path(__file__).resolve().parents[2] / "sql" / "patch.sql"
@@ -1015,6 +1016,7 @@ class StreamEndpointTests(TransactionTestCase):
 
     def setUp(self):
         self.client = APIClient()
+        self.client.force_authenticate(user=AuthedUser(1, "tester", "admin"))
         self.base = models.KnowledgeBase.objects.create(name="知识库")
         self.chat_provider = FakeProvider(api_key_cipher=crypto.encrypt("k"))
         self.embedding_provider = FakeProvider(

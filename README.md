@@ -69,6 +69,10 @@ npm install --registry=https://registry.npmmirror.com   # 国内网络加速；�
 npm run dev                                             # http://localhost:5173，已代理到 Django 后端
 ```
 
+### 登录配置
+
+所有业务接口要求登录。上线前必须在 `src/config/conf.ini` 的 `[auth]` 段设置随机 `jwt_secret`；本地账号可用 `python manage.py createsuperuser` 创建，域账号可通过 LDAP 登录。详见 [docs/auth.md](docs/auth.md)。
+
 ### 用上知识问答还需两步
 
 知识问答依赖两个外部条件，**不满足时其余功能照常可用**：
@@ -116,6 +120,7 @@ my-dba/
 | [docs/sql-analysis.md](docs/sql-analysis.md) | 分析 SQL：能力与规则清单、**执行边界**（只读真跑 / DML·DDL 只 EXPLAIN）、模型解读分区、API、配置 |
 | [docs/nl2sql.md](docs/nl2sql.md) | 说人话 → SQL 语句：**生成 → 校验 → 自修一轮**的机制、**生成与执行是两件事**、校验只覆盖结构这一限定、表范围的取舍、边界与降级、API |
 | [docs/ddl-review.md](docs/ddl-review.md) | DDL 评审：顺序预演、**只报本次新引入/加重**、语句风险分区、规则作用域、支持范围、API、已知限制 |
+| [docs/auth.md](docs/auth.md) | 登录与认证：JWT、LDAP 优先 + 本地兜底、角色、配置、API、已知限制 |
 | [docs/development.md](docs/development.md) | 开发规范：新增模块、Model/ViewSet/Serializer/URL、日志、SQL、代码风格、测试与质量检查、已知问题 |
 | [docs/deployment.md](docs/deployment.md) | 部署：镜像构建、compose 编排的两个坑、数据库初始化、生产运行方式、平台化部署备查 |
 

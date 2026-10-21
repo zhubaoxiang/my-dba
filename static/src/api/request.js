@@ -28,6 +28,15 @@ service.interceptors.response.use(
     if (res.code === 2000) {
       return res.data
     }
+    // 认证失效：清登录态并回登录页；登录请求本身不跳，否则密码错误会循环跳转
+    if (res.code === 4003) {
+      const userStore = useUserStore()
+      const isLogin = (response.config.url || '').includes('/auth/login')
+      userStore.logout()
+      if (!isLogin && window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
+    }
     // 其他业务错误码统一提示
     ElMessage.error(res.message || '请求失败')
     return Promise.reject(new Error(res.message || 'Error'))
@@ -39,6 +48,9 @@ service.interceptors.response.use(
       message = '登录已过期，请重新登录'
       const userStore = useUserStore()
       userStore.logout()
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
     } else if (status === 403) {
       message = '没有访问权限'
     } else if (status >= 500) {

@@ -17,6 +17,7 @@ from apps.knowledge import models as kb_models
 from apps.overview import services
 from apps.sqlanalysis.rules import registry as sql_rules
 from utils import crypto, custom_enum
+from utils.authentication import AuthedUser
 
 HIGH = custom_enum.IssueLevelEnum.HIGH.value
 MEDIUM = custom_enum.IssueLevelEnum.MEDIUM.value
@@ -478,6 +479,7 @@ class OverviewApiTests(TestCase):
 
     def setUp(self):
         self.client = APIClient()
+        self.client.force_authenticate(user=AuthedUser(1, "tester", "admin"))
 
     def get(self):
         return self.client.get(self.URL).json()

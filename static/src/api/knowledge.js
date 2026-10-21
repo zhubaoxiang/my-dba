@@ -126,6 +126,13 @@ export async function askStream(payload, handlers = {}, signal) {
   const contentType = response.headers.get('content-type') || ''
   if (!contentType.includes('text/event-stream')) {
     const body = await response.json().catch(() => ({}))
+    // 开流前失败不经过 axios 拦截器；这里同样处理登录失效
+    if (body.code === 4003) {
+      userStore.logout()
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
+    }
     throw new Error(body.message || `请求失败（${response.status}）`)
   }
 
