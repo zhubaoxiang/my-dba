@@ -1,4 +1,12 @@
-## MODIFIED Requirements
+## REMOVED Requirements
+
+### Requirement: 接口不做应用层鉴权
+
+**Reason**: 系统已增加 JWT 登录认证，业务接口改为要求有效登录，不再把网络隔离作为唯一访问控制。
+
+**Migration**: 所有业务接口改为要求有效 JWT；`POST /v1/auth/login` 公开。部署时配置 `[auth] jwt_secret`，LDAP 可选。
+
+## ADDED Requirements
 
 ### Requirement: 接口要求登录
 

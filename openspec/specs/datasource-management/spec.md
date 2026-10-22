@@ -85,14 +85,24 @@ TBD - created by archiving change add-datasource-catalog. Update Purpose after a
 - **WHEN** 用户在页面上对某数据源点击连接测试
 - **THEN** 页面展示测试成功或失败的结果提示及失败原因
 
-### Requirement: 接口不做应用层鉴权
+### Requirement: 接口要求登录
 
-业务接口 SHALL 继承 `baseviews.AnyLogin`，系统内部 MUST NOT 做认证与角色校验。原因：本仓库没有任何代码会产出 `Token` 请求头，任何基于 `IsAuthenticated` / `IsAdminUser` 的校验都会让接口恒返回 4003。访问控制**依赖网络隔离**——服务只允许部署在内网，MUST NOT 直接暴露到公网或不可信网络。
+业务接口 SHALL 要求有效的 JWT 认证；未携带、无效或过期的 `Token` 请求头 MUST 返回业务失败（code 4003），MUST NOT 执行业务逻辑。登录接口本身 MUST 公开。访问控制不再依赖网络隔离；服务仍建议只部署在内网或受控网络。
 
-#### Scenario: 系统内不因缺少 Token 而拒绝请求
+#### Scenario: 未登录被拒绝
 
 - **WHEN** 请求到达业务接口且未携带 `Token` 请求头
-- **THEN** 系统不返回 4003，而是正常执行业务逻辑并返回统一响应结构
+- **THEN** 系统返回 4003，不返回业务数据
+
+#### Scenario: 有效 token 可访问
+
+- **WHEN** 请求携带有效 JWT
+- **THEN** 系统正常执行业务逻辑并返回统一响应结构
+
+#### Scenario: 登录接口公开
+
+- **WHEN** 未登录客户端调用 `POST /v1/auth/login`
+- **THEN** 系统正常处理登录请求，不要求 `Token`
 
 #### Scenario: 停用的数据源不可采集
 
@@ -107,5 +117,5 @@ TBD - created by archiving change add-datasource-catalog. Update Purpose after a
 #### Scenario: 部署边界被明确记录
 
 - **WHEN** 查阅项目文档或部署说明
-- **THEN** MUST 能查到「接口无应用层鉴权，访问控制依赖网络隔离，只允许内网部署」这一约束及其后果说明
+- **THEN** MUST 能查到「接口要求登录；服务仍建议只部署在内网或受控网络」这一约束
 
