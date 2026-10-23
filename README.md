@@ -91,7 +91,7 @@ my-dba/
 │
 ├── Dockerfile                    # 后端镜像（依赖层 / 代码层分开）
 ├── docker-compose.yml            # 容器编排（frontend / web / postgres / qdrant）
-├── package.py                    # 统一编译打包脚本（镜像 → chart → dat）
+├── package.py                    # 前后端镜像构建脚本（镜像名取自 compose）
 │
 ├── openspec/                     # 变更提案与规格基线
 │   ├── project.md                # 项目上下文（约定、约束、外部依赖、已知问题）

@@ -78,13 +78,13 @@
 - 提交信息：Conventional Commits 风格前缀 + 中文描述，如 `feat:`、`fix:`、`docs:`、`build:`、`refactor:`、`init:`
 - 提交信息里**不要出现平台名等已废弃的专有名词**，用「平台集成资产」这类泛指说法
 - 示例：`feat: api-test 完成 CLI 接线与报告`、`build: Dockerfile 分层 + 阿里云归档源修复`
-- 生产打包在打包机上执行 `python3 package.py`（先 `--clean`，再 `git pull`，再打包）
+- 生产构建在打包机上执行 `python package.py`，一次构建前后端镜像（镜像名与 tag 取自 `docker-compose.yml`）
 
 ## Domain Context
 
 - **部署**：**docker compose**（`Dockerfile` + `docker-compose.yml`），未使用容器编排平台
 - **访问控制**：业务接口要求 JWT 登录（LDAP 优先 + 本地 Django 账号兜底）；服务仍建议只部署在内网或受控网络
-- **BSA 底座平台（当前未使用，保留备查）**：项目原设计运行于 BSA 平台之上。相关资产 `utils/bsa.py`、`hooks/install.py`、`hooks/uninstall.py`、`src/right_config.json` **目前均未接入、无调用方**，新增功能不要依赖它们。`package.py` 是**仍在使用的统一编译打包脚本**（镜像 → chart → dat），取件路径写在脚本开头。`scripts/bsa_register_menu.py`、`service.json`、`service-mgr-tool/` 已删除
+- **BSA 底座平台（当前未使用，保留备查）**：项目原设计运行于 BSA 平台之上。相关资产 `utils/bsa.py`、`hooks/install.py`、`hooks/uninstall.py`、`src/right_config.json` **目前均未接入、无调用方**，新增功能不要依赖它们。`package.py` 现在只负责构建前后端镜像；chart/dat 打包链路依赖的 `scripts/bsa_register_menu.py`、`service.json`、`service-mgr-tool/` 已删除
 - **URL 前缀**：`SYS_NAME`（定义在 `src/config/urls.py`）是系统的对外路径前缀，当前为 `my-dba`。约定 ViewSet 路由为 `{SYS_NAME}/v1/{module}`，函数视图为 `{SYS_NAME}/api/{name}`
 - **知识问答**：文档摄入 → 切分 → 嵌入 → 存 Qdrant；提问时先检索、再交给单 agent 作答。**正文留在业务库内**（唯一事实来源），Qdrant 只是可重建的索引。对话模型与嵌入模型**分开配置**、各自独立选生效
 - **向量维度**：必须与嵌入模型的实际输出、Qdrant 集合的 size 三方一致，写在 `apps/knowledge/models.py` 的 `EMBEDDING_DIMENSIONS`。换嵌入模型须改这里、重建集合、重新摄入
@@ -128,5 +128,5 @@
 - `src/config/conf.ini` **已被 git 跟踪且含真实数据库地址与口令**，违反 [security.md](../.ai-harness/rules/security.md) 的凭据管理要求。应改为提交 `conf.ini.example`、将 `conf.ini` 加入 `.gitignore`，并轮换已泄露的口令
 - `settings/settings.py` 中 `SECRET_KEY` 硬编码（security.md 已标注为已知问题）；`JWT_SECRET` 从 `[auth] jwt_secret` 读取，部署时必须设置为随机值，留空时登录会明确报配置缺失
 - `manage.py check` 的输出**不稳定**：由于模型靠导入副作用注册（见上文），Django 的 `apps.get_models()` 结果可能缓存于模型被导入之前，导致同样的代码有时报 `no issues`、有时报 `models.W042`。判定 CI 是否通过时不要依赖该命令的输出条数
-- `package.py:24` 的注释中含一段 GitLab OAuth2 令牌明文（`oauth2:zRddW7Z9hhGfEkSkqrhG@...`），已进入 git 历史。虽为注释，仍应视为凭据泄露并轮换
+- `package.py` 历史版本的注释中含一段 GitLab OAuth2 令牌明文，已进入 git 历史。虽为注释，仍应视为凭据泄露并轮换
 - `hooks/install.py`、`hooks/uninstall.py` 以子进程方式调用已删除的 `scripts/bsa_register_menu.py`，如将来启用平台化部署需连同该脚本一并恢复

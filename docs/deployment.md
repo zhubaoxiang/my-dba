@@ -79,16 +79,22 @@ ENV_TYPE=prod
 
 ## 二、构建镜像
 
-### 后端
+在项目根目录执行，一次构建前后端镜像：
 
 ```bash
-docker build -t my-dba/my-dba:V1.0R01F00 .
+python package.py
 ```
 
-### 前端
+镜像名与 tag 取自 `docker-compose.yml` 的 `web` / `frontend` 服务，默认：
+
+- 后端 `my-dba-backend:1.0.0`，上下文为项目根目录
+- 前端 `my-dba-frontend:1.0.0`，上下文为 `static/`
+
+只重建其中一端：
 
 ```bash
-docker build -t my-dba/my-dba-web:V1.0R01F00 static
+python package.py --only backend
+python package.py --only frontend
 ```
 
 前端镜像在 Node 阶段执行 `npm ci && npm run build`，再由 nginx 托管；**不依赖宿主机上的 `static/dist`**。
@@ -129,7 +135,7 @@ psql "postgresql://<用户>:<口令>@<主机>:<端口>/<库名>" -f src/sql/patc
 创建本地管理员：
 
 ```bash
-docker exec -e DJANGO_SETTINGS_MODULE=settings.prod -it my-dba \
+docker exec -e DJANGO_SETTINGS_MODULE=settings.prod -it my-dba-backend \
   sh -lc "cd /home/src && python manage.py createsuperuser"
 ```
 
@@ -182,8 +188,7 @@ docker compose down                 # 停止
 
 ```bash
 git pull
-docker build -t my-dba/my-dba:V1.0R01F00 .
-docker build -t my-dba/my-dba-web:V1.0R01F00 static
+python package.py
 docker compose up -d
 ```
 
@@ -217,14 +222,8 @@ docker inspect <现有容器>
 
 ---
 
-## 附录：平台化部署（当前未使用）
+## 附录：原平台化部署（当前未使用）
 
-本项目**不在原平台底座上部署**，已改用 docker compose。`package.py` 是仍在使用的统一编译打包脚本（构建镜像 → chart → dat），其余平台资产未接入。修改业务代码时不要依赖它们。
+本项目**不在原平台底座上部署**，统一使用 docker compose。原 chart/dat 打包链路依赖的 `service.json`、`service-mgr-tool/`、`scripts/bsa_register_menu.py` 已删除，`package.py` 现在只负责构建前后端镜像。
 
-```bash
-python3 package.py --clean
-git pull origin main
-python3 package.py
-```
-
-> ⚠️ `package.py` 注释中含一段 GitLab OAuth2 令牌明文，已进入 git 历史，应轮换（见 [development.md 的「已知问题」](development.md#8-已知问题)）。
+> ⚠️ `package.py` 历史版本的注释中含一段 GitLab OAuth2 令牌明文，已进入 git 历史，应轮换（见 [development.md 的「已知问题」](development.md#8-已知问题)）。

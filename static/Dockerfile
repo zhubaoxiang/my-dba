@@ -1,7 +1,7 @@
 # my-dba 前端镜像：Node 构建 + Nginx 托管
 #
 # 构建上下文是 static/：
-#   docker build -t my-dba/my-dba-web:V1.0R01F00 static
+#   docker build -t my-dba-frontend:1.0.0 static
 #
 # 前端产物在镜像内构建，不依赖宿主机上的 static/dist。
 

@@ -235,6 +235,6 @@ CLAUDE.md（项目根目录）
 以下为已知问题，尚未处理：
 
 - **`src/config/conf.ini` 已被 git 跟踪且含真实数据库地址与口令**，违反 `.ai-harness/rules/security.md` 的凭据管理要求。应改为提交 `conf.ini.example`、将 `conf.ini` 加入 `.gitignore`，并轮换已泄露口令。**数据源加密密钥与模型 API Key 的加密密钥也写在该文件中，同样存在泄露风险**
-- `package.py` 的注释中含一段 GitLab OAuth2 令牌明文，已进入 git 历史，应轮换
+- `package.py` 历史版本的注释中含一段 GitLab OAuth2 令牌明文，已进入 git 历史，应轮换
 - `settings/settings.py` 的 `SECRET_KEY` 硬编码；`JWT_SECRET` 从 `[auth] jwt_secret` 读取，生产必须设置为随机值
 - 多数模型未显式声明主键类型，`manage.py check` 会报 `models.W042` 警告
