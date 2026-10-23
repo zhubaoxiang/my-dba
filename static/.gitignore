@@ -7,3 +7,7 @@ yarn-debug.log*
 yarn-error.log*
 .vscode/*
 !.vscode/extensions.json
+
+# SSL 证书只放宿主机，不进 git
+nginx/cert/*
+!nginx/cert/.gitkeep

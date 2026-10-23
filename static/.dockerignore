@@ -1,0 +1,6 @@
+# 前端镜像构建上下文排除项
+node_modules
+dist
+.vite
+npm-debug.log*
+nginx/cert

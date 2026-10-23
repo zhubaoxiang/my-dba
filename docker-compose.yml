@@ -1,9 +1,5 @@
 version: "3"
 
-networks: # 自定义网络(默认桥接), 不使用links通信
-  nginx_network:
-    driver: bridge
-
 services:
   # 业务数据库。
   #
@@ -28,15 +24,49 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 未设置}
     volumes:
       - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     restart: always
 
+  # 后端 gunicorn（API）
   web:
     image: my-dba/my-dba:V1.0R01F00
     container_name: my-dba
     network_mode: "host"
-    ports:
-      - "8080:8080"
+    environment:
+      # 生产默认 prod；镜像里也写死了 prod，这里保留覆盖入口
+      ENV_TYPE: ${ENV_TYPE:-prod}
+    # 生产配置放在宿主机，改 DB/JWT/LDAP 不需要重建镜像
+    volumes:
+      - ./src/config/conf.ini:/home/src/config/conf.ini:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 8080 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
     tty: true
+    restart: always
+
+  # 前端 nginx（静态资源 + /my-dba 反代）
+  frontend:
+    image: my-dba/my-dba-web:V1.0R01F00
+    container_name: my-dba-web
+    # 与 web 同为 host 网络，nginx 直接反代 127.0.0.1:8080
+    network_mode: "host"
+    volumes:
+      # 证书只在宿主机，挂载进容器；不要 COPY 进镜像
+      - ./static/nginx/cert:/etc/nginx/cert:ro
+    depends_on:
+      web:
+        condition: service_healthy
     restart: always
 
   # 向量库：知识问答的检索载体。

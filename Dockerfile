@@ -8,7 +8,7 @@ FROM python:3.11.9-slim-bullseye
 
 ENV PYTHONUNBUFFERED=1 \
     TZ=Asia/Shanghai \
-    ENV_TYPE=test \
+    ENV_TYPE=prod \
     DEBIAN_FRONTEND=noninteractive
 
 # 换阿里云源（bullseye 位于 debian-archive 下）

@@ -89,8 +89,8 @@ my-dba/
 ├── README.md                     # 本文件
 ├── docs/                         # 模块文档（见下方索引）
 │
-├── Dockerfile                    # 镜像构建（依赖层 / 代码层分开）
-├── docker-compose.yml            # 容器编排（web / postgres / qdrant）
+├── Dockerfile                    # 后端镜像（依赖层 / 代码层分开）
+├── docker-compose.yml            # 容器编排（frontend / web / postgres / qdrant）
 ├── package.py                    # 统一编译打包脚本（镜像 → chart → dat）
 │
 ├── openspec/                     # 变更提案与规格基线
@@ -102,7 +102,7 @@ my-dba/
 ├── .ci/                          # lint 规则与脚手架合规检查
 ├── wiki/                         # 项目知识库（Obsidian vault）
 │
-├── static/                       # 前端工程（Vue3 + Vite 源码，构建产物 static/dist/）
+├── static/                       # 前端工程（Vue3 + Vite；Dockerfile + nginx 配置，产物在镜像内构建）
 └── src/                          # 后端代码根目录
 ```
 
