@@ -120,15 +120,32 @@ compose 已配置：
 
 ## 四、数据库初始化（手动）
 
-compose 的 postgres 服务**不会自动执行**项目 SQL。数据库健康后手动执行：
+compose 的 postgres 服务**不会自动执行**项目 SQL。数据库健康后进入容器执行，宿主机不需要安装 `psql`：
 
 ```bash
+# 确认库已存在（库名与 .env 的 POSTGRES_DB、[db_prod].name 一致）
+docker exec -it my-dba-postgres psql -U postgres -l
+
+# 库不存在时先建库（示例库名 prod）
+docker exec -it my-dba-postgres createdb -U postgres prod
+
 # 新库：一次建全
-psql "postgresql://<用户>:<口令>@<主机>:<端口>/<库名>" -f src/sql/pg_struct.sql
+docker exec -i my-dba-postgres psql -v ON_ERROR_STOP=1 -U postgres -d <库名> < src/sql/pg_struct.sql
 
 # 已有库：执行增量补丁
-psql "postgresql://<用户>:<口令>@<主机>:<端口>/<库名>" -f src/sql/patch.sql
+docker exec -i my-dba-postgres psql -v ON_ERROR_STOP=1 -U postgres -d <库名> < src/sql/patch.sql
 ```
+
+> `-v ON_ERROR_STOP=1` 不能省：默认 psql 遇到错误会继续执行，最后仍返回 0。
+>
+> Windows 的 PowerShell/cmd 不支持 `<` 重定向时，改为先复制再执行：
+>
+> ```bash
+> docker cp src/sql/pg_struct.sql my-dba-postgres:/tmp/pg_struct.sql
+> docker exec -it my-dba-postgres psql -v ON_ERROR_STOP=1 -U postgres -d <库名> -f /tmp/pg_struct.sql
+> ```
+
+容器内通过 Unix socket 连接，默认 `trust`，不需要再输口令。
 
 本次登录认证新增了 `auth_user` 表，已有库务必执行 `patch.sql`，否则本地账号登录和 `createsuperuser` 都会失败。
 

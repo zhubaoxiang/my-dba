@@ -1,4 +1,6 @@
-version: "3"
+# 2.4：docker-compose v1 也支持 depends_on 的 condition 长语法；
+# 3.x 会把 condition 判为非法，只允许数组写法。
+version: "2.4"
 
 services:
   # 业务数据库。
@@ -86,9 +88,10 @@ services:
 
 volumes:
   # ⚠️ 引用**已有**数据卷，不新建。先用 `docker volume ls` 找到当前 PG 实际在用的卷名填进来。
-  # external: true 的作用是：compose 只引用不创建，避免手滑起出一个空库。
+  # external 的作用是：compose 只引用不创建，避免手滑起出一个空库。
+  # 注意 name 必须写在 external 下面：docker-compose v1 不接受 external/name 同级写法。
   pg_data:
-    external: true
-    name: ${PG_VOLUME_NAME:?PG_VOLUME_NAME 未设置}
+    external:
+      name: ${PG_VOLUME_NAME:?PG_VOLUME_NAME 未设置}
 
   qdrant_data:

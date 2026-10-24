@@ -22,12 +22,13 @@ WORKDIR /home/src
 # 编译类工具仅在 pip 构建 wheel 时需要，装完即卸以压镜像体积。
 COPY src/requirements.txt ./
 
+# gunicorn 20.0.4 依赖 pkg_resources；setuptools 82 已移除该模块，必须钉在 82 以下。
 RUN apt-get -o Acquire::Check-Valid-Until=false update \
  && apt-get install -y --no-install-recommends \
       build-essential libfreetype6-dev libpng-dev pkg-config \
       vim curl net-tools iputils-ping procps netcat \
  && pip3 install --no-cache-dir -U pip -i https://mirrors.aliyun.com/pypi/simple \
- && pip3 install --no-cache-dir --upgrade setuptools -i https://mirrors.aliyun.com/pypi/simple \
+ && pip3 install --no-cache-dir "setuptools<82" -i https://mirrors.aliyun.com/pypi/simple \
  && pip3 install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple \
  && apt-get purge -y --auto-remove build-essential libfreetype6-dev libpng-dev pkg-config \
  && apt-get clean \
