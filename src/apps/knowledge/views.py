@@ -422,6 +422,7 @@ class QaSessionView(baseviews.AnyLogin):
                 return baseviews.ResponseNotFound("会话不存在")
 
         knowledge_base_id = data.get("knowledge_base_id") or (session.knowledge_base_id if session else None)
+        datasource_id = _resolve_datasource_id(data, session)
         mode = data.get("mode") or (session.mode if session else custom_enum.QaModeEnum.AUTO.value)
         history = _session_history(session) if session else []
 
@@ -429,7 +430,7 @@ class QaSessionView(baseviews.AnyLogin):
             result = agent.answer(
                 question=data["question"],
                 knowledge_base_id=knowledge_base_id,
-                datasource_id=data.get("datasource_id"),
+                datasource_id=datasource_id,
                 mode=mode,
                 history=history,
             )
@@ -443,11 +444,17 @@ class QaSessionView(baseviews.AnyLogin):
             LOGGER.error("问答失败: %s", exc)
             return baseviews.ResponseError(f"问答失败：{exc}")
 
+        # 预检通过后再更新会话默认值，避免非法数据源污染会话
+        if session is not None and "datasource_id" in data and session.datasource_id != datasource_id:
+            session.datasource_id = datasource_id
+            session.save(update_fields=["datasource_id", "update_time"])
+
         creator = self._creator(request)
         if session is None:
             session = models.QaSession.objects.create(
                 title=data["question"][:128],
                 knowledge_base_id=knowledge_base_id,
+                datasource_id=datasource_id,
                 mode=mode,
                 creator=creator,
             )
@@ -504,6 +511,7 @@ class QaSessionView(baseviews.AnyLogin):
                 return baseviews.ResponseNotFound("会话不存在")
 
         knowledge_base_id = data.get("knowledge_base_id") or (session.knowledge_base_id if session else None)
+        datasource_id = _resolve_datasource_id(data, session)
         mode = data.get("mode") or (session.mode if session else custom_enum.QaModeEnum.AUTO.value)
         history = _session_history(session) if session else []
 
@@ -513,7 +521,7 @@ class QaSessionView(baseviews.AnyLogin):
             prep = agent.prepare_stream(
                 question=data["question"],
                 knowledge_base_id=knowledge_base_id,
-                datasource_id=data.get("datasource_id"),
+                datasource_id=datasource_id,
                 mode=mode,
                 history=history,
             )
@@ -524,11 +532,17 @@ class QaSessionView(baseviews.AnyLogin):
             LOGGER.error("流式问答失败（向量服务）: %s", exc)
             return baseviews.ResponseError(f"向量服务不可用：{exc}")
 
+        # 预检通过后再更新会话默认值，避免非法数据源污染会话
+        if session is not None and "datasource_id" in data and session.datasource_id != datasource_id:
+            session.datasource_id = datasource_id
+            session.save(update_fields=["datasource_id", "update_time"])
+
         creator = self._creator(request)
         if session is None:
             session = models.QaSession.objects.create(
                 title=data["question"][:128],
                 knowledge_base_id=knowledge_base_id,
+                datasource_id=datasource_id,
                 mode=mode,
                 creator=creator,
             )
@@ -628,3 +642,14 @@ def _session_history(session) -> list:
         {"role": message.role, "content": message.content}
         for message in models.QaMessage.objects.filter(session_id=session.id, is_deleted=False).order_by("id")
     ]
+
+
+def _resolve_datasource_id(data, session):
+    """
+    显式携带（含 null）时以请求为准；未携带时沿用会话默认值。
+
+    用 `in` 判断而不是 `or`：`null` 表示「清除选择」，不能退化成沿用旧值。
+    """
+    if "datasource_id" in data:
+        return data.get("datasource_id")
+    return session.datasource_id if session else None

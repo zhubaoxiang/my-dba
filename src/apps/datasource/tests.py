@@ -1495,6 +1495,48 @@ class IssueMuteTests(TestCase):
         data = serializers.IssueMuteSerializer(row).data
         self.assertEqual(data["rule_name"], registry.get_rule("no_primary_key").name)
 
+    def test_summary_counts_exclude_muted(self):
+        self.add_issue()
+        self.add_issue(rule_code="isolated_table", table_name="u")
+        services.mute_issue(self.datasource.id, "no_primary_key", "t", "c")
+
+        summary = services.datasource_summary(self.datasource.id)
+        self.assertTrue(summary["collected"])
+        self.assertEqual(summary["issue_total"], 1)
+        self.assertEqual(summary["issue_counts"][custom_enum.IssueLevelEnum.HIGH.value], 1)
+
+    def test_issue_list_excludes_muted_and_filters_by_table(self):
+        self.add_issue()
+        self.add_issue(rule_code="isolated_table", table_name="u")
+        services.mute_issue(self.datasource.id, "no_primary_key", "t", "c")
+
+        result = services.list_snapshot_issues(self.datasource.id)
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["issues"][0]["table"], "u")
+
+        filtered = services.list_snapshot_issues(self.datasource.id, table_name="u")
+        self.assertEqual(filtered["total"], 1)
+        self.assertEqual(filtered["issues"][0]["table"], "u")
+
+        empty = services.list_snapshot_issues(self.datasource.id, table_name="nope")
+        self.assertEqual(empty["total"], 0)
+        self.assertEqual(empty["issues"], [])
+
+    def test_uncollected_datasource_reports_not_collected(self):
+        other = models.Datasource.objects.create(
+            name="ds-empty",
+            db_type=custom_enum.DbTypeEnum.POSTGRESQL.value,
+            host="127.0.0.1",
+            port=5432,
+            db_name="d",
+            username="u",
+            password="p",
+        )
+        self.assertEqual(services.datasource_summary(other.id), {"collected": False})
+        result = services.list_snapshot_issues(other.id)
+        self.assertFalse(result["collected"])
+        self.assertEqual(result["total"], 0)
+
 
 class IssueMuteApiTests(TestCase):
     """

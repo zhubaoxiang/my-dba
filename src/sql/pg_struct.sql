@@ -297,6 +297,7 @@ CREATE TABLE IF NOT EXISTS qa_session (
     id                serial       PRIMARY KEY,
     title             varchar(128) NOT NULL DEFAULT '',
     knowledge_base_id integer      REFERENCES knowledge_base (id),
+    datasource_id     integer      NULL,
     mode              smallint     NOT NULL DEFAULT 1,
     create_time       timestamp    NOT NULL DEFAULT now(),
     update_time       timestamp    NOT NULL DEFAULT now(),
@@ -305,6 +306,7 @@ CREATE TABLE IF NOT EXISTS qa_session (
 );
 
 COMMENT ON TABLE qa_session IS '一次问答会话';
+COMMENT ON COLUMN qa_session.datasource_id IS '默认数据源；仅存 id，不建跨模块外键';
 COMMENT ON COLUMN qa_session.mode IS '默认模式：1=自动 2=仅知识库 3=仅通用模型';
 
 CREATE INDEX IF NOT EXISTS idx_qa_session_id ON qa_session (id DESC);

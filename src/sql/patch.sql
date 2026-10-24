@@ -356,3 +356,15 @@ CREATE TABLE IF NOT EXISTS auth_user (
 );
 
 COMMENT ON TABLE auth_user IS 'Django 本地账号，仅用于本地兜底登录；LDAP 用户不落此表';
+
+
+-- ============================================================
+-- 2026-10-24  add-datasource-qa
+-- 问答会话记住所选数据源，重新打开会话时恢复。
+-- 只存 id，不建到 datasource 的外键：跨模块边界通过 service 维持，
+-- 数据源软删除后会话记录仍保留，提问时再判存在性。
+-- ============================================================
+
+ALTER TABLE qa_session ADD COLUMN IF NOT EXISTS datasource_id integer NULL;
+
+COMMENT ON COLUMN qa_session.datasource_id IS '默认数据源；仅存 id，不建跨模块外键';

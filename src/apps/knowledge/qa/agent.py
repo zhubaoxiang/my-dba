@@ -23,6 +23,7 @@ import dataclasses
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage
 from langgraph.prebuilt import create_react_agent
 
+from apps.datasource import services as datasource_services
 from apps.knowledge import llm, retrieval
 from apps.knowledge.qa import tools as qa_tools
 from utils import custom_enum
@@ -236,11 +237,11 @@ def _ev_delta(text: str) -> dict:
     return {"type": "delta", "text": text}
 
 
-def _done_event(prep: "_Prep", collected: list, is_fallback: bool, note: str = "") -> dict:
+def _done_event(prep: "_Prep", collected: list, used_tools: list, is_fallback: bool, note: str = "") -> dict:
     return {
         "type": "done",
         "sources": _sources(collected),
-        "tools_used": _tool_names(collected),
+        "tools_used": _tool_names(used_tools),
         "is_fallback": is_fallback,
         "note": note,
         "mode": prep.mode,
@@ -264,6 +265,7 @@ class _Prep:
     history: list
     knowledge_base_id: int = None
     datasource_id: int = None
+    datasource_name: str = ""
     embedding: object = None
     hits: list = dataclasses.field(default_factory=list)
 
@@ -301,21 +303,39 @@ def _prepare(question: str, knowledge_base_id=None, datasource_id=None, mode=Non
         "history": history or [],
         "knowledge_base_id": knowledge_base_id,
         "datasource_id": datasource_id,
+        "datasource_name": "",
     }
 
     if mode == custom_enum.QaModeEnum.MODEL_ONLY.value:
         return _Prep(path=_PATH_MODEL_ONLY, **base)
-    if not knowledge_base_id:
-        if mode == custom_enum.QaModeEnum.KNOWLEDGE_ONLY.value:
-            raise QaError("「仅知识库」模式必须指定知识库")
-        return _Prep(path=_PATH_NO_KB, **base)
 
-    # 嵌入模型缺失是配置问题而非服务故障，必须给出可操作的提示，
-    # 否则会被当成「服务器错误」而使用者不知道该去改哪里
-    embedding = llm.active_embedding_provider()
-    if embedding is None:
-        raise QaError(NO_EMBEDDING_MESSAGE)
-    return _Prep(path=_PATH_AGENT, embedding=embedding, **base)
+    # 仅知识库模式不挂数据源工具，不需要校验；自动模式才把数据源作为事实来源
+    if mode != custom_enum.QaModeEnum.KNOWLEDGE_ONLY.value and datasource_id:
+        brief = datasource_services.datasource_brief(datasource_id)
+        if brief is None:
+            raise QaError("数据源不存在或已删除，请重新选择数据源。")
+        base["datasource_name"] = brief.get("name", "")
+
+    if mode == custom_enum.QaModeEnum.KNOWLEDGE_ONLY.value:
+        if not knowledge_base_id:
+            raise QaError("「仅知识库」模式必须指定知识库")
+        # 仅知识库模式不挂数据源工具，因此即使传了数据源也不需要它
+        embedding = llm.active_embedding_provider()
+        if embedding is None:
+            raise QaError(NO_EMBEDDING_MESSAGE)
+        return _Prep(path=_PATH_AGENT, embedding=embedding, **base)
+
+    # 自动模式：知识库优先；没有知识库但有数据源时，直接用数据源工具作答
+    if knowledge_base_id:
+        # 嵌入模型缺失是配置问题而非服务故障，必须给出可操作的提示，
+        # 否则会被当成「服务器错误」而使用者不知道该去改哪里
+        embedding = llm.active_embedding_provider()
+        if embedding is None:
+            raise QaError(NO_EMBEDDING_MESSAGE)
+        return _Prep(path=_PATH_AGENT, embedding=embedding, **base)
+    if datasource_id:
+        return _Prep(path=_PATH_AGENT, **base)
+    return _Prep(path=_PATH_NO_KB, **base)
 
 
 def _presearch(embedding_provider, knowledge_base_id: int, question: str) -> list:
@@ -334,23 +354,43 @@ def _decide_after_hits(prep: _Prep, hits: list) -> str:
     预检索之后的去向：进 agent / 如实告知无命中 / 回退通用模型
 
     抽成独立函数是为了让同步与流式走同一套判定，「无命中不得静默回退」只需在一处保证。
+    已选数据源时，知识库无命中并不等于没有依据——数据源工具仍能回答环境事实。
     """
     if hits:
+        return "agent"
+    if prep.datasource_id and prep.mode != custom_enum.QaModeEnum.KNOWLEDGE_ONLY.value:
         return "agent"
     if prep.mode == custom_enum.QaModeEnum.KNOWLEDGE_ONLY.value:
         return "no_hit"
     return "fallback"
 
 
-def _agent_tools(prep: _Prep, collected: list) -> list:
+def _agent_tools(prep: _Prep, collected: list, used_tools: list) -> list:
     """
     构造工具集
 
-    「仅知识库」模式不挂表结构工具——该模式承诺只用知识库作答。
+    「仅知识库」模式不挂数据源工具——该模式承诺只用知识库作答。
     """
     datasource_id = None if prep.mode == custom_enum.QaModeEnum.KNOWLEDGE_ONLY.value else prep.datasource_id
     return qa_tools.build_tools(
-        knowledge_base_id=prep.knowledge_base_id, datasource_id=datasource_id, collected=collected
+        knowledge_base_id=prep.knowledge_base_id,
+        datasource_id=datasource_id,
+        collected=collected,
+        used_tools=used_tools,
+    )
+
+
+def _system_prompt(prep: _Prep) -> str:
+    """
+    有数据源时补充约束：环境事实必须来自工具，不能凭模型记忆
+    """
+    if not prep.datasource_id or prep.mode == custom_enum.QaModeEnum.KNOWLEDGE_ONLY.value:
+        return _SYSTEM_PROMPT
+    return (
+        _SYSTEM_PROMPT
+        + f"\n当前已选定数据源「{prep.datasource_name or prep.datasource_id}」。"
+        "涉及该数据源的表数量、表结构、健康问题时，必须调用工具获取事实，不得凭记忆编造；"
+        "工具没有返回的表名、数量或问题，不得出现在回答里。"
     )
 
 
@@ -367,11 +407,11 @@ def _ask_model(provider, question: str, history: list) -> str:
     return _strip_tool_markup(message_text(reply))
 
 
-def _run_agent(provider, question: str, history: list, tools: list, collected: list) -> tuple:
+def _run_agent(prep: _Prep, question: str, history: list, tools: list, collected: list, used_tools: list) -> tuple:
     """
     跑 agent，返回 (回答文本, 调用过的工具名)
     """
-    agent = create_react_agent(llm.build_chat_model(provider), tools, prompt=_SYSTEM_PROMPT)
+    agent = create_react_agent(llm.build_chat_model(prep.chat), tools, prompt=_system_prompt(prep))
     steps = max_steps()
     try:
         result = agent.invoke(
@@ -380,7 +420,7 @@ def _run_agent(provider, question: str, history: list, tools: list, collected: l
         )
     except Exception as exc:  # noqa: BLE001 含 GraphRecursionError：达到步数上限不该让整轮失败
         LOGGER.warning("agent 执行中断（可能达到步数上限）: %s", exc)
-        return INTERRUPTED_TEMPLATE.format(exc), _tool_names(collected)
+        return INTERRUPTED_TEMPLATE.format(exc), _tool_names(used_tools)
 
     messages = result.get("messages") or []
     content = ""
@@ -390,14 +430,19 @@ def _run_agent(provider, question: str, history: list, tools: list, collected: l
             if text:
                 content = _strip_tool_markup(text)
                 break
-    return content or NO_CONTENT_MESSAGE, _tool_names(collected)
+    return content or NO_CONTENT_MESSAGE, _tool_names(used_tools)
 
 
-def _tool_names(collected: list) -> list:
+def _tool_names(used_tools: list) -> list:
     """
-    从收集到的片段反推调用过的工具——目前只有检索类工具会写入 collected
+    实际执行过的工具名，去重并保持调用顺序
     """
-    return ["search_knowledge_base"] if collected else []
+    seen, result = set(), []
+    for name in used_tools:
+        if name not in seen:
+            seen.add(name)
+            result.append(name)
+    return result
 
 
 def _sources(collected: list) -> list:
@@ -451,19 +496,22 @@ def answer(
     if prep.path == _PATH_NO_KB:
         return _result(_ask_model(prep.chat, question, prep.history), [], [], True, NO_KB_NOTE)
 
-    hits = _presearch(prep.embedding, prep.knowledge_base_id, question)
-    decision = _decide_after_hits(prep, hits)
-    if decision == "no_hit":
-        return _result(NO_HIT_MESSAGE, [], [], False)
-    if decision == "fallback":
-        return _result(_ask_model(prep.chat, question, prep.history), [], [], True, FALLBACK_NOTE)
+    # 没有知识库时跳过预检索，直接用数据源工具作答
+    if prep.embedding is not None:
+        hits = _presearch(prep.embedding, prep.knowledge_base_id, question)
+        decision = _decide_after_hits(prep, hits)
+        if decision == "no_hit":
+            return _result(NO_HIT_MESSAGE, [], [], False)
+        if decision == "fallback":
+            return _result(_ask_model(prep.chat, question, prep.history), [], [], True, FALLBACK_NOTE)
 
     collected = []
-    tools = _agent_tools(prep, collected)
+    used_tools = []
+    tools = _agent_tools(prep, collected, used_tools)
     if not tools:
         return _result(_ask_model(prep.chat, question, prep.history), [], [], True, FALLBACK_NOTE)
 
-    content, used = _run_agent(prep.chat, question, prep.history, tools, collected)
+    content, used = _run_agent(prep, question, prep.history, tools, collected, used_tools)
     return _result(content, _sources(collected), used, False)
 
 
@@ -487,7 +535,8 @@ def prepare_stream(
     因此本函数刻意不是生成器：生成器的函数体要到首次迭代才执行，那时响应头已发出。
     """
     prep = _prepare(question, knowledge_base_id, datasource_id, mode, history)
-    if prep.path == _PATH_AGENT:
+    # 只选数据源时没有知识库，跳过预检索
+    if prep.path == _PATH_AGENT and prep.embedding is not None:
         # VectorStoreError 在此向上抛：视图据此返回 5000，而不是让它看起来像「无命中」
         prep.hits = _presearch(prep.embedding, prep.knowledge_base_id, (question or "").strip())
     return prep
@@ -543,14 +592,14 @@ def _stream_plain(prep: _Prep, question: str, note: str):
     if tail:
         yield _ev_delta(tail)
     yield from _tail_events(buffer)
-    yield _done_event(prep, [], is_fallback=True, note=note)
+    yield _done_event(prep, [], [], is_fallback=True, note=note)
 
 
-def _stream_agent(prep: _Prep, question: str, tools: list, collected: list):
+def _stream_agent(prep: _Prep, question: str, tools: list, collected: list, used_tools: list):
     """
     跑 agent 并逐块产出答案；工具进度在模型发起调用时给出
     """
-    agent = create_react_agent(llm.build_chat_model(prep.chat), tools, prompt=_SYSTEM_PROMPT)
+    agent = create_react_agent(llm.build_chat_model(prep.chat), tools, prompt=_system_prompt(prep))
     steps = max_steps()
     buffer = _LineBuffer()
     announced = set()
@@ -577,14 +626,14 @@ def _stream_agent(prep: _Prep, question: str, tools: list, collected: list):
         # 已经吐出去的内容收不回来，只能把中断说明接在后面；与同步路径给同一句话
         prefix = "\n\n" if buffer.has_content else ""
         yield _ev_delta(f"{prefix}{INTERRUPTED_TEMPLATE.format(exc)}")
-        yield _done_event(prep, collected, is_fallback=False)
+        yield _done_event(prep, collected, used_tools, is_fallback=False)
         return
 
     tail = buffer.flush()
     if tail:
         yield _ev_delta(tail)
     yield from _tail_events(buffer)
-    yield _done_event(prep, collected, is_fallback=False)
+    yield _done_event(prep, collected, used_tools, is_fallback=False)
 
 
 def stream_events(prep: _Prep, question: str):
@@ -607,15 +656,16 @@ def stream_events(prep: _Prep, question: str):
     if decision == "no_hit":
         # 如实告知，不调模型——「仅知识库」模式不得静默改用通用模型
         yield _ev_delta(NO_HIT_MESSAGE)
-        yield _done_event(prep, [], is_fallback=False)
+        yield _done_event(prep, [], [], is_fallback=False)
         return
     if decision == "fallback":
         yield from _stream_plain(prep, question, FALLBACK_NOTE)
         return
 
     collected = []
-    tools = _agent_tools(prep, collected)
+    used_tools = []
+    tools = _agent_tools(prep, collected, used_tools)
     if not tools:
         yield from _stream_plain(prep, question, FALLBACK_NOTE)
         return
-    yield from _stream_agent(prep, question, tools, collected)
+    yield from _stream_agent(prep, question, tools, collected, used_tools)

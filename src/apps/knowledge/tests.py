@@ -19,7 +19,7 @@ from django.test import SimpleTestCase, TestCase, TransactionTestCase
 from rest_framework.test import APIClient
 
 from apps.knowledge import ingest, llm, models, serializers, views
-from apps.knowledge.qa import agent
+from apps.knowledge.qa import agent, tools as qa_tools
 from utils import crypto, custom_enum
 from utils.authentication import AuthedUser
 
@@ -340,6 +340,14 @@ class QaModeBranchTests(SimpleTestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
+        patcher = mock.patch.object(
+            agent.datasource_services,
+            "datasource_brief",
+            side_effect=lambda i: {"id": i, "name": f"ds{i}", "db_type": 1, "is_enabled": True},
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
         # 注意：闭包里不能直接用 self——嵌套类的方法会把 self 遮蔽掉
         case = self
 
@@ -420,6 +428,55 @@ class QaModeBranchTests(SimpleTestCase):
         self.assertFalse(result["is_fallback"])
         self.assertEqual(len(self.agent_calls), 1)
         self.assertIn("search_knowledge_base", self.agent_calls[0])
+
+    def test_auto_with_datasource_only_runs_agent_without_retrieval(self):
+        """
+        只选数据源时不要求知识库，也不该做向量检索；直接挂数据源工具
+        """
+        result = agent.answer("问题", knowledge_base_id=None, datasource_id=2, mode=custom_enum.QaModeEnum.AUTO)
+        self.assertFalse(result["is_fallback"])
+        self.assertEqual(len(self.agent_calls), 1)
+        self.assertIn("get_table_schema", self.agent_calls[0])
+        self.assertIn("get_datasource_summary", self.agent_calls[0])
+        self.assertIn("list_catalog_issues", self.agent_calls[0])
+        self.assertNotIn("search_knowledge_base", self.agent_calls[0])
+
+    def test_auto_without_hit_but_with_datasource_still_runs_agent(self):
+        """
+        知识库无命中不等于没有依据：选了数据源就继续用数据源工具，不得静默回退
+        """
+        self.retrieved = []
+        result = agent.answer("问题", knowledge_base_id=1, datasource_id=2, mode=custom_enum.QaModeEnum.AUTO)
+        self.assertFalse(result["is_fallback"])
+        self.assertEqual(len(self.agent_calls), 1)
+        self.assertIn("search_knowledge_base", self.agent_calls[0])
+        self.assertIn("list_catalog_issues", self.agent_calls[0])
+
+    def test_knowledge_only_does_not_build_datasource_tools(self):
+        self.retrieved = [self._hit()]
+        agent.answer(
+            "问题", knowledge_base_id=1, datasource_id=2, mode=custom_enum.QaModeEnum.KNOWLEDGE_ONLY
+        )
+        self.assertEqual(self.agent_calls[0], ["search_knowledge_base"])
+
+    def test_missing_datasource_is_rejected_before_agent(self):
+        with (
+            mock.patch.object(agent.datasource_services, "datasource_brief", return_value=None),
+            self.assertRaises(agent.QaError) as ctx,
+        ):
+            agent.answer("问题", knowledge_base_id=None, datasource_id=99, mode=custom_enum.QaModeEnum.AUTO)
+        self.assertIn("数据源", str(ctx.exception))
+        self.assertEqual(self.agent_calls, [])
+
+    def test_tool_usage_is_recorded(self):
+        used = []
+        tools = qa_tools.build_tools(datasource_id=2, used_tools=used)
+        summary_tool = next(t for t in tools if t.name == "get_datasource_summary")
+        with mock.patch.object(
+            agent.datasource_services, "datasource_summary", return_value={"collected": False}
+        ):
+            summary_tool.invoke({})
+        self.assertEqual(used, ["get_datasource_summary"])
 
     def test_sources_come_from_retrieval_not_from_the_model(self):
         """
@@ -787,6 +844,14 @@ class QaStreamTests(SimpleTestCase):
         self.addCleanup(patcher.stop)
 
         patcher = mock.patch.object(
+            agent.datasource_services,
+            "datasource_brief",
+            side_effect=lambda i: {"id": i, "name": f"ds{i}", "db_type": 1, "is_enabled": True},
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        patcher = mock.patch.object(
             agent, "create_react_agent", side_effect=lambda *a, **kw: _StubStreamingAgent(self.agent_events)
         )
         patcher.start()
@@ -1041,6 +1106,14 @@ class StreamEndpointTests(TransactionTestCase):
         self.addCleanup(patcher.stop)
 
         patcher = mock.patch.object(
+            agent.datasource_services,
+            "datasource_brief",
+            side_effect=lambda i: {"id": i, "name": f"ds{i}", "db_type": 1, "is_enabled": True},
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        patcher = mock.patch.object(
             agent, "create_react_agent", side_effect=lambda *a, **kw: _StubStreamingAgent(self.agent_events)
         )
         patcher.start()
@@ -1089,6 +1162,26 @@ class StreamEndpointTests(TransactionTestCase):
         self.assertEqual(messages[0].content, "问题")
         self.assertIn("答案第一段", messages[1].content)
         self.assertTrue(messages[1].is_complete)
+
+    def test_datasource_is_persisted_on_new_session(self):
+        response = self._post({"question": "问题", "datasource_id": 42})
+        self._body(response)
+        session = models.QaSession.objects.get()
+        self.assertEqual(session.datasource_id, 42)
+
+    def test_datasource_can_be_cleared(self):
+        session = models.QaSession.objects.create(title="旧会话", datasource_id=42)
+        response = self._post(
+            {
+                "question": "问题",
+                "session_id": session.id,
+                "datasource_id": None,
+                "mode": custom_enum.QaModeEnum.MODEL_ONLY.value,
+            }
+        )
+        self._body(response)
+        session.refresh_from_db()
+        self.assertIsNone(session.datasource_id)
 
     def test_agent_path_emits_tool_progress(self):
         self.retrieved = [

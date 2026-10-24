@@ -4,6 +4,7 @@
 
 from rest_framework import serializers
 
+from apps.datasource import services as datasource_services
 from apps.knowledge import models
 from utils import custom_enum
 
@@ -164,6 +165,7 @@ class QaSessionSerializer(serializers.ModelSerializer):
 
     create_time = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S")
     knowledge_base_name = serializers.SerializerMethodField(label="知识库")
+    datasource_name = serializers.SerializerMethodField(label="数据源")
     message_count = serializers.SerializerMethodField(label="消息数")
 
     class Meta:
@@ -172,6 +174,12 @@ class QaSessionSerializer(serializers.ModelSerializer):
 
     def get_knowledge_base_name(self, obj):
         return getattr(obj.knowledge_base, "name", "") if obj.knowledge_base_id else ""
+
+    def get_datasource_name(self, obj):
+        if not obj.datasource_id:
+            return ""
+        brief = datasource_services.datasource_brief(obj.datasource_id)
+        return (brief or {}).get("name", "")
 
     def get_message_count(self, obj):
         return models.QaMessage.objects.filter(session_id=obj.id, is_deleted=False).count()

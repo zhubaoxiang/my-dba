@@ -123,6 +123,8 @@ class QaSession(AbstractTimeFiledModel):
         blank=True,
         verbose_name="默认知识库",
     )
+    # 跨模块只存 id，不建外键：数据源存在性由 datasource_services 判断
+    datasource_id = models.IntegerField(null=True, blank=True, verbose_name="默认数据源")
     mode = models.SmallIntegerField(
         choices=custom_enum.QaModeEnum.choices, default=custom_enum.QaModeEnum.AUTO, verbose_name="默认模式"
     )

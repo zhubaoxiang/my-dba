@@ -405,6 +405,90 @@ def list_snapshot_tables(datasource_id: int, keyword: str = "") -> list:
     return result
 
 
+def datasource_summary(datasource_id: int) -> dict:
+    """
+    数据源最近一次快照的概况：表/模式数量、问题分布与采集时间。
+
+    未采集时返回 `{"collected": False}`，由调用方决定怎么表述。
+    问题统计排除已静音项，与问题清单、首页统计保持同一口径。
+    """
+    snapshot = latest_snapshot(datasource_id)
+    if snapshot is None:
+        return {"collected": False}
+
+    queryset = models.CatalogIssue.objects.filter(
+        datasource_id=datasource_id, snapshot_id=snapshot.id, is_deleted=False
+    )
+    muted = muted_filter()
+    if muted is not None:
+        queryset = queryset.exclude(muted)
+
+    counts = {level.value: 0 for level in custom_enum.IssueLevelEnum}
+    for (level,) in queryset.values_list("issue_level").order_by():
+        counts[level] = counts.get(level, 0) + 1
+
+    return {
+        "collected": True,
+        "snapshot_id": snapshot.id,
+        "database_version": snapshot.database_version,
+        "collect_time": snapshot.collect_time.strftime("%Y-%m-%d %H:%M:%S"),
+        "schema_count": snapshot.schema_count,
+        "table_count": snapshot.table_count,
+        "issue_counts": counts,
+        "issue_total": sum(counts.values()),
+        "unavailable": snapshot.unavailable,
+    }
+
+
+def list_snapshot_issues(
+    datasource_id: int, issue_level: int = None, table_name: str = "", limit: int = 20
+) -> dict:
+    """
+    数据源最近一次快照中的问题清单（排除已静音）。
+
+    `table_name` 按包含匹配，`limit` 只限制返回明细条数，`total` 始终是过滤后的总数。
+    """
+    snapshot = latest_snapshot(datasource_id)
+    if snapshot is None:
+        return {"collected": False, "total": 0, "issues": []}
+
+    queryset = models.CatalogIssue.objects.filter(
+        datasource_id=datasource_id, snapshot_id=snapshot.id, is_deleted=False
+    )
+    muted = muted_filter()
+    if muted is not None:
+        queryset = queryset.exclude(muted)
+    if issue_level is not None:
+        queryset = queryset.filter(issue_level=issue_level)
+    table_name = (table_name or "").strip()
+    if table_name:
+        queryset = queryset.filter(table_name__icontains=table_name)
+
+    total = queryset.count()
+    rows = queryset.order_by("issue_level", "rule_code", "id")[: max(1, int(limit))]
+    return {
+        "collected": True,
+        "snapshot_id": snapshot.id,
+        "collect_time": snapshot.collect_time.strftime("%Y-%m-%d %H:%M:%S"),
+        "total": total,
+        "issues": [
+            {
+                "issue_level": row.issue_level,
+                "issue_level_label": custom_enum.IssueLevelEnum(row.issue_level).label,
+                "rule_code": row.rule_code,
+                "rule_name": row.rule_name,
+                "target": row.target,
+                "schema": row.schema_name,
+                "table": row.table_name,
+                "column": row.column_name,
+                "description": row.description,
+                "suggestion": row.suggestion,
+            }
+            for row in rows
+        ],
+    }
+
+
 def _table_key(schema, name) -> tuple:
     """
     表的定位键。模式名与表名都可能大小写不一，比较时不区分

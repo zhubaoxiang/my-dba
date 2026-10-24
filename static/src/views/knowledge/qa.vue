@@ -33,6 +33,20 @@
                 <el-select v-model="knowledgeBaseId" placeholder="不使用知识库" clearable style="width: 180px">
                   <el-option v-for="b in bases" :key="b.id" :value="b.id" :label="b.name" />
                 </el-select>
+                <el-select
+                  v-model="datasourceId"
+                  placeholder="不指定数据源"
+                  clearable
+                  :disabled="mode !== 1"
+                  style="width: 200px"
+                >
+                  <el-option
+                    v-for="d in datasources"
+                    :key="d.id"
+                    :value="d.id"
+                    :label="d.is_enabled ? d.name : `${d.name}（已停用）`"
+                  />
+                </el-select>
                 <el-select v-model="mode" style="width: 170px">
                   <el-option :value="1" label="自动" />
                   <el-option :value="2" label="仅知识库" />
@@ -68,7 +82,7 @@
                 />
 
                 <div v-if="item.tools_used && item.tools_used.length" class="tools">
-                  调用工具：{{ item.tools_used.join('、') }}
+                  调用工具：{{ item.tools_used.map(toolLabel).join('、') }}
                 </div>
 
                 <div v-if="item.sources && item.sources.length" class="sources">
@@ -105,18 +119,33 @@
 import { nextTick, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { askStream, knowledgeApi, qaApi } from '@/api/knowledge'
+import { datasourceApi } from '@/api/datasource'
 
 const sessions = ref([])
 const currentSessionId = ref(null)
 const messages = ref([])
 const bases = ref([])
 const knowledgeBaseId = ref(null)
+const datasources = ref([])
+const datasourceId = ref(null)
 const mode = ref(1)
 const question = ref('')
 const asking = ref(false)
 const messagesEl = ref(null)
 // 生成中的请求，供「停止生成」中断
 let controller = null
+
+// 工具名转成面向使用者的说法；未登记的原样显示
+const TOOL_LABELS = {
+  search_knowledge_base: '知识库检索',
+  get_table_schema: '表结构查询',
+  get_datasource_summary: '数据源概况',
+  list_catalog_issues: '问题清单'
+}
+
+function toolLabel(name) {
+  return TOOL_LABELS[name] || name
+}
 
 async function loadSessions() {
   const data = await qaApi.sessions({ page: 1, page_size: 100 })
@@ -129,11 +158,17 @@ async function loadBases() {
   if (bases.value.length && !knowledgeBaseId.value) knowledgeBaseId.value = bases.value[0].id
 }
 
+async function loadDatasources() {
+  const data = await datasourceApi.list({ page: 1, page_size: 100 })
+  datasources.value = data.results || []
+}
+
 async function openSession(item) {
   currentSessionId.value = item.id
   const detail = await qaApi.detail(item.id)
   messages.value = (detail.messages || []).map((m) => ({ ...m }))
-  if (detail.knowledge_base_id) knowledgeBaseId.value = detail.knowledge_base_id
+  knowledgeBaseId.value = detail.knowledge_base_id || null
+  datasourceId.value = detail.datasource_id || null
   mode.value = detail.mode
 }
 
@@ -176,6 +211,7 @@ async function ask() {
         question: text,
         session_id: currentSessionId.value || undefined,
         knowledge_base_id: knowledgeBaseId.value || undefined,
+        datasource_id: datasourceId.value || null,
         mode: mode.value
       },
       {
@@ -237,6 +273,7 @@ async function removeSession(item) {
 
 onMounted(async () => {
   await loadBases()
+  await loadDatasources()
   await loadSessions()
 })
 </script>
@@ -250,6 +287,7 @@ onMounted(async () => {
 
 .controls {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
