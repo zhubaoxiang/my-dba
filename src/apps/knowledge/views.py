@@ -377,18 +377,37 @@ class QaSessionView(baseviews.AnyLogin):
     def _creator(request) -> str:
         return getattr(getattr(request, "user", None), "username", "") or ""
 
-    def _get_instance(self, kwargs):
-        return models.QaSession.objects.filter(is_deleted=False, id=kwargs.get("pk")).first()
+    def _get_instance(self, request, kwargs):
+        """
+        只取当前用户自己的会话
+
+        会话按 `creator` 隔离：别人拿到会话 id 也只能得到 404，不能读、不能删、不能续问。
+        """
+        return models.QaSession.objects.filter(
+            is_deleted=False, id=kwargs.get("pk"), creator=self._creator(request)
+        ).first()
 
     def list(self, request, **kwargs):
-        queryset = self.get_queryset().filter(is_deleted=False).order_by("-id")
+        queryset = (
+            self.get_queryset().filter(is_deleted=False, creator=self._creator(request)).order_by("-id")
+        )
         return baseviews.ResponseOK(pagination.paginate(self, queryset))
+
+    def create(self, request, *args, **kwargs):
+        # 会话只由提问接口创建；直接建会话会绕过 creator 归属
+        return baseviews.ResponseBadRequest("会话只能通过提问创建")
+
+    def update(self, request, *args, **kwargs):
+        return baseviews.ResponseBadRequest("会话不支持修改")
+
+    def partial_update(self, request, *args, **kwargs):
+        return baseviews.ResponseBadRequest("会话不支持修改")
 
     def retrieve(self, request, *args, **kwargs):
         """
         会话详情，带全部消息（含来源与是否回退）
         """
-        instance = self._get_instance(kwargs)
+        instance = self._get_instance(request, kwargs)
         if instance is None:
             return baseviews.ResponseNotFound("会话不存在")
         messages = models.QaMessage.objects.filter(session_id=instance.id, is_deleted=False).order_by("id")
@@ -397,7 +416,7 @@ class QaSessionView(baseviews.AnyLogin):
         return baseviews.ResponseOK(data)
 
     def destroy(self, request, *args, **kwargs):
-        instance = self._get_instance(kwargs)
+        instance = self._get_instance(request, kwargs)
         if instance is None:
             return baseviews.ResponseNotFound("会话不存在")
         models.QaMessage.objects.filter(session_id=instance.id).update(is_deleted=True)
@@ -417,7 +436,7 @@ class QaSessionView(baseviews.AnyLogin):
 
         session = None
         if data.get("session_id"):
-            session = self._get_instance({"pk": data["session_id"]})
+            session = self._get_instance(request, {"pk": data["session_id"]})
             if session is None:
                 return baseviews.ResponseNotFound("会话不存在")
 
@@ -506,7 +525,7 @@ class QaSessionView(baseviews.AnyLogin):
 
         session = None
         if data.get("session_id"):
-            session = self._get_instance({"pk": data["session_id"]})
+            session = self._get_instance(request, {"pk": data["session_id"]})
             if session is None:
                 return baseviews.ResponseNotFound("会话不存在")
 

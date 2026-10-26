@@ -1173,7 +1173,7 @@ class StreamEndpointTests(TransactionTestCase):
         self.assertEqual(session.datasource_id, 42)
 
     def test_datasource_can_be_cleared(self):
-        session = models.QaSession.objects.create(title="旧会话", datasource_id=42)
+        session = models.QaSession.objects.create(title="旧会话", datasource_id=42, creator="tester")
         response = self._post(
             {
                 "question": "问题",
@@ -1234,3 +1234,68 @@ class StreamEndpointTests(TransactionTestCase):
 
         user_message = models.QaMessage.objects.get(role=custom_enum.MessageRoleEnum.USER.value)
         self.assertEqual(user_message.content, "这个问题不能丢")
+
+
+class QaSessionOwnershipTests(TestCase):
+    """
+    会话按 creator 隔离：别人拿到会话 id 也不能读、不能删、不能续问
+    """
+
+    URL = "/my-dba/v1/qa-session"
+
+    def setUp(self):
+        self.alice = models.QaSession.objects.create(title="alice 的会话", creator="alice")
+        self.bob = models.QaSession.objects.create(title="bob 的会话", creator="bob")
+
+    @staticmethod
+    def _client(username):
+        client = APIClient()
+        client.force_authenticate(user=AuthedUser(username, username, "user"))
+        return client
+
+    def test_list_only_returns_own_sessions(self):
+        payload = self._client("alice").get(self.URL).json()
+        self.assertEqual([item["id"] for item in payload["data"]["results"]], [self.alice.id])
+
+    def test_other_users_session_is_not_readable(self):
+        payload = self._client("alice").get(f"{self.URL}/{self.bob.id}").json()
+        self.assertEqual(payload["code"], 4004)
+
+    def test_other_users_session_cannot_be_deleted(self):
+        payload = self._client("alice").delete(f"{self.URL}/{self.bob.id}").json()
+        self.assertEqual(payload["code"], 4004)
+        self.assertFalse(models.QaSession.objects.get(id=self.bob.id).is_deleted)
+
+    def test_other_users_session_cannot_be_continued(self):
+        payload = self._client("alice").post(
+            f"{self.URL}/ask", {"question": "问题", "session_id": self.bob.id}, format="json"
+        ).json()
+        self.assertEqual(payload["code"], 4004)
+
+    def test_other_users_session_cannot_be_continued_streaming(self):
+        response = self._client("alice").post(
+            f"{self.URL}/ask-stream", {"question": "问题", "session_id": self.bob.id}, format="json"
+        )
+        self.assertFalse(response.streaming)
+        self.assertEqual(response.json()["code"], 4004)
+
+    def test_own_session_is_readable(self):
+        payload = self._client("alice").get(f"{self.URL}/{self.alice.id}").json()
+        self.assertEqual(payload["code"], 2000)
+        self.assertEqual(payload["data"]["id"], self.alice.id)
+
+    def test_direct_create_is_rejected(self):
+        """会话只能由提问接口创建，否则可以伪造任意 creator"""
+        payload = self._client("alice").post(
+            self.URL, {"title": "伪造会话", "creator": "bob"}, format="json"
+        ).json()
+        self.assertEqual(payload["code"], 4000)
+        self.assertFalse(models.QaSession.objects.filter(title="伪造会话").exists())
+
+    def test_direct_update_is_rejected(self):
+        payload = self._client("alice").patch(
+            f"{self.URL}/{self.bob.id}", {"title": "被改了"}, format="json"
+        ).json()
+        self.assertEqual(payload["code"], 4000)
+        self.bob.refresh_from_db()
+        self.assertEqual(self.bob.title, "bob 的会话")
