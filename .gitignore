@@ -12,3 +12,4 @@ logs
 .claude/
 .ci
 .ruff_cache
+.workbuddy
