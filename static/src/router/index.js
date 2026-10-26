@@ -30,16 +30,16 @@ const routes = [
         meta: { title: '首页', icon: 'House', showInMenu: true }
       },
       {
-        path: 'knowledge/qa',
-        name: 'KnowledgeQa',
-        component: () => import('@/views/knowledge/qa.vue'),
-        meta: { title: '知识问答', icon: 'ChatDotRound', showInMenu: true }
-      },
-      {
         path: 'datasource',
         name: 'DatasourceManagement',
         component: () => import('@/views/datasource/index.vue'),
         meta: { title: '数据源管理', icon: 'Coin', showInMenu: true }
+      },
+      {
+        path: 'knowledge/qa',
+        name: 'KnowledgeQa',
+        component: () => import('@/views/knowledge/qa.vue'),
+        meta: { title: '知识问答', icon: 'ChatDotRound', showInMenu: true }
       },
       {
         path: 'datasource/tables',
