@@ -407,15 +407,35 @@ class SchemaRuleTests(SimpleTestCase):
     误报会直接损害使用者对问题清单的信任，因此这几条一律「能确定才报」。
     """
 
-    def codes(self, sql, index=_TEST_INDEX):
-        result = parse.parse_sql(sql)
+    def codes(self, sql, index=_TEST_INDEX, dialect=None):
+        result = parse.parse_sql(sql, dialect)
         self.assertTrue(result.ok, result.errors)
-        runner = analyzer.SqlAnalyzer(result, sql=sql, schema=index)
+        runner = analyzer.SqlAnalyzer(result, sql=sql, dialect=dialect, schema=index)
         return [item["rule_code"] for item in runner.analyze()]
 
     def test_unknown_table(self):
         self.assertIn("unknown_table", self.codes("SELECT id FROM nope WHERE id = 1"))
         self.assertNotIn("unknown_table", self.codes("SELECT id FROM users WHERE id = 1"))
+
+    def test_postgres_system_tables_are_not_unknown(self):
+        """系统表不在采集快照里；不能因为快照缺失就报「不存在的表」"""
+        for sql in (
+            "SELECT * FROM pg_stat_activity",
+            "SELECT * FROM pg_catalog.pg_class",
+            "SELECT * FROM information_schema.tables",
+        ):
+            self.assertNotIn("unknown_table", self.codes(sql), sql)
+
+    def test_mysql_system_tables_are_not_unknown(self):
+        for sql in (
+            "SELECT * FROM mysql.user",
+            "SELECT * FROM information_schema.tables",
+            "SELECT * FROM performance_schema.threads",
+            "SELECT 1 FROM dual",
+        ):
+            self.assertNotIn(
+                "unknown_table", self.codes(sql, dialect=custom_enum.DbTypeEnum.MYSQL), sql
+            )
 
     def test_cte_name_is_not_treated_as_a_table(self):
         """CTE 是语句内自定义的名字，不是真实表，不能拿去快照里找"""

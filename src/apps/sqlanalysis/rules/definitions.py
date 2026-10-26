@@ -14,6 +14,7 @@ from collections.abc import Callable
 
 from sqlglot import exp
 
+from apps.sqlanalysis.parse import dialect_of
 from apps.sqlanalysis.schema import SchemaIndex, families_conflict, type_family
 from utils import custom_enum
 
@@ -526,6 +527,41 @@ def _resolve_column(ctx, aliases, column, single=None):
     return table_name, column.name, type_family(data_type)
 
 
+# 系统模式不在采集范围里，不能因为「快照里没有」就判成表不存在
+_SYSTEM_SCHEMAS = {
+    "pg_catalog",
+    "information_schema",
+    "pg_toast",
+    "mysql",
+    "performance_schema",
+    "sys",
+}
+
+
+def _is_system_table(table, dialect) -> bool:
+    """
+    判定是否系统表。
+
+    PostgreSQL 的 `pg_catalog` 在默认 search_path 里，`pg_stat_activity` 这类表可以不写模式；
+    MySQL 的 `dual` 是伪表。两类都不能按快照缺失报「不存在的表」。
+    """
+    schema_name = (table.db or "").lower()
+    if schema_name in _SYSTEM_SCHEMAS:
+        return True
+    if schema_name.startswith("pg_temp_") or schema_name.startswith("pg_toast_temp_"):
+        return True
+
+    name = (table.name or "").lower()
+    if schema_name:
+        return False
+    db_type = dialect_of(dialect)
+    if db_type == custom_enum.DbTypeEnum.POSTGRESQL:
+        return name.startswith("pg_")
+    if db_type == custom_enum.DbTypeEnum.MYSQL:
+        return name == "dual"
+    return False
+
+
 def _check_unknown_table(ctx):
     if not ctx.has_schema:
         return []
@@ -536,6 +572,8 @@ def _check_unknown_table(ctx):
         for table in statement.expression.find_all(exp.Table):
             name = table.name or ""
             if not name or name.lower() in local:
+                continue
+            if _is_system_table(table, ctx.dialect):
                 continue
             key = (name.lower(), (table.db or "").lower())
             if key in seen:
