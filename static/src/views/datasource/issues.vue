@@ -8,6 +8,22 @@
             <el-select v-model="datasourceId" placeholder="选择数据源" style="width: 200px" @change="onDatasourceChange">
               <el-option v-for="item in datasources" :key="item.id" :value="item.id" :label="item.name" />
             </el-select>
+            <el-select
+              v-model="tableKey"
+              placeholder="全部表"
+              clearable
+              filterable
+              :loading="tablesLoading"
+              style="width: 220px"
+              @change="onTableChange"
+            >
+              <el-option
+                v-for="item in tableOptions"
+                :key="makeTableKey(item.schema, item.name)"
+                :value="makeTableKey(item.schema, item.name)"
+                :label="makeTableKey(item.schema, item.name)"
+              />
+            </el-select>
             <el-select v-model="issueLevel" placeholder="全部级别" clearable style="width: 140px" @change="reload">
               <el-option :value="1" label="高" />
               <el-option :value="2" label="中" />
@@ -150,6 +166,12 @@ const datasourceId = ref(null)
 const issueLevel = ref(null)
 const rules = ref([])
 const ruleCode = ref(null)
+// 从「库表分析」的「问题」按钮跳转时带过来的表定位
+const tableName = ref('')
+const schemaName = ref('')
+const tableKey = ref('')
+const tableOptions = ref([])
+const tablesLoading = ref(false)
 const rows = ref([])
 const total = ref(0)
 const loading = ref(false)
@@ -245,7 +267,45 @@ async function loadDatasources() {
   } else if (datasources.value.length) {
     datasourceId.value = datasources.value[0].id
   }
+  await loadTableOptions()
+  // 从库表分析跳转：只带表名与模式，数据源由上面的 query 决定
+  tableName.value = (route.query.table || '').toString()
+  schemaName.value = (route.query.schema || '').toString()
+  tableKey.value = tableName.value ? makeTableKey(schemaName.value, tableName.value) : ''
   if (datasourceId.value) await loadIssues()
+}
+
+function makeTableKey(schema, name) {
+  return schema ? `${schema}.${name}` : name
+}
+
+async function loadTableOptions() {
+  if (!datasourceId.value) {
+    tableOptions.value = []
+    return
+  }
+  tablesLoading.value = true
+  try {
+    const data = await catalogApi.tables({ datasource_id: datasourceId.value, page: 1, page_size: 2000 })
+    tableOptions.value = (data.results || []).sort((a, b) =>
+      makeTableKey(a.schema, a.name).localeCompare(makeTableKey(b.schema, b.name))
+    )
+  } finally {
+    tablesLoading.value = false
+  }
+}
+
+function onTableChange(value) {
+  if (!value) {
+    tableName.value = ''
+    schemaName.value = ''
+  } else {
+    const option = tableOptions.value.find((item) => makeTableKey(item.schema, item.name) === value)
+    tableName.value = option?.name || ''
+    schemaName.value = option?.schema || ''
+  }
+  query.page = 1
+  loadIssues()
 }
 
 async function loadIssues() {
@@ -255,6 +315,8 @@ async function loadIssues() {
     const params = { datasource_id: datasourceId.value, page: query.page, page_size: query.page_size }
     if (issueLevel.value) params.issue_level = issueLevel.value
     if (ruleCode.value) params.rule_code = ruleCode.value
+    if (tableName.value) params.table_name = tableName.value
+    if (schemaName.value) params.schema_name = schemaName.value
     const data = await catalogApi.issues(params)
     rows.value = data.results || []
     total.value = data.total || 0
@@ -272,7 +334,12 @@ async function loadIssues() {
 function onDatasourceChange() {
   query.page = 1
   issueLevel.value = null
+  // 表过滤属于上一个数据源，切换后必须清掉
+  tableName.value = ''
+  schemaName.value = ''
+  tableKey.value = ''
   loaded.value = false
+  loadTableOptions()
   loadIssues()
 }
 
@@ -317,6 +384,8 @@ onMounted(async () => {
 
 .header-actions {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
 }
 

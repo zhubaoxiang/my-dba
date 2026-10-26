@@ -2,6 +2,7 @@
 数据源与元数据视图
 """
 
+from django.db.models import Count
 from rest_framework.decorators import action
 
 from apps.base import baseviews
@@ -216,6 +217,31 @@ class CatalogView(baseviews.AnyLogin):
             return baseviews.ResponseNotFound("该数据源尚未采集")
         return baseviews.ResponseOK(self.get_serializer(snapshot).data)
 
+    @staticmethod
+    def _issue_counts(snapshot) -> dict:
+        """
+        按 (schema, table) 汇总问题数量，排除已静音项
+
+        一次分组查询算完全部表，避免在表清单循环里逐表查库。问题与清单、统计
+        走同一个 `muted_filter()`，保证「表上的问题数」和「问题清单」口径一致。
+        """
+        counts = {}
+        queryset = models.CatalogIssue.objects.filter(
+            snapshot_id=snapshot.id, is_deleted=False
+        ).exclude(table_name="")
+        muted = services.muted_filter()
+        if muted is not None:
+            queryset = queryset.exclude(muted)
+        rows = (
+            queryset.values("schema_name", "table_name", "issue_level")
+            .annotate(total=Count("id"))
+            .order_by()
+        )
+        for row in rows:
+            key = ((row["schema_name"] or "").lower(), (row["table_name"] or "").lower())
+            counts.setdefault(key, {})[row["issue_level"]] = row["total"]
+        return counts
+
     @action(detail=False, methods=["GET"], url_path="tables")
     def tables(self, request):
         """
@@ -225,6 +251,7 @@ class CatalogView(baseviews.AnyLogin):
         if error:
             return error
         keyword = (request.query_params.get("keyword") or "").strip().lower()
+        issue_counts = self._issue_counts(snapshot)
         items = []
         for table in snapshot.raw_data.get("tables") or []:
             if (
@@ -233,6 +260,9 @@ class CatalogView(baseviews.AnyLogin):
                 and keyword not in (table.get("comment") or "").lower()
             ):
                 continue
+            key = ((table.get("schema") or "").lower(), (table.get("name") or "").lower())
+            counts = issue_counts.get(key, {})
+            by_level = {level.value: counts.get(level.value, 0) for level in custom_enum.IssueLevelEnum}
             items.append(
                 {
                     "schema": table.get("schema") or "",
@@ -244,8 +274,20 @@ class CatalogView(baseviews.AnyLogin):
                     "total_size": int(table.get("total_size") or 0),
                     "column_count": len(table.get("columns") or []),
                     "index_count": len(table.get("indexes") or []),
+                    "issue_counts": by_level,
+                    "issue_total": sum(by_level.values()),
                 }
             )
+        # 问题多的排前面：高 → 中 → 低逐级比较；同分按 schema/表名，保证分页顺序稳定
+        items.sort(
+            key=lambda item: (
+                -item["issue_counts"][custom_enum.IssueLevelEnum.HIGH.value],
+                -item["issue_counts"][custom_enum.IssueLevelEnum.MEDIUM.value],
+                -item["issue_counts"][custom_enum.IssueLevelEnum.LOW.value],
+                item["schema"].lower(),
+                item["name"].lower(),
+            )
+        )
         self.serializer_class = serializers.CatalogTableSerializer
         return baseviews.ResponseOK(pagination.paginate(self, items))
 
@@ -305,6 +347,13 @@ class CatalogView(baseviews.AnyLogin):
         rule_code = (request.query_params.get("rule_code") or "").strip()
         if rule_code:
             queryset = queryset.filter(rule_code=rule_code)
+        # 从库表分析「问题」按钮跳转进来时按表定位；同名表可能出现在不同模式，模式一并带上
+        table_name = (request.query_params.get("table_name") or "").strip()
+        if table_name:
+            queryset = queryset.filter(table_name__iexact=table_name)
+        schema_name = (request.query_params.get("schema_name") or "").strip()
+        if schema_name:
+            queryset = queryset.filter(schema_name__iexact=schema_name)
         # 本次问题所属的数据源。**必须在静音过滤之前取**——否则整页问题全被静音时
         # 这里取不到值，连带下面的 muted_total 也变成 0，界面上就再也看不到「已静音几条」
         owner_id = queryset.values_list("datasource_id", flat=True).first()

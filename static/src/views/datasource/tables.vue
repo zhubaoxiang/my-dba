@@ -78,9 +78,25 @@
           </span>
         </div>
 
-        <el-table :data="rows" v-loading="loading" border @row-click="openDetail">
+        <el-table :data="rows" v-loading="loading" border>
           <el-table-column prop="name" label="表名" min-width="180" />
           <el-table-column prop="comment" label="注释" min-width="180" show-overflow-tooltip />
+          <el-table-column label="问题数" width="210">
+            <template #default="{ row }">
+              <div v-if="row.issue_total" class="issue-tags">
+                <el-tag v-if="row.issue_counts?.[1]" type="danger" size="small">
+                  高 {{ row.issue_counts[1] }}
+                </el-tag>
+                <el-tag v-if="row.issue_counts?.[2]" type="warning" size="small">
+                  中 {{ row.issue_counts[2] }}
+                </el-tag>
+                <el-tag v-if="row.issue_counts?.[3]" type="info" size="small">
+                  低 {{ row.issue_counts[3] }}
+                </el-tag>
+              </div>
+              <span v-else class="no-issue">—</span>
+            </template>
+          </el-table-column>
           <el-table-column label="行数（估）" width="130">
             <template #default="{ row }">{{ formatRows(row.row_count) }}</template>
           </el-table-column>
@@ -92,6 +108,12 @@
           </el-table-column>
           <el-table-column prop="column_count" label="列数" width="80" />
           <el-table-column prop="index_count" label="索引数" width="90" />
+          <el-table-column label="操作" width="140" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openDetail(row)">详情</el-button>
+              <el-button link type="primary" @click="openIssues(row)">问题</el-button>
+            </template>
+          </el-table-column>
         </el-table>
 
         <el-pagination
@@ -120,12 +142,13 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { catalogApi, datasourceApi } from '@/api/datasource'
 import { formatBytes, formatRows } from '@/utils/format'
 import TableDetail from './table-detail.vue'
 
 const route = useRoute()
+const router = useRouter()
 
 const datasources = ref([])
 const datasourceId = ref(null)
@@ -218,6 +241,17 @@ function openDetail(row) {
   detailVisible.value = true
 }
 
+function openIssues(row) {
+  router.push({
+    path: '/datasource/issues',
+    query: {
+      datasource_id: datasourceId.value,
+      table: row.name,
+      schema: row.schema
+    }
+  })
+}
+
 // 从问题清单跳转过来时，自动打开对应表详情
 async function maybeOpenFromQuery() {
   const tableName = route.query.table
@@ -277,6 +311,16 @@ onMounted(loadDatasources)
 
 .unavailable-alert {
   margin-bottom: 12px;
+}
+
+.issue-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.no-issue {
+  color: #c0c4cc;
 }
 
 .toolbar {

@@ -249,3 +249,6 @@ class CatalogTableSerializer(serializers.Serializer):
     total_size = serializers.IntegerField()
     column_count = serializers.IntegerField()
     index_count = serializers.IntegerField()
+    # 按严重级别汇总的问题数，键为 1/2/3（高/中/低）；已排除静音项
+    issue_counts = serializers.DictField(child=serializers.IntegerField())
+    issue_total = serializers.IntegerField()

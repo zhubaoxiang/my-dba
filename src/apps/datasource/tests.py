@@ -796,6 +796,126 @@ class CatalogIssueApiTests(TestCase):
         payload = self.client.get(f"{self.CATALOG}/issues?snapshot_id={self.snapshot.id}&issue_level=1").json()
         self.assertEqual([item["rule_code"] for item in payload["data"]["results"]], ["no_primary_key"])
 
+    def test_tables_carry_issue_counts_by_level(self):
+        """
+        库表分析的表清单要直接带高/中/低问题数；静音项与问题清单同口径排除
+        """
+        self.snapshot.raw_data = {
+            "tables": [
+                {
+                    "schema": "public",
+                    "name": "t",
+                    "comment": "",
+                    "row_count": 10,
+                    "data_size": 0,
+                    "index_size": 0,
+                    "total_size": 0,
+                    "columns": [],
+                    "indexes": [],
+                },
+                {
+                    "schema": "public",
+                    "name": "u",
+                    "comment": "",
+                    "row_count": 5,
+                    "data_size": 0,
+                    "index_size": 0,
+                    "total_size": 0,
+                    "columns": [],
+                    "indexes": [],
+                },
+                {
+                    "schema": "other",
+                    "name": "t",
+                    "comment": "",
+                    "row_count": 5,
+                    "data_size": 0,
+                    "index_size": 0,
+                    "total_size": 0,
+                    "columns": [],
+                    "indexes": [],
+                },
+            ]
+        }
+        self.snapshot.save(update_fields=["raw_data"])
+
+        self.add_issue("no_primary_key", "无主键表", schema_name="public")
+        self.add_issue(
+            "big_table", "超大表", level=custom_enum.IssueLevelEnum.MEDIUM.value, schema_name="public"
+        )
+        self.add_issue(
+            "unused_index",
+            "疑似未使用索引",
+            level=custom_enum.IssueLevelEnum.LOW.value,
+            table_name="u",
+            schema_name="public",
+        )
+        # 同名表在不同模式下必须分开统计
+        self.add_issue("no_primary_key", "无主键表", schema_name="other", table_name="t")
+        self.add_issue("fk_without_index", "外键缺索引", schema_name="public")
+        services.mute_issue(self.datasource.id, "fk_without_index", "t", "")
+
+        payload = self.client.get(f"{self.CATALOG}/tables?snapshot_id={self.snapshot.id}").json()
+        rows = {(item["schema"], item["name"]): item for item in payload["data"]["results"]}
+        self.assertEqual(rows[("public", "t")]["issue_counts"], {"1": 1, "2": 1, "3": 0})
+        self.assertEqual(rows[("public", "t")]["issue_total"], 2)
+        self.assertEqual(rows[("public", "u")]["issue_counts"], {"1": 0, "2": 0, "3": 1})
+        self.assertEqual(rows[("other", "t")]["issue_counts"], {"1": 1, "2": 0, "3": 0})
+
+    def test_tables_sorted_by_issue_counts_high_medium_low(self):
+        """
+        表清单默认按问题数排序：高 → 中 → 低；高相等比中，中相等比低
+        """
+        self.snapshot.raw_data = {
+            "tables": [
+                {
+                    "schema": "public",
+                    "name": name,
+                    "comment": "",
+                    "row_count": 0,
+                    "data_size": 0,
+                    "index_size": 0,
+                    "total_size": 0,
+                    "columns": [],
+                    "indexes": [],
+                }
+                for name in ("a", "b", "c", "d")
+            ]
+        }
+        self.snapshot.save(update_fields=["raw_data"])
+
+        high = custom_enum.IssueLevelEnum.HIGH.value
+        medium = custom_enum.IssueLevelEnum.MEDIUM.value
+        low = custom_enum.IssueLevelEnum.LOW.value
+        # d：2 高；b：1 高 + 1 中；c：1 高 + 9 低；a：1 高
+        for _ in range(2):
+            self.add_issue("no_primary_key", "无主键表", level=high, schema_name="public", table_name="d")
+        self.add_issue("no_primary_key", "无主键表", level=high, schema_name="public", table_name="b")
+        self.add_issue("big_table", "超大表", level=medium, schema_name="public", table_name="b")
+        self.add_issue("no_primary_key", "无主键表", level=high, schema_name="public", table_name="c")
+        for index in range(9):
+            self.add_issue(
+                "unused_index", "疑似未使用索引", level=low, schema_name="public", table_name="c", fix_key=f"i{index}"
+            )
+        self.add_issue("no_primary_key", "无主键表", level=high, schema_name="public", table_name="a")
+
+        payload = self.client.get(f"{self.CATALOG}/tables?snapshot_id={self.snapshot.id}").json()
+        self.assertEqual([item["name"] for item in payload["data"]["results"]], ["d", "b", "c", "a"])
+
+    def test_filter_by_table_and_schema(self):
+        """从表清单跳转过来时按表过滤；同名表在不同模式下不能混在一起"""
+        self.add_issue("no_primary_key", "无主键表", schema_name="public", table_name="t")
+        self.add_issue("no_primary_key", "无主键表", schema_name="other", table_name="t")
+        self.add_issue("big_table", "超大表", schema_name="public", table_name="u")
+
+        payload = self.client.get(
+            f"{self.CATALOG}/issues?snapshot_id={self.snapshot.id}&table_name=t&schema_name=public"
+        ).json()
+        results = payload["data"]["results"]
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["schema_name"], "public")
+        self.assertEqual(results[0]["table_name"], "t")
+
     def test_serializer_exposes_rule_fields_and_drops_issue_type(self):
         self.add_issue("no_primary_key", "无主键表")
         item = self.client.get(f"{self.CATALOG}/issues?snapshot_id={self.snapshot.id}").json()["data"]["results"][0]
