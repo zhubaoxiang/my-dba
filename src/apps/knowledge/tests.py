@@ -1055,11 +1055,14 @@ class StreamPersistenceTests(TestCase):
         self.assertTrue(existing.is_complete)
 
     def test_schema_sql_declares_the_new_column(self):
-        """列必须同时出现在全量结构与增量补丁里——两者都不更新，新库与旧库就会不一致"""
+        """
+        pg_struct.sql 必须包含该列，保证新库一次到位。
+
+        patch.sql 已改为「只保留待执行变更」的滚动增量，历史变更落地后会从这里移除，
+        因此不再要求它包含 `is_complete`；历史升级路径见 git 历史与 openspec 归档。
+        """
         struct_sql = _SQL_STRUCT.read_text(encoding="utf-8")
-        patch_sql = _SQL_PATCH.read_text(encoding="utf-8")
         self.assertIn("is_complete", struct_sql, "pg_struct.sql 缺 is_complete，新库建不出来")
-        self.assertIn("is_complete", patch_sql, "patch.sql 缺 is_complete，已有库升不上来")
 
 
 class StreamEndpointTests(TransactionTestCase):
