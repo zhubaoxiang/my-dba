@@ -61,7 +61,12 @@
             <div v-for="(item, index) in messages" :key="index" class="message" :class="item.role">
               <div class="bubble">
                 <div v-if="item.status" class="status">{{ item.status }}</div>
-                <div v-if="item.content" class="content">{{ item.content }}</div>
+                <div
+                  v-if="item.content && item.role === 'assistant'"
+                  class="content markdown-body"
+                  v-html="renderMarkdown(item.content)"
+                ></div>
+                <div v-else-if="item.content" class="content">{{ item.content }}</div>
 
                 <el-alert
                   v-if="item.is_complete === false"
@@ -120,6 +125,7 @@ import { nextTick, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { askStream, knowledgeApi, qaApi } from '@/api/knowledge'
 import { datasourceApi } from '@/api/datasource'
+import { renderMarkdown } from '@/utils/markdown'
 
 const sessions = ref([])
 const currentSessionId = ref(null)
@@ -166,7 +172,11 @@ async function loadDatasources() {
 async function openSession(item) {
   currentSessionId.value = item.id
   const detail = await qaApi.detail(item.id)
-  messages.value = (detail.messages || []).map((m) => ({ ...m }))
+  // 接口返回的 role 是 1/2；统一成 user/assistant，历史消息的样式与 Markdown 渲染都依赖它
+  messages.value = (detail.messages || []).map((m) => ({
+    ...m,
+    role: m.role === 2 ? 'assistant' : 'user'
+  }))
   knowledgeBaseId.value = detail.knowledge_base_id || null
   datasourceId.value = detail.datasource_id || null
   mode.value = detail.mode
@@ -348,12 +358,77 @@ onMounted(async () => {
   padding: 10px 12px;
   border-radius: 6px;
   background-color: #f5f7fa;
-  white-space: pre-wrap;
   line-height: 1.6;
 }
 
 .message.user .bubble {
   background-color: #ecf5ff;
+  white-space: pre-wrap;
+}
+
+/* 模型回答按 Markdown 渲染；下面只覆盖 Element Plus 之外的排版细节 */
+.markdown-body :deep(p) {
+  margin: 0 0 8px;
+}
+
+.markdown-body :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3),
+.markdown-body :deep(h4) {
+  margin: 12px 0 6px;
+  font-size: 15px;
+}
+
+.markdown-body :deep(ul),
+.markdown-body :deep(ol) {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+}
+
+.markdown-body :deep(code) {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #eef0f3;
+  font-size: 12px;
+}
+
+.markdown-body :deep(pre) {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-radius: 4px;
+  background: #f6f8fa;
+  overflow-x: auto;
+}
+
+.markdown-body :deep(pre code) {
+  padding: 0;
+  background: transparent;
+}
+
+.markdown-body :deep(blockquote) {
+  margin: 8px 0;
+  padding-left: 10px;
+  border-left: 3px solid #dcdfe6;
+  color: #606266;
+}
+
+.markdown-body :deep(table) {
+  margin: 8px 0;
+  border-collapse: collapse;
+}
+
+.markdown-body :deep(th),
+.markdown-body :deep(td) {
+  padding: 4px 8px;
+  border: 1px solid #dcdfe6;
+}
+
+.markdown-body :deep(a) {
+  color: #409eff;
 }
 
 .status {
