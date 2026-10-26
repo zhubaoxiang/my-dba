@@ -76,9 +76,13 @@ services:
   # 数据卷丢了只需重建索引，不涉及正文。
   # web 用 network_mode: host，因此应用侧连 127.0.0.1:6333 即可。
   qdrant:
-    # 上线前请固定到具体版本，勿长期用 latest
-    image: qdrant/qdrant:latest
+    # 固定到当前验证过的版本，避免 latest 升级后基础镜像或存储格式变化
+    image: qdrant/qdrant:v1.19.1
     container_name: my-dba-qdrant
+    # 旧版 Docker 的 seccomp 会拒绝 clone3；Qdrant 新版 tokio 线程池创建线程时报
+    # "Operation not permitted (os error 1)" 并反复重启。升级 Docker 后可去掉。
+    security_opt:
+      - seccomp:unconfined
     ports:
       - "6333:6333"   # REST / Web UI
       - "6334:6334"   # gRPC
