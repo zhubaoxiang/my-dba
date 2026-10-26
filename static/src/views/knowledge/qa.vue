@@ -18,7 +18,9 @@
             @click="openSession(item)"
           >
             <div class="session-title">{{ item.title || '未命名会话' }}</div>
-            <div class="session-meta">{{ item.message_count }} 条 · {{ item.create_time }}</div>
+            <div class="session-meta">
+              {{ item.creator || '未知用户' }} · {{ item.message_count }} 条 · {{ item.create_time }}
+            </div>
             <el-button link type="danger" size="small" @click.stop="removeSession(item)">删除</el-button>
           </div>
         </el-card>

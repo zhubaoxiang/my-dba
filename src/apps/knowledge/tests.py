@@ -1248,9 +1248,9 @@ class QaSessionOwnershipTests(TestCase):
         self.bob = models.QaSession.objects.create(title="bob 的会话", creator="bob")
 
     @staticmethod
-    def _client(username):
+    def _client(username, role="user"):
         client = APIClient()
-        client.force_authenticate(user=AuthedUser(username, username, "user"))
+        client.force_authenticate(user=AuthedUser(username, username, role))
         return client
 
     def test_list_only_returns_own_sessions(self):
@@ -1283,6 +1283,22 @@ class QaSessionOwnershipTests(TestCase):
         payload = self._client("alice").get(f"{self.URL}/{self.alice.id}").json()
         self.assertEqual(payload["code"], 2000)
         self.assertEqual(payload["data"]["id"], self.alice.id)
+
+    def test_admin_sees_all_sessions(self):
+        payload = self._client("root", "admin").get(self.URL).json()
+        self.assertEqual(
+            {item["id"] for item in payload["data"]["results"]}, {self.alice.id, self.bob.id}
+        )
+
+    def test_admin_can_read_any_session(self):
+        payload = self._client("root", "admin").get(f"{self.URL}/{self.bob.id}").json()
+        self.assertEqual(payload["code"], 2000)
+        self.assertEqual(payload["data"]["id"], self.bob.id)
+
+    def test_admin_can_delete_any_session(self):
+        payload = self._client("root", "admin").delete(f"{self.URL}/{self.bob.id}").json()
+        self.assertEqual(payload["code"], 2000)
+        self.assertTrue(models.QaSession.objects.get(id=self.bob.id).is_deleted)
 
     def test_direct_create_is_rejected(self):
         """会话只能由提问接口创建，否则可以伪造任意 creator"""

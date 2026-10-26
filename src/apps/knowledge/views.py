@@ -377,21 +377,27 @@ class QaSessionView(baseviews.AnyLogin):
     def _creator(request) -> str:
         return getattr(getattr(request, "user", None), "username", "") or ""
 
+    @staticmethod
+    def _is_admin(request) -> bool:
+        return bool(getattr(getattr(request, "user", None), "is_staff", False))
+
     def _get_instance(self, request, kwargs):
         """
-        只取当前用户自己的会话
+        普通用户只取自己的会话；管理员可取全部会话。
 
-        会话按 `creator` 隔离：别人拿到会话 id 也只能得到 404，不能读、不能删、不能续问。
+        会话按 `creator` 隔离：普通用户拿到别人的会话 id 只能得到 404，
+        不能读、不能删、不能续问。
         """
-        return models.QaSession.objects.filter(
-            is_deleted=False, id=kwargs.get("pk"), creator=self._creator(request)
-        ).first()
+        queryset = models.QaSession.objects.filter(is_deleted=False, id=kwargs.get("pk"))
+        if not self._is_admin(request):
+            queryset = queryset.filter(creator=self._creator(request))
+        return queryset.first()
 
     def list(self, request, **kwargs):
-        queryset = (
-            self.get_queryset().filter(is_deleted=False, creator=self._creator(request)).order_by("-id")
-        )
-        return baseviews.ResponseOK(pagination.paginate(self, queryset))
+        queryset = self.get_queryset().filter(is_deleted=False)
+        if not self._is_admin(request):
+            queryset = queryset.filter(creator=self._creator(request))
+        return baseviews.ResponseOK(pagination.paginate(self, queryset.order_by("-id")))
 
     def create(self, request, *args, **kwargs):
         # 会话只由提问接口创建；直接建会话会绕过 creator 归属
