@@ -108,8 +108,8 @@
               v-model="question"
               type="textarea"
               :autosize="{ minRows: 2, maxRows: 5 }"
-              placeholder="输入问题，Ctrl+Enter 发送"
-              @keydown.ctrl.enter="ask"
+              placeholder="输入问题，Enter 发送，Shift+Enter 换行"
+              @keydown="onKeydown"
             />
             <el-button v-if="asking" type="danger" @click="stop">停止生成</el-button>
             <el-button v-else type="primary" :disabled="!question.trim()" @click="ask">发送</el-button>
@@ -193,7 +193,18 @@ async function scrollToBottom() {
   if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
 }
 
+function onKeydown(event) {
+  if (event.key !== 'Enter') return
+  // 中文输入法组合期间的回车是在确认候选词，不能当作发送
+  if (event.isComposing || event.keyCode === 229) return
+  // Shift+Enter 保留换行；Ctrl/Cmd+Enter 与 Enter 一样发送
+  if (event.shiftKey) return
+  event.preventDefault()
+  ask()
+}
+
 async function ask() {
+  if (asking.value) return
   const text = question.value.trim()
   if (!text) return
   asking.value = true
