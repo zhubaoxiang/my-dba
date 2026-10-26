@@ -199,7 +199,8 @@ import { sqlAnalysisApi } from '@/api/sqlAnalysis'
 const LEVELS = { 1: '高', 2: '中', 3: '低' }
 
 const sql = ref('')
-const dialect = ref(null)
+// 1=PostgreSQL、2=MySQL；默认选中 PostgreSQL，清空后由后端按 PostgreSQL 处理
+const dialect = ref(1)
 const datasourceId = ref(null)
 const datasources = ref([])
 const result = ref(null)
