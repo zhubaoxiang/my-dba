@@ -61,7 +61,7 @@
 
         <div class="stat-row">
           <el-tag size="small" type="info">语句 {{ result.summary.statements }}</el-tag>
-          <el-tag size="small" type="success">已应用 {{ result.summary.applied }}</el-tag>
+          <el-tag size="small" type="success">已合并到快照 {{ result.summary.applied }}</el-tag>
           <el-tag size="small" type="warning">新增 / 加重问题 {{ result.summary.design_issue_total }}</el-tag>
           <el-tag size="small" type="warning">语句风险 {{ result.summary.risk_total }}</el-tag>
           <el-tag v-if="result.summary.blocking_total" size="small" type="danger">
@@ -117,7 +117,7 @@
                 effect="plain"
                 class="applied-tag"
               >
-                {{ statement.applied ? '已应用' : '未应用' }}
+                {{ statement.applied ? '已合并' : '未合并' }}
               </el-tag>
             </div>
           </div>
