@@ -787,15 +787,24 @@ def list_datasource_status() -> list:
     """
     datasources = models.Datasource.objects.filter(is_deleted=False).order_by("id")
 
-    latest_snapshot = {}
-    for snapshot in models.MetadataSnapshot.objects.filter(is_deleted=False).order_by(
-        "datasource_id", "-collect_time", "-id"
-    ):
-        latest_snapshot.setdefault(snapshot.datasource_id, snapshot)
+    # 用 DISTINCT ON 让数据库每库只回一行，并且**不要取 raw_data**：
+    # raw_data 是一份完整快照（大库几十万字符），首页只用到表数量与采集时间，
+    # 把历史快照连同 raw_data 全部加载进内存会把首页拖到数秒。
+    latest_snapshot = {
+        snapshot.datasource_id: snapshot
+        for snapshot in models.MetadataSnapshot.objects.filter(is_deleted=False)
+        .order_by("datasource_id", "-collect_time", "-id")
+        .distinct("datasource_id")
+        .only("id", "datasource_id", "table_count", "collect_time")
+    }
 
-    latest_task = {}
-    for task in models.CollectTask.objects.filter(is_deleted=False).order_by("datasource_id", "-id"):
-        latest_task.setdefault(task.datasource_id, task)
+    latest_task = {
+        task.datasource_id: task
+        for task in models.CollectTask.objects.filter(is_deleted=False)
+        .order_by("datasource_id", "-id")
+        .distinct("datasource_id")
+        .only("id", "datasource_id", "status", "fail_reason")
+    }
 
     counts = {}
     snapshot_ids = [snapshot.id for snapshot in latest_snapshot.values()]

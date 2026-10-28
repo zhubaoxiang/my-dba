@@ -8,7 +8,9 @@
 from datetime import datetime, timedelta
 from unittest import mock
 
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
 from apps.datasource import models as ds_models
@@ -198,6 +200,25 @@ class DatasourceStatusTests(TestCase):
         datasource.is_deleted = True
         datasource.save(update_fields=["is_deleted"])
         self.assertEqual([item["name"] for item in services.datasource_services.list_datasource_status()], [])
+
+
+class OverviewQueryShapeTests(TestCase):
+    """
+    首页只取最近快照的少量列，不能把历史快照的 raw_data 全量加载进内存
+
+    raw_data 是一份完整快照，大库可达几十万字符；此前每次首页都把全部历史快照
+    （含 raw_data）加载出来，本地环境要 3 秒多。
+    """
+
+    def test_overview_does_not_select_snapshot_raw_data(self):
+        datasource = _datasource("ds")
+        _snapshot(datasource)
+
+        with CaptureQueriesContext(connection) as captured:
+            services.build_overview()
+
+        sql = "\n".join(item["sql"] for item in captured.captured_queries)
+        self.assertNotIn('"raw_data"', sql)
 
 
 class KnowledgeBaseStatusTests(TestCase):
