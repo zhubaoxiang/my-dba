@@ -9,15 +9,18 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest import mock
 
-from django.test import SimpleTestCase, override_settings
+from django.contrib.auth import get_user_model
+from django.test import SimpleTestCase, TestCase, override_settings
 from rest_framework.test import APIClient
 
 from apps.accounts import services
 from utils.authentication import AuthedUser, JwtOperate
 
 AUTH = "/my-dba/v1/auth"
+USER = "/my-dba/v1/user"
 RULES = "/my-dba/v1/sql-analysis/rules"
 SECRET = "test-jwt-secret"
+PASSWORD = "Str0ngPass!23"
 
 
 def _user(is_staff=False, is_superuser=False, active=True):
@@ -27,6 +30,8 @@ def _user(is_staff=False, is_superuser=False, active=True):
         is_staff=is_staff,
         is_superuser=is_superuser,
         is_active=active,
+        last_login=None,
+        save=mock.Mock(),
     )
 
 
@@ -351,3 +356,132 @@ class AuthApiTests(SimpleTestCase):
         self.client.credentials(HTTP_TOKEN="not-a-token")
         payload = self.client.get(RULES).json()
         self.assertEqual(payload["code"], 4003)
+
+
+class UserManagementApiTests(TestCase):
+    """
+    本地用户管理：管理员可用、普通用户 4005、角色映射与删除保护
+    """
+
+    NEW_PASSWORD = "An0therStr0ng!23"
+
+    def setUp(self):
+        model = get_user_model()
+        self.admin = model.objects.create_user(
+            username="root", password=PASSWORD, is_staff=True, is_superuser=True
+        )
+        self.user = model.objects.create_user(username="alice", password=PASSWORD)
+
+    @staticmethod
+    def _client(user):
+        client = APIClient()
+        role = "admin" if (user.is_staff or user.is_superuser) else "user"
+        client.force_authenticate(user=AuthedUser(user.id, user.username, role))
+        return client
+
+    def test_admin_can_list_users(self):
+        payload = self._client(self.admin).get(USER).json()
+        self.assertEqual(payload["code"], 2000)
+        rows = {item["username"]: item for item in payload["data"]["results"]}
+        self.assertEqual(set(rows), {"root", "alice"})
+        self.assertEqual(rows["root"]["role"], "admin")
+        self.assertEqual(rows["alice"]["role"], "user")
+
+    def test_normal_user_gets_4005(self):
+        payload = self._client(self.user).get(USER).json()
+        self.assertEqual(payload["code"], 4005)
+        self.assertIn("权限", payload["message"])
+
+    def test_anonymous_gets_4003(self):
+        payload = APIClient().get(USER).json()
+        self.assertEqual(payload["code"], 4003)
+
+    def test_create_user(self):
+        payload = self._client(self.admin).post(
+            USER,
+            {
+                "username": "bob",
+                "password": PASSWORD,
+                "email": "bob@example.com",
+                "role": "admin",
+            },
+            format="json",
+        ).json()
+        self.assertEqual(payload["code"], 2000)
+        bob = get_user_model().objects.get(username="bob")
+        self.assertTrue(bob.is_superuser)
+        self.assertTrue(bob.is_staff)
+        self.assertTrue(bob.check_password(PASSWORD))
+
+    def test_create_duplicate_username_is_rejected(self):
+        payload = self._client(self.admin).post(
+            USER, {"username": "root", "password": PASSWORD}, format="json"
+        ).json()
+        self.assertEqual(payload["code"], 4000)
+
+    def test_update_role_email_and_password(self):
+        payload = self._client(self.admin).put(
+            f"{USER}/{self.user.id}",
+            {"role": "admin", "email": "new@example.com", "password": self.NEW_PASSWORD},
+            format="json",
+        ).json()
+        self.assertEqual(payload["code"], 2000)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.is_superuser)
+        self.assertTrue(self.user.is_staff)
+        self.assertEqual(self.user.email, "new@example.com")
+        self.assertTrue(self.user.check_password(self.NEW_PASSWORD))
+
+    def test_username_cannot_be_changed(self):
+        payload = self._client(self.admin).put(
+            f"{USER}/{self.user.id}", {"username": "renamed", "email": "x@example.com"}, format="json"
+        ).json()
+        self.assertEqual(payload["code"], 2000)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "alice")
+
+    def test_admin_cannot_change_own_role(self):
+        payload = self._client(self.admin).put(
+            f"{USER}/{self.admin.id}", {"role": "user"}, format="json"
+        ).json()
+        self.assertEqual(payload["code"], 4000)
+        self.admin.refresh_from_db()
+        self.assertTrue(self.admin.is_superuser)
+
+    def test_admin_cannot_delete_self(self):
+        payload = self._client(self.admin).delete(f"{USER}/{self.admin.id}").json()
+        self.assertEqual(payload["code"], 4000)
+        self.assertTrue(get_user_model().objects.filter(id=self.admin.id).exists())
+
+    def test_delete_user(self):
+        payload = self._client(self.admin).delete(f"{USER}/{self.user.id}").json()
+        self.assertEqual(payload["code"], 2000)
+        self.assertFalse(get_user_model().objects.filter(id=self.user.id).exists())
+
+    def test_last_superuser_cannot_be_deleted(self):
+        # 另一个只有 is_staff 的管理员来删唯一的 superuser
+        actor = get_user_model().objects.create_user(
+            username="ops", password=PASSWORD, is_staff=True, is_superuser=False
+        )
+        payload = self._client(actor).delete(f"{USER}/{self.admin.id}").json()
+        self.assertEqual(payload["code"], 4000)
+        self.assertTrue(get_user_model().objects.filter(id=self.admin.id).exists())
+
+    def test_last_superuser_cannot_be_demoted_or_disabled(self):
+        actor = get_user_model().objects.create_user(
+            username="ops", password=PASSWORD, is_staff=True, is_superuser=False
+        )
+        client = self._client(actor)
+        for data in ({"role": "user"}, {"is_active": False}):
+            payload = client.put(f"{USER}/{self.admin.id}", data, format="json").json()
+            self.assertEqual(payload["code"], 4000)
+        self.admin.refresh_from_db()
+        self.assertTrue(self.admin.is_superuser)
+        self.assertTrue(self.admin.is_active)
+
+    def test_local_login_updates_last_login(self):
+        self.assertIsNone(self.user.last_login)
+        result = services.authenticate_user("alice", PASSWORD)
+        self.assertEqual(result.username, "alice")
+        self.user.refresh_from_db()
+        self.assertIsNotNone(self.user.last_login)

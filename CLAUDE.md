@@ -59,7 +59,7 @@ gunicorn -c settings/gunicorn.py config.wsgi:application
 
 - 配置层级：`settings/settings.py` → `{local|dev|prod|test}.py` → `conf.ini`（`Configure` 单例）
 - 认证：`JwtAuthentication`（`utils/authentication.py`），填充 `AuthedUser`
-- 响应：`baseviews.ResponseOK/ResponseError/ResponseBadRequest/ResponseForbidden/ResponseNotFound/ResponseExpectationFailed`（code 2000/5000/4000/4003/4004/0017）
+- 响应：`baseviews.ResponseOK/ResponseError/ResponseBadRequest/ResponseForbidden/ResponsePermissionDenied/ResponseNotFound/ResponseExpectationFailed`（code 2000/5000/4000/4003/4005/4004/4017）
 - 模型：继承 `AbstractTimeFiledModel`（`apps/base/models.py`），软删除 `is_deleted`
 - 分页：`pagination.paginate(self, queryset)` → `baseviews.ResponseOK(result)`
 - 部署：docker compose（`Dockerfile` 分层构建 + `docker-compose.yml`）

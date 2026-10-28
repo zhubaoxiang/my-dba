@@ -113,6 +113,8 @@ const MENU_GROUP_ICONS = {
   设置: 'Setting'
 }
 
+const isAdmin = computed(() => userStore.userInfo.role === 'admin')
+
 // 从路由配置的 children 中筛选需要展示在菜单中的项（`meta.showInMenu !== false`），
 // 拼接父路由与子路由得到完整路径，再按 `meta.group` 归到分组下。
 //
@@ -125,6 +127,7 @@ const menuEntries = computed(() => {
     const parent = root.path.endsWith('/') ? root.path.slice(0, -1) : root.path
     root.children.forEach((child) => {
       if (!child.meta || child.meta.showInMenu === false) return
+      if (child.meta.adminOnly && !isAdmin.value) return
       const item = { ...child, path: `${parent}/${child.path}` }
       const name = item.meta.group
       if (!name) {

@@ -30,6 +30,7 @@ urlpatterns = []
 
 router = DefaultRouter(trailing_slash=False)
 router.register(rf"{SYS_NAME}/v1/auth", accounts_views.AuthView, basename="auth")
+router.register(rf"{SYS_NAME}/v1/user", accounts_views.UserView, basename="user")
 router.register(rf"{SYS_NAME}/v1/datasource", datasource_views.DatasourceView, basename="datasource")
 router.register(rf"{SYS_NAME}/v1/catalog", datasource_views.CatalogView, basename="catalog")
 router.register(rf"{SYS_NAME}/v1/analysis-rule", datasource_views.AnalysisRuleView, basename="analysis_rule")

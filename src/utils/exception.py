@@ -30,14 +30,13 @@ def exception_handler(exc, context):
     request = context.get("request")
     if isinstance(exc, exceptions.NotAuthenticated) or (
         isinstance(exc, exceptions.PermissionDenied)
-        and request is not None
-        and not getattr(request, "successful_authenticator", None)
+        and not getattr(getattr(request, "user", None), "is_authenticated", False)
     ):
         return baseviews.ResponseForbidden("未登录或登录已失效")
     if isinstance(exc, exceptions.AuthenticationFailed):
         return baseviews.ResponseForbidden(str(exc.detail))
     if isinstance(exc, exceptions.PermissionDenied):
-        return baseviews.ResponseForbidden("您没有权限进行此操作")
+        return baseviews.ResponsePermissionDenied("您没有权限进行此操作")
     if response.status_code == status.HTTP_401_UNAUTHORIZED:
         detail = response.data.get("detail") if isinstance(response.data, dict) else None
         return baseviews.ResponseForbidden(str(detail) if detail else "未登录或登录已失效")

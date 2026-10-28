@@ -173,7 +173,8 @@ src/                          # 后端代码根目录
 | `ResponseOK` | 2000 | 成功 |
 | `ResponseError` | 5000 | 服务器错误 |
 | `ResponseBadRequest` | 4000 | 参数错误 |
-| `ResponseForbidden` | 4003 | 无权限 |
+| `ResponseForbidden` | 4003 | 未登录 / 登录失效 |
+| `ResponsePermissionDenied` | 4005 | 已登录但无权限 |
 | `ResponseNotFound` | 4004 | 资源不存在 |
 | `ResponseExpectationFailed` | 4017 | 业务条件未满足 |
 
@@ -222,11 +223,11 @@ ViewSet 基类（`apps/base/baseviews.py`）：
 
 > `StatelessView` 是无模型的 ViewSet 基类。既有的四个基类都是 `ModelViewSet` 子类，继承它们会连同带上一套用不了的 list / detail / create 路由——路由注册了但访问即 500。不落库的接口用它。
 
-> **所有业务接口要求有效 JWT**；未登录、token 无效或过期统一返回业务码 4003。登录接口是唯一公开的入口。
+> **所有业务接口要求有效 JWT**；未登录、token 无效或过期统一返回业务码 4003，已登录但权限不足返回 4005。登录接口是唯一公开的入口。
 >
-> v1 所有登录用户权限相同，不做细粒度 RBAC：LDAP 用户 `role=user`，本地 `is_staff` / `is_superuser` 用户 `role=admin`。角色目前只用于展示与后续扩展。
+> 角色分两级：LDAP 用户 `role=user`，本地 `is_staff` / `is_superuser` 用户 `role=admin`。普通用户可以使用全部业务功能；「用户管理」「系统管理」仅超级管理员可用。
 >
-> 服务仍建议只部署在内网或受控网络，但访问控制不再依赖网络隔离。决策与配置见 [auth.md](auth.md) 与 `openspec/changes/add-login-auth/`。
+> 服务仍建议只部署在内网或受控网络，访问控制同时依赖 JWT 与角色。决策与配置见 [auth.md](auth.md) 与 `openspec/changes/archive/2026-10-22-add-login-auth/`。
 
 ## 后台任务
 

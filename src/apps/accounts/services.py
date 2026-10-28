@@ -151,6 +151,9 @@ def authenticate_user(username: str, password: str) -> AuthedUser:
         if user is None or not user.is_active:
             LOGGER.warning("本地账号存在但认证失败，不再尝试 LDAP username=%s", username)
             raise AuthError("用户名或密码错误", 4003)
+        # 用户管理页面要展示最后登录时间；Django 的 authenticate() 本身不写 last_login
+        user.last_login = datetime.now()
+        user.save(update_fields=["last_login"])
         LOGGER.info("本地认证成功 username=%s", username)
         role = "admin" if (user.is_staff or user.is_superuser) else "user"
         return AuthedUser(user_id=user.id, username=user.username, role=role)

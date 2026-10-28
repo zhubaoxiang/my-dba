@@ -67,6 +67,18 @@ class ResponseForbidden(FormatResponse):
         super().__init__(4003, msg, content)
 
 
+class ResponsePermissionDenied(FormatResponse):
+    """
+    已登录但权限不足。
+
+    与 4003 分开：4003 是「未登录/登录失效」，前端会清理登录态；
+    4005 只表示当前账号没有这个操作权限，不能把用户登出。
+    """
+
+    def __init__(self, msg="您没有权限进行此操作", content=None):
+        super().__init__(4005, msg, content)
+
+
 class ResponseNotFound(FormatResponse):
     def __init__(self, msg="failure", content=None):
         super().__init__(4004, msg, content)

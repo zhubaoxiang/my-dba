@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import Layout from '@/layout/index.vue'
 import { useUserStore } from '@/store/user'
+import { authApi } from '@/api/auth'
 
 // 路由表：所有页面通过 Layout 包裹，菜单项由子路由 meta.showInMenu 控制
 //
@@ -92,14 +93,14 @@ const routes = [
       {
         path: 'user',
         name: 'UserManagement',
-        component: () => import('@/views/development/index.vue'),
-        meta: { title: '用户管理', icon: 'User', showInMenu: true, group: '设置' }
+        component: () => import('@/views/user/index.vue'),
+        meta: { title: '用户管理', icon: 'User', showInMenu: true, group: '设置', adminOnly: true }
       },
       {
         path: 'system',
         name: 'SystemManagement',
         component: () => import('@/views/development/index.vue'),
-        meta: { title: '系统管理', icon: 'Setting', showInMenu: true, group: '设置' }
+        meta: { title: '系统管理', icon: 'Setting', showInMenu: true, group: '设置', adminOnly: true }
       },
       {
         path: 'about',
@@ -130,13 +131,26 @@ const router = createRouter({
 
 // 未登录只能进登录页；已登录访问登录页则回首页。
 // token 是否过期由后续接口的 4003 兜底，避免每次跳转都先打一次 me 接口。
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const userStore = useUserStore()
   if (to.path === '/login') {
     return userStore.token ? { path: '/home' } : true
   }
   if (!userStore.token) {
     return { path: '/login', query: { redirect: to.fullPath } }
+  }
+  // 管理员页面：本地缓存里没有用户信息时先补一次 me，避免刷新后误判
+  if (to.meta.adminOnly) {
+    if (!userStore.userInfo.username || !userStore.userInfo.role) {
+      try {
+        userStore.setUserInfo(await authApi.me())
+      } catch {
+        return { path: '/login' }
+      }
+    }
+    if (userStore.userInfo.role !== 'admin') {
+      return { path: '/home' }
+    }
   }
   return true
 })
