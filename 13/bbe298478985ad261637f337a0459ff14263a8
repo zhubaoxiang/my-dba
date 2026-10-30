@@ -1,0 +1,25 @@
+openspec/changes/add-llm-usage-stats/design.md
+  s_ca85dcdcc2d759::t_140580ee98aac4 72-73
+src/sql/patch.sql
+  s_ca85dcdcc2d759::t_2b367e5f31d62c 28-67
+openspec/changes/add-llm-usage-stats/proposal.md
+  s_ca85dcdcc2d759::t_73a1202c5ab0a7 24
+openspec/changes/add-llm-usage-stats/tasks.md
+  s_ca85dcdcc2d759::t_b49b9cc94026b2 3
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "13bbe298478985ad261637f337a0459ff14263a8",
+  "prompts": {},
+  "sessions": {
+    "s_ca85dcdcc2d759": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "31d5c0ba-962b-4eb8-83fc-1971c315a04c",
+        "model": "deepseek-flash"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    }
+  }
+}
