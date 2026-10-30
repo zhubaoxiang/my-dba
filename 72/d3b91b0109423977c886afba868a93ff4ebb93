@@ -1,0 +1,37 @@
+src/sql/patch.sql
+  s_ca85dcdcc2d759::t_fbad250910103b 33
+docs/knowledge-qa.md
+  s_ca85dcdcc2d759::t_16ba58a61a4421 308
+openspec/changes/add-llm-usage-stats/specs/llm-usage/spec.md
+  s_ca85dcdcc2d759::t_ea3ea2e217d5f7 98,103-104,106,108-109
+openspec/changes/add-llm-usage-stats/tasks.md
+  s_ca85dcdcc2d759::t_5f48094342a89c 9
+src/apps/llmusage/services.py
+  s_ca85dcdcc2d759::t_a561e6b252cbdd 82-85,88-89
+openspec/changes/add-llm-usage-stats/proposal.md
+  s_ca85dcdcc2d759::t_dd45dfa3dd8eee 13
+docs/architecture.md
+  s_ca85dcdcc2d759::t_e346b6f8d37f71 261
+openspec/changes/add-llm-usage-stats/design.md
+  s_ca85dcdcc2d759::t_4c93298dab3485 54,56-58
+src/apps/llmusage/tests.py
+  s_ca85dcdcc2d759::t_0d7c859abd6ebd 259,267-269
+src/sql/pg_struct.sql
+  s_ca85dcdcc2d759::t_8c0c3614d7b45c 369
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "72d3b91b0109423977c886afba868a93ff4ebb93",
+  "prompts": {},
+  "sessions": {
+    "s_ca85dcdcc2d759": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "31d5c0ba-962b-4eb8-83fc-1971c315a04c",
+        "model": "deepseek-flash"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    }
+  }
+}
