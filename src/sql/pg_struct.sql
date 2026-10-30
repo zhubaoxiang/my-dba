@@ -366,7 +366,7 @@ COMMENT ON TABLE auth_user IS 'Django 本地账号，仅用于本地兜底登录
 -- 模型调用用量（add-llm-usage-stats）
 --
 -- 每次模型调用一行，查询时聚合。token 列可空：网关未返回 usage 时留空，不估算。
--- 保留 90 天，超期按项目规则软删除（is_deleted），不做物理删除。
+-- 保留 90 天，超期物理删除；观测数据不保留已删除记录。
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS llm_usage (

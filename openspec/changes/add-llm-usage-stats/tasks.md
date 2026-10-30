@@ -6,7 +6,7 @@
 - [x] 1.4 实现 LangChain callback handler，接入 `build_chat_model()`；包装 `embed_documents` / `embed_query`
 - [x] 1.5 新增归属中间件（URL 前缀映射功能、写入 contextvars、生成 `request_id`），在 `settings.py` 注册
 - [x] 1.6 新增 `LlmUsageView(SuperUserView)`：`summary` 与 `calls`，在 `config/urls.py` 注册
-- [x] 1.7 保留期清理接入 `jobs/metrics.py` 循环，超期记录软删除
+- [x] 1.7 保留期清理接入 `jobs/metrics.py` 循环，超期记录物理删除
 - [x] 1.8 补测试：记录成功/失败/无 usage、埋点失败不影响业务、归属与 request_id、权限 4005、聚合正确、清理只处理超期数据
 
 ## 2. 前端

@@ -79,12 +79,14 @@ def classify_error(error) -> str:
 
 def purge_expired() -> int:
     """
-    超过保留期的记录置为已删除（项目规则禁止物理删除）
+    删除超过保留期的记录
+
+    用量是纯观测数据，过期后没有恢复价值；与 `datasource_metrics` 的清理一致，
+    这里物理删除，不保留软删除记录。
     """
     deadline = datetime.now() - timedelta(days=RETENTION_DAYS)
-    return models.LlmUsage.objects.filter(is_deleted=False, create_time__lt=deadline).update(
-        is_deleted=True, update_time=datetime.now()
-    )
+    deleted, _ = models.LlmUsage.objects.filter(create_time__lt=deadline).delete()
+    return deleted
 
 
 def _base_queryset(range_key: str):

@@ -10,7 +10,7 @@
 - 在 `build_chat_model()` 上挂 LangChain callback，并包装 `embed_documents` / `embed_query`，业务调用点零改动。
 - 新增中间件按 URL 前缀映射功能，用 contextvars 传递 `username` / `feature` / `request_id`；后台任务记为 `system`。
 - 新增 `GET /v1/llm-usage/summary`（汇总与分组）与 `GET /v1/llm-usage/calls`（明细分页），仅超级管理员可用。
-- 记录保留 90 天，清理挂在现有 `jobs/metrics.py` 循环里执行（按项目规则软删除）。
+- 记录保留 90 天，清理挂在现有 `jobs/metrics.py` 循环里执行，超期记录物理删除。
 - 前端 `/system` 占位页替换为带标签页的系统管理页，「模型用量」为第一个标签；不新增图表依赖，趋势先用 CSS 条形。
 - **不记录** prompt 与回答正文；网关未返回 usage 时 token 留空，不估算。
 

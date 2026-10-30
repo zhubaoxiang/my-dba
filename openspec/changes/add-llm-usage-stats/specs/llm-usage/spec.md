@@ -95,18 +95,18 @@
 
 ### Requirement: 用量数据保留
 
-系统 SHALL 保留最近 90 天的用量记录。超期记录 MUST 按项目规则软删除，查询 MUST 过滤已删除记录。
+系统 SHALL 保留最近 90 天的用量记录，超期记录 MUST 物理删除。
 
 #### Scenario: 超期清理
 
 - **WHEN** 清理任务运行且存在超过 90 天的记录
-- **THEN** 系统 MUST 将这些记录标记为已删除
-- **AND** MUST NOT 物理删除数据
+- **THEN** 系统 MUST 物理删除这些记录
+- **AND** 查询 MUST NOT 再返回它们
 
-#### Scenario: 查询不返回已删除记录
+#### Scenario: 未超期记录不受影响
 
-- **WHEN** 查询任意用量接口
-- **THEN** 结果 MUST NOT 包含已标记删除的记录
+- **WHEN** 清理任务运行
+- **THEN** 90 天内的记录 MUST 全部保留
 
 ### Requirement: 系统管理页面
 

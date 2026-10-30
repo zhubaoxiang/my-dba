@@ -258,7 +258,7 @@ ViewSet 基类（`apps/base/baseviews.py`）：
 - **独立进程** —— gunicorn 跑 3 个 worker，任何随 web 进程启动的周期任务都会每个 worker 各跑一份
 - **外层 `while true` 守护** —— 容器的 `restart: always` 只管容器、不管里面的单个进程；进程崩了没有别的东西会拉起它
 
-任务脚本体自己是个 `while True` 循环（间隔取配置），且**循环内要兜住所有异常**——业务出错绝不该让它退出。参考实现：`jobs/metrics.py`（[datasource-metrics.md](datasource-metrics.md)）。该循环同时承担模型用量的保留期清理（每天一次，超期记录软删除）。
+任务脚本体自己是个 `while True` 循环（间隔取配置），且**循环内要兜住所有异常**——业务出错绝不该让它退出。参考实现：`jobs/metrics.py`（[datasource-metrics.md](datasource-metrics.md)）。该循环同时承担模型用量的保留期清理（每天一次，超期记录物理删除）。
 
 ## 代码规范入口
 

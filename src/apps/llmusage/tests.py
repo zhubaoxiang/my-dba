@@ -256,7 +256,7 @@ class UsageApiTests(TestCase):
 
 
 class RetentionTests(TestCase):
-    def test_purge_soft_deletes_expired_rows_only(self):
+    def test_purge_physically_deletes_expired_rows_only(self):
         expired = _row()
         expired.create_time = datetime.now() - timedelta(days=services.RETENTION_DAYS + 1)
         models.LlmUsage.objects.filter(id=expired.id).update(create_time=expired.create_time)
@@ -264,9 +264,6 @@ class RetentionTests(TestCase):
 
         self.assertEqual(services.purge_expired(), 1)
 
-        expired.refresh_from_db()
-        fresh.refresh_from_db()
-        self.assertTrue(expired.is_deleted)
-        self.assertFalse(fresh.is_deleted)
-        # 软删除：行仍在表里
-        self.assertEqual(models.LlmUsage.objects.count(), 2)
+        self.assertFalse(models.LlmUsage.objects.filter(id=expired.id).exists())
+        self.assertTrue(models.LlmUsage.objects.filter(id=fresh.id).exists())
+        self.assertEqual(models.LlmUsage.objects.count(), 1)
