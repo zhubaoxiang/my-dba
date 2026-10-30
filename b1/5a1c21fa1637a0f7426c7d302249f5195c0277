@@ -1,0 +1,80 @@
+openspec/changes/add-llm-usage-stats/tasks.md
+  s_ca85dcdcc2d759::t_cbe3830f58aa5f 3-10,14-18,22-23,29-31
+  s_ca85dcdcc2d759::t_bec2134989c53a 1-2,11-13,19-21,24-26
+  s_ca85dcdcc2d759::t_1e2d88ed8b0157 27-28
+src/apps/llmusage/filters.py
+  s_ca85dcdcc2d759::t_7c3a620b5e45cf 1-4
+src/apps/llmusage/context.py
+  s_ca85dcdcc2d759::t_ba2816ec6c95d0 1-31
+openspec/changes/add-llm-usage-stats/design.md
+  s_ca85dcdcc2d759::t_bf426b82567557 1-78
+src/apps/llmusage/callbacks.py
+  s_ca85dcdcc2d759::t_99caac45deaa82 78-81
+  s_ca85dcdcc2d759::t_6d80d8b0d67bc5 1-49,55-74,76-77,82-84
+  s_ca85dcdcc2d759::t_1c93bab761c5e4 50-54
+  s_ca85dcdcc2d759::t_77013c497fd4ed 75
+openspec/changes/add-llm-usage-stats/proposal.md
+  s_ca85dcdcc2d759::t_3749e3d9d0926f 1-28
+src/jobs/metrics.py
+  s_ca85dcdcc2d759::t_8ea780b0eb7f31 29,34-35,39,41,46-52
+  s_ca85dcdcc2d759::t_345655e436c6bc 16
+src/apps/llmusage/serializers.py
+  s_ca85dcdcc2d759::t_44a0c10638d4d8 1-44
+static/src/views/system/index.vue
+  s_ca85dcdcc2d759::t_22bc35ccb92845 1-325
+src/apps/llmusage/tests.py
+  s_ca85dcdcc2d759::t_ee4c44ff502d8e 227-233
+  s_ca85dcdcc2d759::t_c6b08d8005eb70 1-100,102-226,234-272
+  s_ca85dcdcc2d759::t_a972e67bc57860 101
+openspec/changes/add-llm-usage-stats/specs/llm-usage/spec.md
+  s_ca85dcdcc2d759::t_9fbcd89f0bba56 1-131
+src/apps/llmusage/services.py
+  s_ca85dcdcc2d759::t_3b416fe9249d1f 66-79
+  s_ca85dcdcc2d759::t_e9135f71fe624c 1-65,80-216
+static/src/router/index.js
+  s_ca85dcdcc2d759::t_4de7dbcff10562 102
+docs/knowledge-qa.md
+  s_ca85dcdcc2d759::t_90b55379ca97fc 304-309
+static/src/api/llmUsage.js
+  s_ca85dcdcc2d759::t_879dc6190d8e89 1-11
+src/apps/llmusage/models.py
+  s_ca85dcdcc2d759::t_b783cfb0f50a57 1-40
+docs/architecture.md
+  s_ca85dcdcc2d759::t_c27b71caf02352 261
+  s_ca85dcdcc2d759::t_2f92a6e5eba0ed 113-118
+src/settings/settings.py
+  s_ca85dcdcc2d759::t_9ed0f16684b52a 59
+src/apps/llmusage/middleware.py
+  s_ca85dcdcc2d759::t_7a3b169348f0eb 1-58
+src/utils/custom_enum.py
+  s_ca85dcdcc2d759::t_73e65fa62e24bd 133-160
+src/sql/pg_struct.sql
+  s_ca85dcdcc2d759::t_a50c6b9a7622d3 363-403
+src/apps/llmusage/views.py
+  s_ca85dcdcc2d759::t_9cbe7b7127556f 37-38
+  s_ca85dcdcc2d759::t_27f6d35a654a6e 28-29
+  s_ca85dcdcc2d759::t_1b87a43a6603a1 1-27,30-36,39-43
+src/config/urls.py
+  s_ca85dcdcc2d759::t_52bf4d94a13e85 22
+  s_ca85dcdcc2d759::t_c3847a8cf9f3a8 46
+src/apps/knowledge/llm.py
+  s_ca85dcdcc2d759::t_a94f752feda22c 6-7,10-11,15
+  s_ca85dcdcc2d759::t_433c291b3e8cba 106-116,121-128,136-143
+  s_ca85dcdcc2d759::t_b00e2d5fe21d85 61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b15a1c21fa1637a0f7426c7d302249f5195c0277",
+  "prompts": {},
+  "sessions": {
+    "s_ca85dcdcc2d759": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "31d5c0ba-962b-4eb8-83fc-1971c315a04c",
+        "model": "deepseek-flash"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    }
+  }
+}
