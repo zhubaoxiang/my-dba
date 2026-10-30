@@ -110,6 +110,12 @@ src/                          # 后端代码根目录
 │   │   ├── qa/               #   langgraph 单 agent 与工具
 │   │   ├── serializers.py / views.py
 │   │   └── tests.py
+│   ├── llmusage/             # 模型调用用量（记录 / 聚合 / 保留期清理）
+│   │   ├── models.py         #   llm_usage：每次调用一行，不存正文
+│   │   ├── callbacks.py      #   对话模型用量回调（挂在 build_chat_model）
+│   │   ├── middleware.py     #   按 URL 映射功能、写入归属上下文
+│   │   ├── services.py       #   record_call / 聚合查询 / 过期清理
+│   │   └── views.py          #   GET /v1/llm-usage（SuperUserView）
 │   ├── overview/             # 首页状态总览（跨模块只读聚合，无模型）→ docs/overview.md
 │   │   ├── services.py       #   聚合各块数据 + 概览数字 + 分块兜底
 │   │   └── views.py          #   GET /v1/overview（StatelessView）
@@ -252,7 +258,7 @@ ViewSet 基类（`apps/base/baseviews.py`）：
 - **独立进程** —— gunicorn 跑 3 个 worker，任何随 web 进程启动的周期任务都会每个 worker 各跑一份
 - **外层 `while true` 守护** —— 容器的 `restart: always` 只管容器、不管里面的单个进程；进程崩了没有别的东西会拉起它
 
-任务脚本体自己是个 `while True` 循环（间隔取配置），且**循环内要兜住所有异常**——业务出错绝不该让它退出。参考实现：`jobs/metrics.py`（[datasource-metrics.md](datasource-metrics.md)）。
+任务脚本体自己是个 `while True` 循环（间隔取配置），且**循环内要兜住所有异常**——业务出错绝不该让它退出。参考实现：`jobs/metrics.py`（[datasource-metrics.md](datasource-metrics.md)）。该循环同时承担模型用量的保留期清理（每天一次，超期记录软删除）。
 
 ## 代码规范入口
 

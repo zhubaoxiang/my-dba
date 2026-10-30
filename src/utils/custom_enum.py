@@ -130,6 +130,34 @@ class MessageRoleEnum(models.IntegerChoices):
     ASSISTANT = 2, "回答"
 
 
+class LlmCallTypeEnum(models.IntegerChoices):
+    """
+    模型调用类型
+
+    对话与嵌入分开统计：嵌入量大但通常不计费，混在一起会掩盖对话的成本变化。
+    """
+
+    CHAT = 1, "对话"
+    EMBEDDING = 2, "嵌入"
+
+
+class LlmFeatureEnum(models.IntegerChoices):
+    """
+    模型调用的来源功能
+
+    由中间件按 URL 前缀映射；认不出的记为 OTHER 并打日志，便于补齐映射。
+    """
+
+    QA = 1, "知识问答"
+    NL2SQL = 2, "SQL 生成"
+    SQL_INTERPRET = 3, "SQL 解读"
+    DDL_REVIEW = 4, "DDL 评审"
+    KB_INGEST = 5, "知识库摄入"
+    PROVIDER_TEST = 6, "连通性测试"
+    SYSTEM = 7, "后台任务"
+    OTHER = 8, "其他"
+
+
 class StatementKindEnum(models.IntegerChoices):
     """
     SQL 语句类别

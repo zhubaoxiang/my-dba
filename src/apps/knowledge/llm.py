@@ -3,11 +3,16 @@
 
 从 LlmProvider 配置构造 langchain 的模型对象。API Key 在此解密，只在内存中传递，
 不落日志、不出接口。
+
+用量记录统一在这里埋点：对话模型挂回调，嵌入调用计时，业务调用点无需改动。
 """
+
+import time
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 from apps.knowledge import models
+from apps.llmusage import callbacks, services
 from utils import crypto, custom_enum
 from utils.configure import CONF_ATTR
 
@@ -53,6 +58,7 @@ def build_chat_model(provider, temperature: float = 0):
         temperature=temperature,
         timeout=_timeout(),
         max_retries=1,
+        callbacks=[callbacks.LlmUsageCallbackHandler(provider)],
     )
 
 
@@ -97,12 +103,29 @@ def _verify_dimensions(provider, vectors: list):
             )
 
 
+def _record_embedding(provider, units: int, started: float, error=None):
+    services.record_call(
+        call_type=custom_enum.LlmCallTypeEnum.EMBEDDING,
+        provider=provider,
+        units=units,
+        latency_ms=int((time.perf_counter() - started) * 1000),
+        success=error is None,
+        error_code="" if error is None else services.classify_error(error),
+    )
+
+
 def embed_documents(provider, texts: list) -> list:
     """
     批量嵌入并校验维度
     """
-    vectors = build_embeddings(provider).embed_documents(texts)
-    _verify_dimensions(provider, vectors)
+    started = time.perf_counter()
+    try:
+        vectors = build_embeddings(provider).embed_documents(texts)
+        _verify_dimensions(provider, vectors)
+    except Exception as exc:
+        _record_embedding(provider, units=len(texts), started=started, error=exc)
+        raise
+    _record_embedding(provider, units=len(texts), started=started)
     return vectors
 
 
@@ -110,8 +133,14 @@ def embed_query(provider, text: str) -> list:
     """
     单条嵌入并校验维度
     """
-    vector = build_embeddings(provider).embed_query(text)
-    _verify_dimensions(provider, [vector])
+    started = time.perf_counter()
+    try:
+        vector = build_embeddings(provider).embed_query(text)
+        _verify_dimensions(provider, [vector])
+    except Exception as exc:
+        _record_embedding(provider, units=1, started=started, error=exc)
+        raise
+    _record_embedding(provider, units=1, started=started)
     return vector
 
 

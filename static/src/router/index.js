@@ -99,7 +99,7 @@ const routes = [
       {
         path: 'system',
         name: 'SystemManagement',
-        component: () => import('@/views/development/index.vue'),
+        component: () => import('@/views/system/index.vue'),
         meta: { title: '系统管理', icon: 'Setting', showInMenu: true, group: '设置', adminOnly: true }
       },
       {

@@ -13,6 +13,7 @@
 import os
 import sys
 import time
+from datetime import date
 
 # 让脚本能被直接执行：把 src/ 放进模块搜索路径，并沿用与 web 相同的环境选择逻辑
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,19 +26,30 @@ import django  # noqa: E402
 django.setup()
 
 from apps.datasource import metrics  # noqa: E402
+from apps.llmusage import services as llmusage_services  # noqa: E402
 from utils.logger import get_logger  # noqa: E402
 
 LOGGER = get_logger("datasource.log")
 
+_last_usage_purge_date = None
+
 
 def run_once() -> dict:
     """
-    一轮：采集全部数据源，并清理过期数据
+    一轮：采集全部数据源，并清理过期数据；模型用量每天清理一次
     """
+    global _last_usage_purge_date
     result = metrics.collect_all()
     purged = metrics.purge_expired()
     if purged:
         LOGGER.info("清理过期指标 %s 条", purged)
+
+    today = date.today()
+    if _last_usage_purge_date != today:
+        _last_usage_purge_date = today
+        expired = llmusage_services.purge_expired()
+        if expired:
+            LOGGER.info("清理过期模型用量 %s 条", expired)
     return result
 
 
