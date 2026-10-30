@@ -1,6 +1,6 @@
 ## 1. 后端
 
-- [x] 1.1 `src/sql/pg_struct.sql` 新增 `llm_usage` 表与索引（`create_time`、`username+create_time`、`feature+create_time`）
+- [x] 1.1 `src/sql/pg_struct.sql` 新增 `llm_usage` 表与索引（`create_time`、`username+create_time`、`feature+create_time`）；`src/sql/patch.sql` 追加幂等增量并在开发库执行
 - [x] 1.2 `utils/custom_enum.py` 增加功能枚举与调用类型枚举（对话/嵌入）
 - [x] 1.3 新增 `apps/llmusage` 模块：模型、`record_call()` 服务、聚合查询服务
 - [x] 1.4 实现 LangChain callback handler，接入 `build_chat_model()`；包装 `embed_documents` / `embed_query`

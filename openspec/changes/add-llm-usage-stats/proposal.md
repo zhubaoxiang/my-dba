@@ -21,7 +21,7 @@
   - `src/apps/llmusage/`（模型、服务、中间件、序列化器、视图）
   - `src/apps/knowledge/llm.py`（挂 callback、包装嵌入）
   - `src/utils/custom_enum.py`（功能与调用类型枚举）
-  - `src/sql/pg_struct.sql`（`llm_usage` 表）
+  - `src/sql/pg_struct.sql`（`llm_usage` 表）、`src/sql/patch.sql`（已有库的幂等增量）
   - `src/config/urls.py`（路由注册）、`settings/settings.py`（中间件）
   - `src/jobs/metrics.py`（保留期清理）
   - `static/src/views/system/`、`static/src/api/llmUsage.js`、`static/src/router/index.js`

@@ -69,7 +69,8 @@
 
 ## Migration Plan
 
-- 在 `pg_struct.sql` 追加 `llm_usage` 建表语句，部署时执行增量 DDL。
+- 新库：`pg_struct.sql` 已包含 `llm_usage` 建表语句。
+- 已有库：`patch.sql` 追加幂等的 `CREATE TABLE IF NOT EXISTS` 与索引，执行 `patch.sql` 即可落地。
 - 无业务数据迁移；上线后从第一次模型调用开始产生数据。
 - 回滚：删除表、回退代码；统计缺失不影响任何业务功能。
 
