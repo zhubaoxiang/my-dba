@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS metadata_snapshot (
     raw_data         jsonb       NOT NULL DEFAULT '{}'::jsonb,
     unavailable      jsonb       NOT NULL DEFAULT '[]'::jsonb,
     evaluated_rules  jsonb       NOT NULL DEFAULT '[]'::jsonb,
+    change_summary   jsonb       NOT NULL DEFAULT '{}'::jsonb,
     create_time      timestamp   NOT NULL DEFAULT now(),
     update_time      timestamp   NOT NULL DEFAULT now(),
     creator          varchar(32) NOT NULL DEFAULT '',
@@ -57,6 +58,7 @@ COMMENT ON TABLE metadata_snapshot IS '元数据采集快照，每次采集生�
 COMMENT ON COLUMN metadata_snapshot.raw_data IS '原始采集结果（模式/表/列/索引/约束/体积）';
 COMMENT ON COLUMN metadata_snapshot.unavailable IS '因权限或版本原因未能采集的项，分析时据此跳过相关规则';
 COMMENT ON COLUMN metadata_snapshot.evaluated_rules IS '本次分析实际参与评估的规则 code，用于察觉规则集在采集之后被改过';
+COMMENT ON COLUMN metadata_snapshot.change_summary IS '与同一数据源上一次快照的紧凑结构变更摘要；空表示未记录，不可比时带 reason';
 
 CREATE INDEX IF NOT EXISTS idx_metadata_snapshot_datasource ON metadata_snapshot (datasource_id, collect_time DESC);
 

@@ -100,6 +100,9 @@
       <el-table :data="taskRows" v-loading="taskLoading" border max-height="360">
         <el-table-column prop="id" label="任务" width="80" />
         <el-table-column prop="status_label" label="状态" width="100" />
+        <el-table-column label="结构变化" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">{{ changeSummaryText(row.change_summary) }}</template>
+        </el-table-column>
         <el-table-column prop="start_time" label="开始" width="170" />
         <el-table-column prop="end_time" label="结束" width="170" />
         <el-table-column prop="fail_reason" label="失败原因" min-width="160" show-overflow-tooltip />
@@ -255,6 +258,14 @@ async function loadTasks() {
   } finally {
     taskLoading.value = false
   }
+}
+
+// 空摘要 = 历史快照未记录；不可比时显示原因——都不能读成「无结构变化」
+function changeSummaryText(summary) {
+  if (!summary) return '—'
+  if (summary.comparable === false) return summary.reason || '不可比'
+  if (!summary.has_changes) return '无结构变化'
+  return `新增 ${summary.added_table_count} · 删除 ${summary.removed_table_count} · 变更 ${summary.changed_table_count}`
 }
 
 async function handleRemove(row) {

@@ -34,7 +34,7 @@ DDL 见 `src/sql/pg_struct.sql`（全量）与 `src/sql/patch.sql`（增量）�
 | POST | `/datasource/test` | 测试未保存的连接参数 |
 | POST | `/datasource/{id}/test` | 测试已保存数据源的连通性 |
 | POST | `/datasource/{id}/collect` | 触发采集，立即返回任务 |
-| GET | `/datasource/{id}/tasks` | 采集任务列表 |
+| GET | `/datasource/{id}/tasks` | 采集任务列表（含结构变更摘要） |
 
 ### 元数据查询
 
@@ -46,9 +46,64 @@ DDL 见 `src/sql/pg_struct.sql`（全量）与 `src/sql/patch.sql`（增量）�
 | GET | `/catalog/tables?snapshot_id=&keyword=` | 表清单（分页、可搜索） |
 | GET | `/catalog/table?snapshot_id=&table=&schema=` | 表详情（列 / 索引 / 主键 / 外键 / 体积） |
 | GET | `/catalog/issues?datasource_id=&issue_level=` | 问题清单（按级别筛选） |
-| GET | `/catalog/diff?snapshot_id=&compare_snapshot_id=` | 两个快照的结构差异 |
+| GET | `/catalog/diff?snapshot_id=&compare_snapshot_id=&ignore_schema=` | 两个快照的结构差异（带两侧元信息与警告） |
 
 > 以上接口要求有效 JWT；未登录、token 无效或过期返回业务码 4003。数据源密码仍加密存储，接口响应不含凭据。登录与 LDAP 配置见 [auth.md](auth.md)。
+
+### 结构对比（快照 diff）
+
+`GET /catalog/diff` 接受**任意两个快照**，不要求同属一个数据源：
+
+| 参数 | 说明 |
+|------|------|
+| `snapshot_id` | 基准快照 |
+| `compare_snapshot_id` | 对比对象 |
+| `ignore_schema` | 可选；`1/true/yes/on` 时按表名对齐，忽略 schema |
+
+响应在差异之外带出两侧快照元信息与警告：
+
+```json
+{
+  "code": 2000,
+  "data": {
+    "base": {
+      "snapshot_id": 1, "datasource_id": 2, "datasource_name": "test",
+      "db_type": 1, "db_type_label": "PostgreSQL",
+      "collect_time": "2026-11-02 10:00:00", "table_count": 120, "unavailable": []
+    },
+    "target": { "…同形状…": "" },
+    "diff": { "added_tables": [], "removed_tables": [], "changed_tables": [] },
+    "summary": {
+      "added_table_count": 2, "removed_table_count": 1,
+      "changed_table_count": 3, "has_changes": true
+    },
+    "warnings": ["两侧数据源类型不同（PostgreSQL / MySQL），类型名称天然不同，差异仅供参考"]
+  }
+}
+```
+
+- **跨数据源可用**：页面左右各选数据源与快照；跨方言时只给警告，**不做类型归一化**——`varchar` 与 `character varying` 会被视为不同，属于预期行为
+- **按表名对齐**：两侧 schema 名不同时启用 `ignore_schema`；若任一侧在多个 schema 下存在同名表，接口返回 4000 并列出冲突表名，**不会悄悄合并**
+- **未采集项**：任一侧 `unavailable` 非空时给出警告，对应结构可能被误判为差异
+- 只比结构（表、列、索引），不比数据
+
+前端页面在侧边栏「库表 → 结构对比」：左右各选数据源与快照（默认最新，同一数据源时对比侧默认取上一次），变更表可展开查看列与索引明细；后端返回的警告原样展示。
+
+### 采集变更摘要
+
+每次采集成功会把本次结果与**同一数据源的上一次快照**对比，把紧凑摘要写入 `metadata_snapshot.change_summary`：
+
+```json
+{
+  "comparable": true, "base_snapshot_id": 12, "base_collect_time": "2026-11-01 10:00:00",
+  "added_table_count": 2, "removed_table_count": 1, "changed_table_count": 3, "has_changes": true
+}
+```
+
+- 首次采集：`{"comparable": false, "reason": "首次采集，没有上一次快照"}`
+- 计算失败：`comparable=false` 并记原因；**采集本身仍然成功**，不会显示成「无变化」
+- 历史快照（能力上线前）：`{}`，接口以 `null` 返回「未记录」——**不能读成「无变化」**
+- `GET /datasource/{id}/tasks` 的每一项带 `change_summary`，数据源管理页的任务弹窗与首页卡片据此提示
 
 ## 健康分析规则
 

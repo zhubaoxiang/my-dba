@@ -24,6 +24,31 @@ def _to_int(value):
         return None
 
 
+def _to_bool(value) -> bool:
+    return str(value or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _snapshot_meta(snapshot) -> dict:
+    """
+    对比响应里的单侧快照元信息（不含任何凭据）
+    """
+    datasource = snapshot.datasource
+    try:
+        db_type_label = custom_enum.DbTypeEnum(datasource.db_type).label
+    except ValueError:
+        db_type_label = ""
+    return {
+        "snapshot_id": snapshot.id,
+        "datasource_id": datasource.id,
+        "datasource_name": datasource.name,
+        "db_type": datasource.db_type,
+        "db_type_label": db_type_label,
+        "collect_time": snapshot.collect_time.strftime("%Y-%m-%d %H:%M:%S"),
+        "table_count": snapshot.table_count,
+        "unavailable": list(snapshot.unavailable or []),
+    }
+
+
 class DatasourceView(baseviews.AnyLogin):
     """
     数据源配置管理
@@ -144,7 +169,11 @@ class DatasourceView(baseviews.AnyLogin):
         """
         采集任务列表
         """
-        queryset = models.CollectTask.objects.filter(datasource_id=kwargs.get("pk"), is_deleted=False).order_by("-id")
+        queryset = (
+            models.CollectTask.objects.filter(datasource_id=kwargs.get("pk"), is_deleted=False)
+            .select_related("snapshot")
+            .order_by("-id")
+        )
         self.serializer_class = serializers.CollectTaskSerializer
         return baseviews.ResponseOK(pagination.paginate(self, queryset))
 
@@ -226,17 +255,11 @@ class CatalogView(baseviews.AnyLogin):
         走同一个 `muted_filter()`，保证「表上的问题数」和「问题清单」口径一致。
         """
         counts = {}
-        queryset = models.CatalogIssue.objects.filter(
-            snapshot_id=snapshot.id, is_deleted=False
-        ).exclude(table_name="")
+        queryset = models.CatalogIssue.objects.filter(snapshot_id=snapshot.id, is_deleted=False).exclude(table_name="")
         muted = services.muted_filter()
         if muted is not None:
             queryset = queryset.exclude(muted)
-        rows = (
-            queryset.values("schema_name", "table_name", "issue_level")
-            .annotate(total=Count("id"))
-            .order_by()
-        )
+        rows = queryset.values("schema_name", "table_name", "issue_level").annotate(total=Count("id")).order_by()
         for row in rows:
             key = ((row["schema_name"] or "").lower(), (row["table_name"] or "").lower())
             counts.setdefault(key, {})[row["issue_level"]] = row["total"]
@@ -426,16 +449,53 @@ class CatalogView(baseviews.AnyLogin):
     def diff(self, request):
         """
         两个快照的结构差异
+
+        带上两侧快照元信息与警告：跨方言时类型名天然不同，差异仅供参考；
+        忽略 schema 时若一侧存在同名表则拒绝，不悄悄合并。
         """
         base_id = _to_int(request.query_params.get("snapshot_id"))
         target_id = _to_int(request.query_params.get("compare_snapshot_id"))
         if base_id is None or target_id is None:
             return baseviews.ResponseBadRequest("缺少参数 snapshot_id 或 compare_snapshot_id")
-        base = models.MetadataSnapshot.objects.filter(is_deleted=False, id=base_id).first()
-        target = models.MetadataSnapshot.objects.filter(is_deleted=False, id=target_id).first()
+
+        snapshots = models.MetadataSnapshot.objects.filter(
+            is_deleted=False, id__in=(base_id, target_id)
+        ).select_related("datasource")
+        by_id = {snapshot.id: snapshot for snapshot in snapshots}
+        base, target = by_id.get(base_id), by_id.get(target_id)
         if base is None or target is None:
             return baseviews.ResponseNotFound("快照不存在")
-        return baseviews.ResponseOK(differ.diff_snapshots(base.raw_data, target.raw_data))
+
+        ignore_schema = _to_bool(request.query_params.get("ignore_schema"))
+        try:
+            diff = differ.diff_snapshots(base.raw_data, target.raw_data, ignore_schema=ignore_schema)
+        except differ.TableKeyCollision as exc:
+            return baseviews.ResponseBadRequest(str(exc))
+
+        base_meta, target_meta = _snapshot_meta(base), _snapshot_meta(target)
+        warnings = []
+        if base.datasource.db_type != target.datasource.db_type:
+            warnings.append(
+                f"两侧数据源类型不同（{base_meta['db_type_label']} / {target_meta['db_type_label']}），"
+                "类型名称天然不同，差异仅供参考"
+            )
+        if ignore_schema:
+            warnings.append("已忽略 schema，按表名对齐")
+        unavailable = sorted({str(item) for item in (base_meta["unavailable"] + target_meta["unavailable"])})
+        if unavailable:
+            warnings.append(f"存在未采集项（{'、'.join(unavailable)}），对应结构可能被误判为差异")
+        if base.id == target.id:
+            warnings.append("两侧选择了同一快照，差异必然为空")
+
+        return baseviews.ResponseOK(
+            {
+                "base": base_meta,
+                "target": target_meta,
+                "diff": diff,
+                "summary": differ.summarize_result(diff),
+                "warnings": warnings,
+            }
+        )
 
     @action(detail=False, methods=["POST"], url_path="issues/mute")
     def mute_issue(self, request):

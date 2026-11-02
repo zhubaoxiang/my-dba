@@ -58,6 +58,12 @@ const routes = [
         meta: { title: '问题清单', icon: 'Warning', showInMenu: true, group: '库表' }
       },
       {
+        path: 'datasource/diff',
+        name: 'DatasourceDiff',
+        component: () => import('@/views/datasource/diff.vue'),
+        meta: { title: '结构对比', icon: 'Switch', showInMenu: true, group: '库表' }
+      },
+      {
         path: 'sqlanalysis',
         name: 'SqlAnalysis',
         component: () => import('@/views/sqlanalysis/index.vue'),

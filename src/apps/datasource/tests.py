@@ -868,9 +868,7 @@ class CatalogIssueApiTests(TestCase):
         self.snapshot.save(update_fields=["raw_data"])
 
         self.add_issue("no_primary_key", "无主键表", schema_name="public")
-        self.add_issue(
-            "big_table", "超大表", level=custom_enum.IssueLevelEnum.MEDIUM.value, schema_name="public"
-        )
+        self.add_issue("big_table", "超大表", level=custom_enum.IssueLevelEnum.MEDIUM.value, schema_name="public")
         self.add_issue(
             "unused_index",
             "疑似未使用索引",
@@ -969,6 +967,138 @@ class CatalogIssueApiTests(TestCase):
         self.assertEqual(item["rule_name"], "无主键表（旧名）")
 
 
+class SchemaDiffApiTests(TestCase):
+    """
+    结构对比接口：两侧元信息、摘要、警告与按表名对齐
+    """
+
+    CATALOG = "/my-dba/v1/catalog"
+    DATASOURCE = "/my-dba/v1/datasource"
+
+    def setUp(self):
+        self.client = APIClient()
+        self.client.force_authenticate(user=AuthedUser(1, "tester", "admin"))
+        self.pg = models.Datasource.objects.create(
+            name="pg",
+            db_type=custom_enum.DbTypeEnum.POSTGRESQL.value,
+            host="127.0.0.1",
+            port=5432,
+            db_name="d",
+            username="u",
+            password="p",
+        )
+        self.mysql = models.Datasource.objects.create(
+            name="mysql",
+            db_type=custom_enum.DbTypeEnum.MYSQL.value,
+            host="127.0.0.1",
+            port=3306,
+            db_name="d",
+            username="u",
+            password="p",
+        )
+
+    def snapshot(self, datasource, tables, change_summary=None):
+        return models.MetadataSnapshot.objects.create(
+            datasource_id=datasource.id,
+            collect_time=datetime.now(),
+            raw_data={"tables": tables},
+            table_count=len(tables),
+            change_summary=change_summary or {},
+        )
+
+    def diff(self, base, target, **params):
+        query = {"snapshot_id": base.id, "compare_snapshot_id": target.id, **params}
+        return self.client.get(f"{self.CATALOG}/diff", query).json()
+
+    def test_returns_snapshot_meta_and_summary(self):
+        base = self.snapshot(self.pg, [_table("kept"), _table("dropped")])
+        target = self.snapshot(self.pg, [_table("kept"), _table("added")])
+
+        payload = self.diff(base, target)
+
+        self.assertEqual(payload["code"], 2000)
+        data = payload["data"]
+        self.assertEqual(data["base"]["datasource_name"], "pg")
+        self.assertEqual(data["base"]["db_type_label"], "PostgreSQL")
+        self.assertEqual(data["target"]["datasource_name"], "pg")
+        self.assertEqual(data["summary"]["added_table_count"], 1)
+        self.assertEqual(data["summary"]["removed_table_count"], 1)
+        self.assertTrue(data["summary"]["has_changes"])
+        self.assertEqual(data["diff"]["added_tables"], ["public.added"])
+
+    def test_cross_dialect_warns(self):
+        base = self.snapshot(self.pg, [_table("t")])
+        target = self.snapshot(self.mysql, [_table("t")])
+
+        warnings = self.diff(base, target)["data"]["warnings"]
+
+        self.assertTrue(any("类型名称天然不同" in item for item in warnings))
+
+    def test_ignore_schema_aligns_tables(self):
+        base = self.snapshot(self.pg, [_table("users", schema="public")])
+        target = self.snapshot(self.mysql, [_table("users", schema="app")])
+
+        payload = self.diff(base, target, ignore_schema=1)
+
+        self.assertEqual(payload["code"], 2000)
+        self.assertEqual(payload["data"]["diff"]["added_tables"], [])
+        self.assertEqual(payload["data"]["diff"]["removed_tables"], [])
+        self.assertTrue(any("忽略 schema" in item for item in payload["data"]["warnings"]))
+
+    def test_ignore_schema_collision_is_bad_request(self):
+        base = self.snapshot(self.pg, [_table("users", schema="public"), _table("users", schema="app")])
+        target = self.snapshot(self.pg, [_table("users")])
+
+        payload = self.diff(base, target, ignore_schema="true")
+
+        self.assertEqual(payload["code"], 4000)
+        self.assertIn("users", payload["message"])
+
+    def test_missing_params(self):
+        payload = self.client.get(f"{self.CATALOG}/diff").json()
+        self.assertEqual(payload["code"], 4000)
+
+    def test_snapshot_not_found(self):
+        base = self.snapshot(self.pg, [])
+
+        payload = self.client.get(f"{self.CATALOG}/diff?snapshot_id={base.id}&compare_snapshot_id=999999").json()
+
+        self.assertEqual(payload["code"], 4004)
+
+    def test_task_list_exposes_change_summary(self):
+        summary = {
+            "comparable": True,
+            "has_changes": True,
+            "added_table_count": 1,
+            "removed_table_count": 0,
+            "changed_table_count": 0,
+        }
+        snapshot = self.snapshot(self.pg, [], change_summary=summary)
+        models.CollectTask.objects.create(
+            datasource_id=self.pg.id,
+            snapshot_id=snapshot.id,
+            status=custom_enum.CollectTaskStatusEnum.SUCCESS.value,
+            creator="tester",
+        )
+
+        payload = self.client.get(f"{self.DATASOURCE}/{self.pg.id}/tasks?page=1&page_size=10").json()
+
+        self.assertEqual(payload["code"], 2000)
+        self.assertEqual(payload["data"]["results"][0]["change_summary"], summary)
+
+    def test_task_without_snapshot_has_no_change_summary(self):
+        models.CollectTask.objects.create(
+            datasource_id=self.pg.id,
+            status=custom_enum.CollectTaskStatusEnum.FAILED.value,
+            fail_reason="连接失败",
+            creator="tester",
+        )
+
+        payload = self.client.get(f"{self.DATASOURCE}/{self.pg.id}/tasks?page=1&page_size=10").json()
+
+        self.assertIsNone(payload["data"]["results"][0]["change_summary"])
+
+
 class DifferTests(SimpleTestCase):
     """
     快照差异对比
@@ -1013,6 +1143,87 @@ class DifferTests(SimpleTestCase):
     def test_empty_snapshots(self):
         result = differ.diff_snapshots({}, {})
         self.assertEqual(result, {"added_tables": [], "removed_tables": [], "changed_tables": []})
+
+    def test_ignore_schema_aligns_tables_across_schemas(self):
+        base = _snapshot([_table("users", schema="public", columns=[_column("id")])])
+        target = _snapshot([_table("users", schema="app", columns=[_column("id"), _column("extra")])])
+
+        result = differ.diff_snapshots(base, target, ignore_schema=True)
+
+        self.assertEqual(result["added_tables"], [])
+        self.assertEqual(result["removed_tables"], [])
+        self.assertEqual(result["changed_tables"][0]["table"], "users")
+        self.assertEqual(result["changed_tables"][0]["added_columns"], ["extra"])
+
+    def test_ignore_schema_rejects_duplicate_table_names(self):
+        base = _snapshot([_table("users", schema="public"), _table("users", schema="app")])
+
+        with self.assertRaises(differ.TableKeyCollision) as raised:
+            differ.diff_snapshots(base, _snapshot([]), ignore_schema=True)
+
+        self.assertEqual(raised.exception.names, ["users"])
+
+    def test_summarize_result_counts(self):
+        diff = differ.diff_snapshots(
+            _snapshot([_table("kept"), _table("dropped")]),
+            _snapshot([_table("kept"), _table("added")]),
+        )
+
+        self.assertEqual(
+            differ.summarize_result(diff),
+            {
+                "added_table_count": 1,
+                "removed_table_count": 1,
+                "changed_table_count": 0,
+                "has_changes": True,
+            },
+        )
+
+    def test_summarize_diff_without_changes(self):
+        table = _table("t")
+
+        summary = differ.summarize_diff(_snapshot([table]), _snapshot([table]))
+
+        self.assertFalse(summary["has_changes"])
+        self.assertEqual(summary["added_table_count"], 0)
+
+
+class ChangeSummaryTests(SimpleTestCase):
+    """
+    采集摘要：首次不可比、正常计数、计算失败降级
+    """
+
+    def test_first_collection_is_not_comparable(self):
+        summary = services._build_change_summary(None, {"tables": []})
+
+        self.assertFalse(summary["comparable"])
+        self.assertIn("首次采集", summary["reason"])
+
+    def test_summary_counts_against_previous(self):
+        previous = SimpleNamespace(
+            id=7,
+            datasource_id=1,
+            collect_time=datetime(2026, 11, 1, 10, 0, 0),
+            raw_data=_snapshot([_table("kept"), _table("dropped")]),
+        )
+
+        summary = services._build_change_summary(previous, _snapshot([_table("kept"), _table("added")]))
+
+        self.assertTrue(summary["comparable"])
+        self.assertEqual(summary["base_snapshot_id"], 7)
+        self.assertEqual(summary["base_collect_time"], "2026-11-01 10:00:00")
+        self.assertEqual(summary["added_table_count"], 1)
+        self.assertEqual(summary["removed_table_count"], 1)
+        self.assertTrue(summary["has_changes"])
+
+    def test_summary_failure_degrades_without_raising(self):
+        previous = SimpleNamespace(id=7, datasource_id=1, collect_time=datetime.now(), raw_data={"tables": []})
+
+        with mock.patch.object(differ, "summarize_diff", side_effect=RuntimeError("boom")):
+            summary = services._build_change_summary(previous, {"tables": []})
+
+        self.assertFalse(summary["comparable"])
+        self.assertIn("计算失败", summary["reason"])
 
 
 class _FakeCursor:

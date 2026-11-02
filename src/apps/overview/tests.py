@@ -40,12 +40,13 @@ def _datasource(name, enabled=True):
     )
 
 
-def _snapshot(datasource, table_count=10, minutes_ago=0):
+def _snapshot(datasource, table_count=10, minutes_ago=0, change_summary=None):
     return ds_models.MetadataSnapshot.objects.create(
         datasource_id=datasource.id,
         collect_time=datetime.now() - timedelta(minutes=minutes_ago),
         raw_data={"tables": []},
         table_count=table_count,
+        change_summary=change_summary or {},
     )
 
 
@@ -200,6 +201,21 @@ class DatasourceStatusTests(TestCase):
         datasource.is_deleted = True
         datasource.save(update_fields=["is_deleted"])
         self.assertEqual([item["name"] for item in services.datasource_services.list_datasource_status()], [])
+
+    def test_latest_snapshot_change_summary_is_exposed(self):
+        datasource = _datasource("changed")
+        summary = {"comparable": True, "has_changes": True, "added_table_count": 2}
+        _snapshot(datasource, minutes_ago=60)
+        _snapshot(datasource, minutes_ago=1, change_summary=summary)
+
+        self.assertEqual(self.item("changed")["change_summary"], summary)
+
+    def test_snapshot_without_change_summary_is_null(self):
+        """历史快照没有摘要：必须是「未记录」，不能读成「无变化」"""
+        datasource = _datasource("legacy")
+        _snapshot(datasource)
+
+        self.assertIsNone(self.item("legacy")["change_summary"])
 
 
 class OverviewQueryShapeTests(TestCase):
@@ -512,6 +528,14 @@ class OverviewApiTests(TestCase):
             self.assertIn(key, payload["data"])
         for key in ("readiness", "datasources", "metrics", "knowledge_bases", "rules"):
             self.assertIn("available", payload["data"][key])
+
+    def test_datasource_items_carry_change_summary(self):
+        summary = {"comparable": True, "has_changes": True, "added_table_count": 1}
+        _snapshot(_datasource("ds"), change_summary=summary)
+
+        data = self.get()["data"]
+
+        self.assertEqual(data["datasources"]["items"][0]["change_summary"], summary)
 
     def test_a_failing_block_does_not_break_the_rest(self):
         """

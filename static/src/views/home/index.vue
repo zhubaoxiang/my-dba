@@ -162,6 +162,16 @@
                   <span v-if="card.item.issue_counts[3]" class="level low">低 {{ card.item.issue_counts[3] }}</span>
                   <span v-if="!hasIssues(card.item)" class="level ok">未判出问题</span>
                   <span class="meta">{{ card.item.table_count }} 张表 · 采集于 {{ freshness(card.item.collect_time) }}</span>
+                  <!-- 只在确有变化时提示；无摘要（历史快照）或不可比都不显示，避免把「不知道」读成「没变化」 -->
+                  <el-tag
+                    v-if="card.item.change_summary?.has_changes"
+                    class="change-tag"
+                    type="warning"
+                    size="small"
+                    @click="goDiff(card.item.id)"
+                  >
+                    结构有变化 +{{ card.item.change_summary.added_table_count }} / -{{ card.item.change_summary.removed_table_count }} / ~{{ card.item.change_summary.changed_table_count }}
+                  </el-tag>
                 </template>
                 <!-- 没有快照就不给问题数：「还没有数据」不能被读成「没有问题」 -->
                 <span v-else class="meta">{{ statusHint(card.item) }}</span>
@@ -377,6 +387,10 @@ function unavailableText(items) {
 function hasIssues(item) {
   const counts = item.issue_counts || {}
   return Boolean(counts[1] || counts[2] || counts[3])
+}
+
+function goDiff(datasourceId) {
+  router.push({ path: '/datasource/diff', query: { datasource_id: datasourceId } })
 }
 
 function statusHint(item) {
@@ -927,6 +941,10 @@ onMounted(load)
   gap: 10px;
   align-items: center;
   min-width: 0;
+}
+
+.change-tag {
+  cursor: pointer;
 }
 
 .foot-actions {

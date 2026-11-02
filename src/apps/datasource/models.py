@@ -45,6 +45,9 @@ class MetadataSnapshot(AbstractTimeFiledModel):
     # 本次分析实际参与评估的规则 code。存下来才能察觉「规则集在采集之后被改过」——
     # 只比对库中当前的启用项是看不出来的（design.md D3 的运维可察觉性）
     evaluated_rules = models.JSONField(default=list, verbose_name="本次参与评估的规则")
+    # 与同一数据源上一次快照的紧凑结构变更摘要。空字典表示「未记录」（能力上线前的历史快照），
+    # 不可比时另存 reason，**不能**把空读成「没有变化」
+    change_summary = models.JSONField(default=dict, verbose_name="变更摘要")
 
     class Meta:
         db_table = "metadata_snapshot"

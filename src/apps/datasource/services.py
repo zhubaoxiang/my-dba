@@ -15,7 +15,7 @@ import psycopg2
 import pymysql
 from django.db.models import Count, Q
 
-from apps.datasource import analyzer, models
+from apps.datasource import analyzer, differ, models
 from apps.datasource.collectors import get_collector
 from apps.datasource.rules import registry as rule_registry
 from utils import background, common, crypto, custom_enum
@@ -103,7 +103,9 @@ def run_collect_task(task_id: int):
         # 先分析再落快照：快照要记下本次实际参与评估的规则，否则「规则集在采集之后被改过」无从察觉
         runner = analyzer.CatalogAnalyzer(data)
         issues = runner.analyze()
-        snapshot = _save_snapshot(datasource, data, runner.evaluated_rules, task.creator)
+        # 摘要在 create 之前算好，随快照一并写入——快照生成后不可变
+        change_summary = _build_change_summary(latest_snapshot(datasource.id), data)
+        snapshot = _save_snapshot(datasource, data, runner.evaluated_rules, task.creator, change_summary)
         _save_issues(datasource, snapshot, issues, task.creator)
         task.snapshot_id = snapshot.id
         _finish(task, custom_enum.CollectTaskStatusEnum.SUCCESS, "")
@@ -126,7 +128,36 @@ def _finish(task: models.CollectTask, status, fail_reason: str):
     task.save(update_fields=["status", "fail_reason", "end_time", "snapshot_id", "update_time"])
 
 
-def _save_snapshot(datasource, data: dict, evaluated_rules: list, creator: str) -> models.MetadataSnapshot:
+def _build_change_summary(previous, data: dict) -> dict:
+    """
+    与同一数据源上一次快照的紧凑摘要
+
+    摘要不是采集的必需产物：计算失败只记原因，绝不让采集失败。
+    首次采集与计算失败都标为不可比——缺失不能被读成「没有变化」。
+    """
+    if previous is None:
+        return {"comparable": False, "reason": "首次采集，没有上一次快照"}
+    try:
+        summary = differ.summarize_diff(previous.raw_data or {}, data)
+    except Exception as exc:  # noqa: BLE001 摘要失败不能中断采集
+        LOGGER.warning(
+            "变更摘要计算失败 datasource_id=%s snapshot_id=%s err=%s",
+            previous.datasource_id,
+            previous.id,
+            exc,
+        )
+        return {"comparable": False, "reason": "变更摘要计算失败"}
+    return {
+        "comparable": True,
+        "base_snapshot_id": previous.id,
+        "base_collect_time": previous.collect_time.strftime("%Y-%m-%d %H:%M:%S"),
+        **summary,
+    }
+
+
+def _save_snapshot(
+    datasource, data: dict, evaluated_rules: list, creator: str, change_summary: dict
+) -> models.MetadataSnapshot:
     return models.MetadataSnapshot.objects.create(
         datasource_id=datasource.id,
         database_version=data.get("database_version", ""),
@@ -136,6 +167,7 @@ def _save_snapshot(datasource, data: dict, evaluated_rules: list, creator: str) 
         raw_data=data,
         unavailable=data.get("unavailable") or [],
         evaluated_rules=list(evaluated_rules or []),
+        change_summary=change_summary or {},
         creator=creator,
     )
 
@@ -440,9 +472,7 @@ def datasource_summary(datasource_id: int) -> dict:
     }
 
 
-def list_snapshot_issues(
-    datasource_id: int, issue_level: int = None, table_name: str = "", limit: int = 20
-) -> dict:
+def list_snapshot_issues(datasource_id: int, issue_level: int = None, table_name: str = "", limit: int = 20) -> dict:
     """
     数据源最近一次快照中的问题清单（排除已静音）。
 
@@ -795,7 +825,7 @@ def list_datasource_status() -> list:
         for snapshot in models.MetadataSnapshot.objects.filter(is_deleted=False)
         .order_by("datasource_id", "-collect_time", "-id")
         .distinct("datasource_id")
-        .only("id", "datasource_id", "table_count", "collect_time")
+        .only("id", "datasource_id", "table_count", "collect_time", "change_summary")
     }
 
     latest_task = {
@@ -838,6 +868,8 @@ def list_datasource_status() -> list:
                 "collect_status": _collect_status(snapshot, task),
                 "table_count": snapshot.table_count if snapshot is not None else 0,
                 "collect_time": snapshot.collect_time.strftime("%Y-%m-%d %H:%M:%S") if snapshot else "",
+                # 空摘要 = 未记录（能力上线前的历史快照），与「无变化」区分
+                "change_summary": (snapshot.change_summary or None) if snapshot is not None else None,
                 # 没有快照时问题数一律为 0，并由调用方按 collect_status 决定**不展示**它们——
                 # 「还没有数据」不能让使用者读成「没有问题」
                 "issue_counts": issue_counts if snapshot is not None else {},

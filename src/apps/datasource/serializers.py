@@ -98,6 +98,7 @@ class CollectTaskSerializer(serializers.ModelSerializer):
 
     create_time = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S")
     status_label = serializers.SerializerMethodField(label="状态")
+    change_summary = serializers.SerializerMethodField(label="结构变化")
 
     class Meta:
         model = models.CollectTask
@@ -105,6 +106,12 @@ class CollectTaskSerializer(serializers.ModelSerializer):
 
     def get_status_label(self, obj):
         return custom_enum.CollectTaskStatusEnum(obj.status).label
+
+    def get_change_summary(self, obj):
+        # 空摘要 = 未记录（能力上线前的历史快照），与「无变化」区分
+        if obj.snapshot_id is None:
+            return None
+        return obj.snapshot.change_summary or None
 
 
 class CatalogIssueSerializer(serializers.ModelSerializer):

@@ -65,3 +65,12 @@ COMMENT ON COLUMN llm_usage.request_id IS '一次用户请求内多次模型调�
 CREATE INDEX IF NOT EXISTS idx_llm_usage_create_time ON llm_usage (create_time);
 CREATE INDEX IF NOT EXISTS idx_llm_usage_username ON llm_usage (username, create_time);
 CREATE INDEX IF NOT EXISTS idx_llm_usage_feature ON llm_usage (feature, create_time);
+
+-- ============================================================
+-- 2026-11-02  add-schema-diff
+-- 快照与同一数据源上一次采集的结构变更摘要（紧凑计数，不存完整 diff）
+-- 空字典表示未记录（历史快照）；不可比时带 reason，不能读成「没有变化」
+-- ============================================================
+
+ALTER TABLE metadata_snapshot ADD COLUMN IF NOT EXISTS change_summary jsonb NOT NULL DEFAULT '{}'::jsonb;
+COMMENT ON COLUMN metadata_snapshot.change_summary IS '与同一数据源上一次快照的紧凑结构变更摘要；空表示未记录，不可比时带 reason';

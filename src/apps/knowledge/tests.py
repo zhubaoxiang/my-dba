@@ -20,7 +20,8 @@ from django.test import SimpleTestCase, TestCase, TransactionTestCase
 from rest_framework.test import APIClient
 
 from apps.knowledge import ingest, llm, models, serializers, views
-from apps.knowledge.qa import agent, tools as qa_tools
+from apps.knowledge.qa import agent
+from apps.knowledge.qa import tools as qa_tools
 from utils import crypto, custom_enum
 from utils.authentication import AuthedUser
 
