@@ -31,11 +31,13 @@ def _sanitize(message: str, provider) -> str:
     return message.replace(secret, "***") if secret else message
 
 
-class LlmProviderView(baseviews.AnyLogin):
+class LlmProviderView(baseviews.SuperUserView):
     """
-    模型接入配置管理
+    模型接入配置管理（仅管理员）
 
-    同基线：不做应用层鉴权，访问控制依赖网络隔离。
+    页面对普通用户隐藏（前端 meta.adminOnly），接口层整卡到管理员：配置里存着
+    模型 API Key，是全系统最敏感的一类数据，没有「普通用户需要读」的场景——
+    问答时对模型的调用都走后端转发，不经此接口。
     """
 
     queryset = models.LlmProvider.objects.all()
@@ -150,7 +152,9 @@ class KnowledgeBaseView(baseviews.AnyLogin):
     """
     知识库管理
 
-    同基线：不做应用层鉴权，访问控制依赖网络隔离。
+    读写分开：读（list / retrieve）对所有登录用户开放——知识问答页要用知识库列表
+    选库，不能一刀切；**写（创建 / 修改 / 删除）仅管理员**，页面本身对普通用户隐藏
+    （前端 meta.adminOnly），接口层由 `ensure_admin` 兜底，绕过 UI 直接调用返回 4005。
     """
 
     queryset = models.KnowledgeBase.objects.all()
@@ -175,6 +179,9 @@ class KnowledgeBaseView(baseviews.AnyLogin):
         return baseviews.ResponseOK(self.get_serializer(instance).data)
 
     def create(self, request, **kwargs):
+        denied = baseviews.ensure_admin(request)
+        if denied is not None:
+            return denied
         serializer = serializers.KnowledgeBaseCreateSerializer(data=request.data)
         if not serializer.is_valid():
             return baseviews.ResponseBadRequest(common.ToolUtil.format_drf_error(serializer.errors))
@@ -193,6 +200,9 @@ class KnowledgeBaseView(baseviews.AnyLogin):
         return baseviews.ResponseOK(self.get_serializer(instance).data)
 
     def update(self, request, *args, **kwargs):
+        denied = baseviews.ensure_admin(request)
+        if denied is not None:
+            return denied
         instance = self._get_instance(kwargs)
         if instance is None:
             return baseviews.ResponseNotFound("知识库不存在")
@@ -208,6 +218,9 @@ class KnowledgeBaseView(baseviews.AnyLogin):
         """
         软删除知识库，并清理其文档、块与 Qdrant 中的向量
         """
+        denied = baseviews.ensure_admin(request)
+        if denied is not None:
+            return denied
         instance = self._get_instance(kwargs)
         if instance is None:
             return baseviews.ResponseNotFound("知识库不存在")
@@ -219,9 +232,14 @@ class KnowledgeBaseView(baseviews.AnyLogin):
         return baseviews.ResponseOK(None)
 
 
-class KbDocumentView(baseviews.AnyLogin):
+class KbDocumentView(baseviews.SuperUserView):
     """
-    知识库文档：列表、上传、链接导入、重新摄入、软删除
+    知识库文档：列表、上传、链接导入、重新摄入、软删除（仅管理员）
+
+    整卡到管理员：文档页与知识库页一同对普通用户隐藏（前端 meta.adminOnly），且没有
+    任何普通用户功能依赖文档接口——问答页只用到知识库列表（`KnowledgeBaseView.list`）。
+    因此不像知识库那样读写分开，整类设防：将来新增 action 也不会漏掉校验。
+    绕过 UI 直接调用时返回 4005。
     """
 
     queryset = models.KbDocument.objects.all()

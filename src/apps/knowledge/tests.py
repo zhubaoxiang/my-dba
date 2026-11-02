@@ -4,9 +4,10 @@
 绝大多数为 SimpleTestCase（**不需要数据库**）：覆盖不依赖存储的部分——凭据保护、失败信息脱敏、
 向量存储迁移完整性、摄入的切分与解析、三种问答模式的分支、以及流式的事件与分片过滤。
 
-`StreamPersistenceTests` 是唯一的 TestCase：流式中断要把已收到的内容落库并标记不完整，
-这件事离开数据库测不了。它依赖 `TEST_RUNNER`（`utils/test_runner.py`）把 `sql/pg_struct.sql`
-灌进测试库——本项目禁止 Django migration，Django 默认建不出业务表。
+需要数据库的是两组 TestCase：`StreamPersistenceTests`（流式中断要把已收到的内容落库并
+标记不完整）与 `AdminPermissionTests`（「设置」组接口的管理员权限），它们依赖
+`TEST_RUNNER`（`utils/test_runner.py`）把 `sql/pg_struct.sql` 灌进测试库——本项目禁止
+Django migration，Django 默认建不出业务表。
 
 涉及真实 Qdrant 与模型 API 的链路（摄入落库、检索回库取正文）不放进这里，
 那部分以脚本对着真实服务验证。
@@ -95,6 +96,84 @@ class ProviderSerializerTests(SimpleTestCase):
             fake_filter.return_value.exclude.return_value.exists.return_value = False
             self.assertFalse(serializer.is_valid())
         self.assertIn("model_type", serializer.errors)
+
+
+class AdminPermissionTests(TestCase):
+    """
+    「设置」组接口的权限底线：写操作仅管理员，读按需开放
+
+    前端把「设置」组页面对普通用户整体隐藏（路由 meta.adminOnly），接口层在这里兜底：
+    绕过 UI 直接调用时一律 4005（llm-provider / kb-document 整卡 SuperUserView；
+    知识库的写接口由 ensure_admin 兜底）。知识库列表保持开放——知识问答页要用它选库；
+    文档接口没有普通用户场景，读也一并锁住。
+    """
+
+    KB = "/my-dba/v1/knowledge-base"
+    DOC = "/my-dba/v1/kb-document"
+    PROVIDER = "/my-dba/v1/llm-provider"
+
+    def setUp(self):
+        self.client = APIClient()
+
+    def _as(self, role):
+        self.client.force_authenticate(user=AuthedUser(1, "tester", role))
+
+    def test_kb_create_by_non_admin_is_denied(self):
+        self._as("user")
+        payload = self.client.post(self.KB, {"name": "kb"}, format="json").json()
+        self.assertEqual(payload["code"], 4005)
+        self.assertFalse(models.KnowledgeBase.objects.exists())
+
+    def test_kb_update_and_destroy_by_non_admin_are_denied(self):
+        kb = models.KnowledgeBase.objects.create(name="kb")
+        self._as("user")
+        payload = self.client.put(f"{self.KB}/{kb.id}", {"name": "kb2"}, format="json").json()
+        self.assertEqual(payload["code"], 4005)
+        payload = self.client.delete(f"{self.KB}/{kb.id}").json()
+        self.assertEqual(payload["code"], 4005)
+        kb.refresh_from_db()
+        self.assertFalse(kb.is_deleted)
+
+    def test_kb_list_is_open_to_non_admin(self):
+        """知识问答页要用知识库列表选库，读不能锁"""
+        self._as("user")
+        payload = self.client.get(f"{self.KB}?page=1&page_size=10").json()
+        self.assertEqual(payload["code"], 2000)
+
+    def test_kb_document_by_non_admin_is_denied(self):
+        """文档页整卡管理员：问答页只用到知识库列表，文档接口没有普通用户场景"""
+        self._as("user")
+        payload = self.client.get(f"{self.DOC}?page=1&page_size=10").json()
+        self.assertEqual(payload["code"], 4005)
+
+    def test_kb_document_writes_by_non_admin_are_denied(self):
+        kb = models.KnowledgeBase.objects.create(name="kb")
+        self._as("user")
+        payload = self.client.post(
+            f"{self.DOC}/import-url",
+            {"knowledge_base_id": kb.id, "url": "http://example.com/doc"},
+            format="json",
+        ).json()
+        self.assertEqual(payload["code"], 4005)
+        payload = self.client.delete(f"{self.DOC}/999").json()
+        self.assertEqual(payload["code"], 4005)
+        self.assertFalse(models.KbDocument.objects.exists())
+
+    def test_kb_document_list_by_admin_is_ok(self):
+        self._as("admin")
+        payload = self.client.get(f"{self.DOC}?page=1&page_size=10").json()
+        self.assertEqual(payload["code"], 2000)
+
+    def test_provider_by_non_admin_is_denied(self):
+        # 项目约定：DRF PermissionDenied 由 utils/exception 统一转成 HTTP 200 + 业务码 4005
+        self._as("user")
+        payload = self.client.get(f"{self.PROVIDER}?page=1&page_size=10").json()
+        self.assertEqual(payload["code"], 4005)
+
+    def test_provider_list_by_admin_is_ok(self):
+        self._as("admin")
+        resp = self.client.get(f"{self.PROVIDER}?page=1&page_size=10")
+        self.assertEqual(resp.status_code, 200)
 
 
 class FailureMessageSanitizeTests(SimpleTestCase):

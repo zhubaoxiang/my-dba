@@ -79,6 +79,24 @@ class ResponsePermissionDenied(FormatResponse):
         super().__init__(4005, msg, content)
 
 
+def ensure_admin(request):
+    """
+    管理员校验：通过返回 None，否则返回 4005 响应，调用方直接 return 即可。
+
+    「设置」组页面对普通用户在前端整体隐藏（路由 meta.adminOnly），但接口层仍需设防——
+    绕过 UI 直接调用接口时，写操作一律拒绝。读接口**按需保留**：知识问答等普通用户功能
+    也依赖部分读接口（如知识库列表），所以不做 ViewSet 级一刀切，由各视图按方法粒度调用。
+
+    与 `SuperUserView`（DRF `IsAdminUser`）同一判定口径：is_staff 或 is_superuser；
+    角色映射见 utils/authentication.py 的 AuthedUser 与 accounts 的 role 换算。
+    """
+
+    user = getattr(request, "user", None)
+    if getattr(user, "is_staff", False) or getattr(user, "is_superuser", False):
+        return None
+    return ResponsePermissionDenied()
+
+
 class ResponseNotFound(FormatResponse):
     def __init__(self, msg="failure", content=None):
         super().__init__(4004, msg, content)

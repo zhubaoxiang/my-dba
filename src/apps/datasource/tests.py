@@ -648,6 +648,34 @@ class AnalysisRuleApiTests(TestCase):
         self.assertFalse(models.AnalysisRule.objects.exists())
 
     # ------------------------------------------------------------------
+    # 写操作仅管理员：页面本身 adminOnly，接口层由 ensure_admin 兜底
+    # ------------------------------------------------------------------
+
+    def _as_user(self):
+        self.client.force_authenticate(user=AuthedUser(2, "normal", "user"))
+
+    def test_update_by_non_admin_is_denied(self):
+        self._as_user()
+        payload = self.client.put(f"{self.URL}/big_table", {"enabled": False}, format="json").json()
+        self.assertEqual(payload["code"], 4005)
+        # 拒绝之前不许建行——否则等于普通用户改成了默认值
+        self.assertFalse(models.AnalysisRule.objects.exists())
+
+    def test_reset_by_non_admin_is_denied(self):
+        models.AnalysisRule.objects.create(code="big_table", is_deleted=False, enabled=False, level=2)
+        self._as_user()
+        payload = self.client.post(f"{self.URL}/big_table/reset").json()
+        self.assertEqual(payload["code"], 4005)
+        self.assertTrue(models.AnalysisRule.objects.filter(code="big_table", enabled=False).exists())
+
+    def test_list_is_open_to_non_admin(self):
+        """读不设限：问题清单页要用规则清单做筛选下拉"""
+        self._as_user()
+        payload = self.client.get(f"{self.URL}?page=1&page_size=100").json()
+        self.assertEqual(payload["code"], 2000)
+        self.assertTrue(len(payload["data"]["results"]) > 0)
+
+    # ------------------------------------------------------------------
     # 校验与拒绝
     # ------------------------------------------------------------------
 

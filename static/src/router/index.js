@@ -18,6 +18,9 @@ import { authApi } from '@/api/auth'
 // 2. 组内按**概念/工作顺序**排，不按点击频率。库表那组只剩「看」的动作——接入与规则
 //    都已经挪走了。
 // 3. 「设置」那一组是设置类的集合（规则、知识库、模型、用户）——组名如实反映了它装什么。
+//    **整组仅管理员可见可访问**（meta.adminOnly）：五项全部带 adminOnly，普通用户的
+//    菜单里「设置」分组会整体消失（layout 按 adminOnly 过滤子项，一个不剩时分组不渲染）；
+//    直接敲 URL 也会被路由守卫拦回首页。接口层的写操作另有管理员校验兜底。
 const routes = [
   {
     path: '/',
@@ -76,19 +79,19 @@ const routes = [
         path: 'datasource/rules',
         name: 'AnalysisRules',
         component: () => import('@/views/datasource/rules.vue'),
-        meta: { title: '分析规则', icon: 'SetUp', showInMenu: true, group: '设置' }
+        meta: { title: '分析规则', icon: 'SetUp', showInMenu: true, group: '设置', adminOnly: true }
       },
       {
         path: 'knowledge/bases',
         name: 'KnowledgeBase',
         component: () => import('@/views/knowledge/bases.vue'),
-        meta: { title: '知识库', icon: 'Collection', showInMenu: true, group: '设置' }
+        meta: { title: '知识库', icon: 'Collection', showInMenu: true, group: '设置', adminOnly: true }
       },
       {
         path: 'knowledge/provider',
         name: 'ModelProvider',
         component: () => import('@/views/knowledge/provider.vue'),
-        meta: { title: '模型配置', icon: 'Cpu', showInMenu: true, group: '设置' }
+        meta: { title: '模型配置', icon: 'Cpu', showInMenu: true, group: '设置', adminOnly: true }
       },
       {
         path: 'user',

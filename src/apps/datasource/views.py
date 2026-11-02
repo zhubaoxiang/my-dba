@@ -518,7 +518,9 @@ class AnalysisRuleView(baseviews.AnyLogin):
     （design D1）——库里有没有记录只决定「这条被改过没有」，不决定它在不在清单里。
     规则以 `code` 定位而非自增主键：未落库的规则没有主键可用（design D2）。
 
-    同基线：不做应用层鉴权，访问控制依赖网络隔离。
+    同基线：读对所有登录用户开放（问题清单页用清单做筛选下拉）；**写操作仅管理员**——
+    页面本身对普通用户隐藏（前端 meta.adminOnly），接口层由 `ensure_admin` 兜底，
+    绕过 UI 直接调用时返回 4005。
     """
 
     queryset = models.AnalysisRule.objects.all()
@@ -562,6 +564,9 @@ class AnalysisRuleView(baseviews.AnyLogin):
         库里没有这条规则时**顺手建行**：清单改以代码声明为基底之后，使用者不再需要任何
         「同步」之类的前置动作（design D3）。
         """
+        denied = baseviews.ensure_admin(request)
+        if denied is not None:
+            return denied
         code = kwargs.get("code")
         declared = registry.get_rule(code)
         if declared is None:
@@ -601,6 +606,9 @@ class AnalysisRuleView(baseviews.AnyLogin):
         从未被调整过的规则库里没有记录，也就没有可恢复的东西——如实报错，而不是悄悄
         建一行再抹掉，那会让「恢复默认」看起来生效了。
         """
+        denied = baseviews.ensure_admin(request)
+        if denied is not None:
+            return denied
         code = kwargs.get("code")
         declared = registry.get_rule(code)
         if declared is None:
