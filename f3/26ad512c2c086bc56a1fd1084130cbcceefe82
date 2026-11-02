@@ -1,0 +1,21 @@
+README.md
+  s_391980184528ae::t_4219346fb3d4a4 115
+docs/roadmap.md
+  s_391980184528ae::t_24400297ca3a0b 1-247
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f326ad512c2c086bc56a1fd1084130cbcceefe82",
+  "prompts": {},
+  "sessions": {
+    "s_391980184528ae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e7bece69-09ff-42a7-965f-c10260ab6fd3",
+        "model": "deepseek-flash"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    }
+  }
+}
