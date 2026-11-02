@@ -1,0 +1,62 @@
+src/apps/knowledge/views.py
+  s_391980184528ae::t_6fe3ba91d32700 235,237-242
+  s_391980184528ae::t_7e9c00e640065b 34,36,38-40,155-157,182-184,203-205,221-223
+src/apps/knowledge/tests.py
+  s_391980184528ae::t_25eb05b03219ea 106-112
+  s_391980184528ae::t_5771dd93db5a11 122,124,128-129,131,133,139,141,143-166,169,171,174
+  s_391980184528ae::t_2c64919033b30f 7-10
+  s_391980184528ae::t_0899e71924dde8 103-105
+  s_391980184528ae::t_5bcc2bd305b2dc 113-115,119-121
+  s_391980184528ae::t_1b885d8e861249 123
+  s_391980184528ae::t_8ab7b986736829 125-127
+  s_391980184528ae::t_b4bc630bbaea41 130
+  s_391980184528ae::t_e7b223428049da 132
+  s_391980184528ae::t_c8a96d991b0cd6 134-138
+  s_391980184528ae::t_a9293992a7b7b3 140
+  s_391980184528ae::t_59b7f555e878f9 142
+  s_391980184528ae::t_208e82bcd35646 167-168
+  s_391980184528ae::t_365d8acbcf8c09 170
+  s_391980184528ae::t_a327490fa8532d 172-173
+  s_391980184528ae::t_1aa02a34afc841 175-177
+  s_391980184528ae::t_2cf5b3f595963b 101-102,116-118,178
+src/apps/base/baseviews.py
+  s_d8f034afdc409c::t_2c0de67ffb6dbc 82-99
+src/apps/datasource/tests.py
+  s_ca85dcdcc2d759::t_b4166c651ddd1b 650-677
+src/apps/datasource/views.py
+  s_ca85dcdcc2d759::t_641c6a69e0c3ad 521-523,567-569,609-611
+static/src/router/index.js
+  s_ca85dcdcc2d759::t_f29f1a445953a4 21-23,82,88,94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0be653d3945ce0a69521b9e7541c180d154aeb78",
+  "prompts": {},
+  "sessions": {
+    "s_391980184528ae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e7bece69-09ff-42a7-965f-c10260ab6fd3",
+        "model": "deepseek-flash"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    },
+    "s_ca85dcdcc2d759": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "31d5c0ba-962b-4eb8-83fc-1971c315a04c",
+        "model": "unknown"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    },
+    "s_d8f034afdc409c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "59e2e254-07fa-40fb-8c2c-8ffa6042a38f",
+        "model": "unknown"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    }
+  }
+}
