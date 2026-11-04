@@ -1,0 +1,23 @@
+openspec/changes/archive/2026-11-04-add-schema-diff/tasks.md
+  s_391980184528ae::t_90f4b702d01d9c 48
+openspec/specs/metadata-catalog/spec.md
+  s_391980184528ae::t_04624f378a31bb 47-53,70-96,448-523
+openspec/specs/system-overview/spec.md
+  s_391980184528ae::t_b302a5b8237bef 211-238
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "06ff8b51e5d76b136287e64bb23272178d8a9f6a",
+  "prompts": {},
+  "sessions": {
+    "s_391980184528ae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e7bece69-09ff-42a7-965f-c10260ab6fd3",
+        "model": "deepseek-flash"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    }
+  }
+}
