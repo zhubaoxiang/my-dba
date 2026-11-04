@@ -208,3 +208,31 @@ TBD - created by archiving change add-homepage-overview. Update Purpose after ar
 - **WHEN** 规则条目数因查询失败而取不到
 - **THEN** MUST 标注为不可用，MUST NOT 显示成「0 条」
 
+### Requirement: 结构变化提示
+
+首页已纳管库的卡片 SHALL 在**最新快照记录了结构变更摘要且确有变化**时，提示「结构有变化」并给出新增 / 删除 / 变更表的数量。
+
+提示 MUST 只在摘要存在且 `has_changes` 为真时出现；无变化、摘要缺失（历史快照）或不可比时 MUST NOT 显示该提示，避免把「不知道」读成「没变化」。
+
+点击提示 SHALL 进入结构对比页面，并预选该数据源；对比侧由使用者选择。
+
+#### Scenario: 有变化时提示
+
+- **WHEN** 某数据源最新快照的变更摘要标记为可比且有变化
+- **THEN** 该数据源卡片 MUST 显示「结构有变化」及新增 / 删除 / 变更数量
+
+#### Scenario: 无变化时不提示
+
+- **WHEN** 最新快照的摘要标记为可比且没有变化
+- **THEN** 卡片 MUST NOT 显示结构变化提示
+
+#### Scenario: 未记录摘要时不提示
+
+- **WHEN** 最新快照没有变更摘要（历史快照）或摘要标记为不可比
+- **THEN** 卡片 MUST NOT 显示结构变化提示，MUST NOT 把缺失当作无变化
+
+#### Scenario: 点击进入对比页
+
+- **WHEN** 使用者点击结构变化提示
+- **THEN** MUST 进入结构对比页面并预选该数据源
+

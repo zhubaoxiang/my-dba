@@ -45,4 +45,4 @@
 - [x] 7.4 `python .ci/custom-checks/scaffold_check.py`
 - [x] 7.5 `ruff check` 通过；改动文件已 `ruff format`
 - [x] 7.6 `openspec validate add-schema-diff --strict --no-interactive`
-- [ ] 7.7 手工核对：两次采集摘要、跨方言警告、ignore_schema、首页提示（需运行环境）
+- [x] 7.7 手工核对：两次采集摘要、跨方言警告、ignore_schema、首页提示（已在运行环境验证）
