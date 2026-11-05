@@ -1,0 +1,21 @@
+openspec/changes/archive/2026-11-05-add-llm-usage-stats/tasks.md
+  s_391980184528ae::t_34e4861d3c04ed 28
+openspec/specs/llm-usage/spec.md
+  s_391980184528ae::t_948dbcec8ca676 1-135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2806c35774e72689b5f5985b38027e9f0a0d3dac",
+  "prompts": {},
+  "sessions": {
+    "s_391980184528ae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e7bece69-09ff-42a7-965f-c10260ab6fd3",
+        "model": "unknown"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    }
+  }
+}
