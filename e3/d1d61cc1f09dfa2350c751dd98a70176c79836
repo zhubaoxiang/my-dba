@@ -1,0 +1,29 @@
+src/apps/accounts/tests.py
+  s_391980184528ae::t_28309f7e80dfe9 370,398-411,419,423-431,440-444,450
+src/apps/accounts/views.py
+  s_391980184528ae::t_86cdf5e75a8fda 133,139
+src/apps/knowledge/qa/agent.py
+  s_391980184528ae::t_a61c5daba67091 390
+src/apps/knowledge/qa/tools.py
+  s_391980184528ae::t_1fd2dd95e78cb8 184-186
+src/apps/knowledge/tests.py
+  s_391980184528ae::t_9f2c5ea57e01e7 537,553,1346-1350,1367,1381,1386
+src/apps/sqlanalysis/tests.py
+  s_391980184528ae::t_cc0a94e040fa0a 436
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e3d1d61cc1f09dfa2350c751dd98a70176c79836",
+  "prompts": {},
+  "sessions": {
+    "s_391980184528ae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e7bece69-09ff-42a7-965f-c10260ab6fd3",
+        "model": "unknown"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    }
+  }
+}
