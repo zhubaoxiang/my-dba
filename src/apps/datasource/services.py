@@ -364,6 +364,32 @@ def datasource_brief(datasource_id: int):
     return {"id": row.id, "name": row.name, "db_type": row.db_type, "is_enabled": row.is_enabled}
 
 
+def provisioning_target(datasource_id: int):
+    """
+    测试库预置所需的数据源信息（跨模块契约）
+
+    返回**加密后的**写密码，由调用方用 utils.crypto 解密——本函数不返回明文。
+    不存在返回 None。
+    """
+    row = models.Datasource.objects.filter(id=datasource_id, is_deleted=False).first()
+    if row is None:
+        return None
+    return {
+        "id": row.id,
+        "name": row.name,
+        "db_type": row.db_type,
+        "host": row.host,
+        "port": row.port,
+        "db_name": row.db_name,
+        "is_enabled": row.is_enabled,
+        "env_type": row.env_type,
+        "write_username": row.write_username,
+        "write_password": row.write_password,
+        "has_write_credential": bool(row.write_username and row.write_password),
+        "creator": row.creator,
+    }
+
+
 def latest_snapshot(datasource_id: int):
     return (
         models.MetadataSnapshot.objects.filter(datasource_id=datasource_id, is_deleted=False)

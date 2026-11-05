@@ -11,18 +11,27 @@ from utils import custom_enum
 
 class DatasourceSerializer(serializers.ModelSerializer):
     """
-    数据源查询序列化，密码不出参
+    数据源查询序列化，采集密码与预置写密码都不出参
     """
 
     create_time = serializers.DateTimeField(format="%Y-%m-%d %H:%M:%S")
     db_type_label = serializers.SerializerMethodField(label="数据库类型")
+    env_type_label = serializers.SerializerMethodField(label="环境类型")
+    has_write_credential = serializers.SerializerMethodField(label="是否配置预置写账号")
 
     class Meta:
         model = models.Datasource
-        exclude = ["update_time", "password"]
+        # 写用户名可以展示（便于管理员编辑），写密码永不回传
+        exclude = ["update_time", "password", "write_password"]
 
     def get_db_type_label(self, obj):
         return custom_enum.DbTypeEnum(obj.db_type).label
+
+    def get_env_type_label(self, obj):
+        return custom_enum.DatasourceEnvEnum(obj.env_type).label
+
+    def get_has_write_credential(self, obj):
+        return bool(obj.write_username and obj.write_password)
 
 
 class DatasourceBaseSerializer(serializers.Serializer):
@@ -38,6 +47,10 @@ class DatasourceBaseSerializer(serializers.Serializer):
     username = serializers.CharField(max_length=64)
     description = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
     is_enabled = serializers.BooleanField(default=True)
+    # 环境与预置写账号由管理员在创建/编辑时设置；普通用户提交这些字段会被视图拒绝
+    env_type = serializers.ChoiceField(choices=custom_enum.DatasourceEnvEnum.choices, required=False)
+    write_username = serializers.CharField(max_length=64, required=False, allow_blank=True)
+    write_password = serializers.CharField(max_length=512, required=False, allow_blank=True, write_only=True)
 
     def validate_name(self, value):
         queryset = models.Datasource.objects.filter(is_deleted=False, name=value)

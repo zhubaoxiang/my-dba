@@ -17,6 +17,7 @@
 | 帮使用者**看懂**库表结构与隐患 | 备份恢复、容量规划、主从运维 |
 | 帮使用者**写出**正确的建表语句与 SQL | 数据库巡检、值班告警、SLA 管理 |
 | 帮使用者**判断**自己 SQL 的规范与性能 | 慢查询平台、SQL 上线审批流 |
+| 在**测试环境**新建独立测试库并造数（限自己创建的数据源，生产禁用） | 写入任何已有数据库 |
 | 解答数据库相关的问题 | 生产库变更执行 |
 
 ## 能力与路线图
@@ -31,6 +32,7 @@
 | **自然语言转建表语句 / SQL** | 「按我说的建张表 / 写条查询」 | ✅ 已实现（[文档](docs/nl2sql.md)） |
 | 分析规则注册表（支撑） | 让分析规则可配置、可开关 | 🚧 进行中（[文档](docs/datasource.md#分析规则注册表)） |
 | **DDL 评审**（支撑） | 「这条建表 / 改表语句能不能安全执行？」 | ✅ 已实现（[文档](docs/ddl-review.md)） |
+| **测试库预置**（支撑） | 「给我一套能直接用的测试数据」 | ✅ 已实现（[文档](docs/test-db-provisioning.md)；限自己创建的数据源） |
 
 已确定的技术选型：数据源支持 PostgreSQL + MySQL；RAG 向量存储用独立的 Qdrant 服务；LLM 走公有云 API。
 
@@ -117,6 +119,7 @@ my-dba/
 | [docs/datasource-metrics.md](docs/datasource-metrics.md) | 数据源指标采集：采什么、怎么采（独立进程 + 守护）、保留策略、取数代价、已知限制 |
 | [docs/architecture.md](docs/architecture.md) | 技术栈与依赖、配置层级、**模块注册机制**、代码分层、接口约定（统一响应 / 分页）、认证与鉴权、后台任务 |
 | [docs/datasource.md](docs/datasource.md) | 分析数据库表：元数据采集、健康分析规则、API、配置、安全说明、已知限制 |
+| [docs/test-db-provisioning.md](docs/test-db-provisioning.md) | 测试库预置：安全边界、近似结构与造数、简单语义推断、API、配置、已知限制 |
 | [docs/knowledge-qa.md](docs/knowledge-qa.md) | 知识问答：**架构与数据流**、摄入链路、问答链路、关键设计决策、数据模型、API、配置、实测踩坑 |
 | [docs/sql-analysis.md](docs/sql-analysis.md) | 分析 SQL：能力与规则清单、**执行边界**（只读真跑 / DML·DDL 只 EXPLAIN）、模型解读分区、API、配置 |
 | [docs/nl2sql.md](docs/nl2sql.md) | 说人话 → SQL 语句：**生成 → 校验 → 自修一轮**的机制、**生成与执行是两件事**、校验只覆盖结构这一限定、表范围的取舍、边界与降级、API |

@@ -14,6 +14,11 @@
       <el-table :data="rows" v-loading="loading" border>
         <el-table-column prop="name" label="名称" min-width="140" />
         <el-table-column prop="db_type_label" label="类型" width="120" />
+        <el-table-column label="环境" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.env_type === 2 ? 'warning' : 'info'">{{ row.env_type_label }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="连接信息" min-width="240">
           <template #default="{ row }">
             <span class="mono">{{ row.host }}:{{ row.port }}/{{ row.db_name }}</span>
@@ -61,6 +66,26 @@
             <el-option :value="2" label="MySQL" />
           </el-select>
         </el-form-item>
+        <template v-if="canConfigureProvisioning">
+          <el-divider content-position="left">测试库预置</el-divider>
+          <el-form-item label="环境类型">
+            <el-select v-model="form.env_type" style="width: 100%">
+              <el-option :value="1" label="生产（禁用预置）" />
+              <el-option :value="2" label="测试" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="预置写账号">
+            <el-input v-model="form.write_username" maxlength="64" placeholder="与只读采集账号分开；留空表示不启用" />
+          </el-form-item>
+          <el-form-item label="预置写密码">
+            <el-input
+              v-model="form.write_password"
+              type="password"
+              show-password
+              :placeholder="editing ? '留空表示不修改' : '配置写账号时必填'"
+            />
+          </el-form-item>
+        </template>
         <el-form-item label="主机" prop="host">
           <el-input v-model="form.host" maxlength="128" placeholder="IP 或域名" />
         </el-form-item>
@@ -116,9 +141,17 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { datasourceApi } from '@/api/datasource'
+import { useUserStore } from '@/store/user'
+
+const userStore = useUserStore()
+const isAdmin = computed(() => userStore.userInfo.role === 'admin')
+// 管理员可设置任意数据源；普通用户只能设置自己创建的数据源（新建时自己就是创建者）
+const canConfigureProvisioning = computed(
+  () => isAdmin.value || !editing.value || editing.value.creator === userStore.userInfo.username
+)
 
 const rows = ref([])
 const total = ref(0)
@@ -157,7 +190,10 @@ function emptyForm() {
     username: '',
     password: '',
     description: '',
-    is_enabled: true
+    is_enabled: true,
+    env_type: 1,
+    write_username: '',
+    write_password: ''
   }
 }
 
@@ -191,7 +227,7 @@ function openCreate() {
 
 function openEdit(row) {
   editing.value = row
-  Object.assign(form, emptyForm(), { ...row, password: '' })
+  Object.assign(form, emptyForm(), { ...row, password: '', write_password: '' })
   dialogVisible.value = true
 }
 
@@ -201,8 +237,15 @@ async function handleSubmit() {
   saving.value = true
   try {
     const payload = { ...form }
+    // 无权设置环境与预置写账号时不发送这些字段，避免被后端拒绝
+    if (!canConfigureProvisioning.value) {
+      delete payload.env_type
+      delete payload.write_username
+      delete payload.write_password
+    }
     if (editing.value) {
       if (!payload.password) delete payload.password
+      if (!payload.write_password) delete payload.write_password
       await datasourceApi.update(editing.value.id, payload)
       ElMessage.success('已保存')
     } else {

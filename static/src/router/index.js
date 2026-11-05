@@ -64,6 +64,12 @@ const routes = [
         meta: { title: '结构对比', icon: 'Switch', showInMenu: true, group: '库表' }
       },
       {
+        path: 'test-db',
+        name: 'TestDbProvisioning',
+        component: () => import('@/views/provisioning/index.vue'),
+        meta: { title: '测试库预置', icon: 'FolderAdd', showInMenu: true, group: '库表' }
+      },
+      {
         path: 'sqlanalysis',
         name: 'SqlAnalysis',
         component: () => import('@/views/sqlanalysis/index.vue'),

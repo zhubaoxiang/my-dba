@@ -66,6 +66,25 @@ class DatasourceView(baseviews.AnyLogin):
     def _creator(request) -> str:
         return getattr(getattr(request, "user", None), "username", "") or ""
 
+    @staticmethod
+    def _is_admin(request) -> bool:
+        return bool(getattr(getattr(request, "user", None), "is_staff", False))
+
+    @staticmethod
+    def _has_provisioning_fields(data) -> bool:
+        return any(field in data for field in ("env_type", "write_username", "write_password"))
+
+    @staticmethod
+    def _can_manage_provisioning(request, instance=None) -> bool:
+        """
+        环境与写账号：管理员可设置任意数据源；普通用户只能设置自己创建的数据源
+        """
+        if DatasourceView._is_admin(request):
+            return True
+        if instance is None:
+            return True
+        return instance.creator == getattr(getattr(request, "user", None), "username", "")
+
     def _get_instance(self, kwargs):
         return models.Datasource.objects.filter(is_deleted=False, id=kwargs.get("pk")).first()
 
@@ -84,6 +103,13 @@ class DatasourceView(baseviews.AnyLogin):
         if not serializer.is_valid():
             return baseviews.ResponseBadRequest(common.ToolUtil.format_drf_error(serializer.errors))
         data = serializer.validated_data
+        write_username = data.get("write_username", "")
+        write_password = data.get("write_password", "")
+        if write_username and not write_password:
+            return baseviews.ResponseBadRequest("配置预置写账号时请同时提供密码")
+        if write_password and not write_username:
+            return baseviews.ResponseBadRequest("请先填写预置写账号用户名")
+
         instance = models.Datasource.objects.create(
             name=data["name"],
             db_type=data["db_type"],
@@ -94,6 +120,9 @@ class DatasourceView(baseviews.AnyLogin):
             password=crypto.encrypt(data["password"]),
             description=data.get("description", ""),
             is_enabled=data.get("is_enabled", True),
+            env_type=data.get("env_type", custom_enum.DatasourceEnvEnum.PRODUCTION.value),
+            write_username=write_username,
+            write_password=crypto.encrypt(write_password) if write_password else "",
             creator=self._creator(request),
         )
         return baseviews.ResponseOK(self.get_serializer(instance).data)
@@ -106,10 +135,30 @@ class DatasourceView(baseviews.AnyLogin):
         if not serializer.is_valid():
             return baseviews.ResponseBadRequest(common.ToolUtil.format_drf_error(serializer.errors))
         data = serializer.validated_data
+        if self._has_provisioning_fields(data) and not self._can_manage_provisioning(request, instance):
+            return baseviews.ResponsePermissionDenied()
+
         for field in _MUTABLE_FIELDS:
             setattr(instance, field, data[field])
         if data.get("password"):
             instance.password = crypto.encrypt(data["password"])
+        if "env_type" in data:
+            instance.env_type = data["env_type"]
+        if "write_username" in data:
+            new_username = data["write_username"]
+            if not new_username:
+                instance.write_username = ""
+                instance.write_password = ""
+            else:
+                if new_username != instance.write_username and not data.get("write_password"):
+                    return baseviews.ResponseBadRequest("修改预置写账号时请同时提供密码")
+                instance.write_username = new_username[:64]
+                if data.get("write_password"):
+                    instance.write_password = crypto.encrypt(data["write_password"])
+        elif data.get("write_password"):
+            if not instance.write_username:
+                return baseviews.ResponseBadRequest("请先填写预置写账号用户名")
+            instance.write_password = crypto.encrypt(data["write_password"])
         instance.save()
         return baseviews.ResponseOK(self.get_serializer(instance).data)
 

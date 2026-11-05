@@ -22,6 +22,7 @@ from apps.knowledge import views as knowledge_views
 from apps.llmusage import views as llmusage_views
 from apps.nl2sql import views as nl2sql_views
 from apps.overview import views as overview_views
+from apps.provisioning import views as provisioning_views
 from apps.sqlanalysis import views as sqlanalysis_views
 
 # System name prefix for URL paths (change this when initializing the project)
@@ -44,5 +45,6 @@ router.register(rf"{SYS_NAME}/v1/ddl-review", ddlreview_views.DdlReviewView, bas
 router.register(rf"{SYS_NAME}/v1/nl2sql", nl2sql_views.Nl2SqlView, basename="nl2sql")
 router.register(rf"{SYS_NAME}/v1/overview", overview_views.OverviewView, basename="overview")
 router.register(rf"{SYS_NAME}/v1/llm-usage", llmusage_views.LlmUsageView, basename="llm_usage")
+router.register(rf"{SYS_NAME}/v1/test-db", provisioning_views.ProvisioningView, basename="test_db")
 
 urlpatterns += router.urls

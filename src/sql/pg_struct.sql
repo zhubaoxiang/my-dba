@@ -21,8 +21,11 @@ CREATE TABLE IF NOT EXISTS datasource (
     db_name       varchar(128) NOT NULL,
     username      varchar(64)  NOT NULL,
     password      varchar(512) NOT NULL,
-    description   varchar(255) NOT NULL DEFAULT '',
-    is_enabled    boolean      NOT NULL DEFAULT true,
+    description    varchar(255) NOT NULL DEFAULT '',
+    is_enabled     boolean      NOT NULL DEFAULT true,
+    env_type       smallint     NOT NULL DEFAULT 1,
+    write_username varchar(64)  NOT NULL DEFAULT '',
+    write_password varchar(512) NOT NULL DEFAULT '',
     create_time   timestamp    NOT NULL DEFAULT now(),
     update_time   timestamp    NOT NULL DEFAULT now(),
     creator       varchar(32)  NOT NULL DEFAULT '',
@@ -32,6 +35,9 @@ CREATE TABLE IF NOT EXISTS datasource (
 COMMENT ON TABLE datasource IS '被纳管的数据库数据源';
 COMMENT ON COLUMN datasource.db_type IS '数据库类型：1=PostgreSQL 2=MySQL';
 COMMENT ON COLUMN datasource.password IS '可逆加密后的密码，解密见 utils/crypto.py';
+COMMENT ON COLUMN datasource.env_type IS '环境类型：1=生产 2=测试；默认生产，只有测试环境可预置测试库';
+COMMENT ON COLUMN datasource.write_username IS '测试库预置写账号；与只读采集账号分离';
+COMMENT ON COLUMN datasource.write_password IS '可逆加密后的预置写密码；为空表示未配置';
 
 -- 名称在未删除范围内唯一
 CREATE UNIQUE INDEX IF NOT EXISTS uk_datasource_name ON datasource (name) WHERE is_deleted = false;
@@ -83,6 +89,29 @@ COMMENT ON COLUMN collect_task.status IS '状态：1=待执行 2=执行中 3=成
 CREATE INDEX IF NOT EXISTS idx_collect_task_datasource ON collect_task (datasource_id, id DESC);
 -- snapshot_id 外键的前导索引（由本模块的分析规则发现缺失后补齐）
 CREATE INDEX IF NOT EXISTS idx_collect_task_snapshot ON collect_task (snapshot_id);
+
+-- 测试库预置记录（openspec: add-test-db-provisioning）
+CREATE TABLE IF NOT EXISTS provisioned_database (
+    id            serial        PRIMARY KEY,
+    datasource_id integer       NOT NULL,
+    db_name       varchar(128)  NOT NULL,
+    status        smallint      NOT NULL DEFAULT 1,
+    tables        jsonb         NOT NULL DEFAULT '[]'::jsonb,
+    row_count     integer       NOT NULL DEFAULT 0,
+    error         varchar(1024) NOT NULL DEFAULT '',
+    create_time   timestamp     NOT NULL DEFAULT now(),
+    update_time   timestamp     NOT NULL DEFAULT now(),
+    creator       varchar(32)   NOT NULL DEFAULT '',
+    is_deleted    boolean       NOT NULL DEFAULT false
+);
+
+COMMENT ON TABLE provisioned_database IS '由测试库预置功能创建的独立数据库记录';
+COMMENT ON COLUMN provisioned_database.status IS '状态：1=创建中 2=可用 3=失败 4=已删除';
+COMMENT ON COLUMN provisioned_database.tables IS '选中的表与每表行数';
+COMMENT ON COLUMN provisioned_database.row_count IS '实际写入的总行数';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_provisioned_database_name ON provisioned_database (datasource_id, db_name);
+CREATE INDEX IF NOT EXISTS idx_provisioned_database_datasource ON provisioned_database (datasource_id, id DESC);
 
 -- 库表健康问题
 CREATE TABLE IF NOT EXISTS catalog_issue (

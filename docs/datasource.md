@@ -18,6 +18,8 @@ DDL 见 `src/sql/pg_struct.sql`（全量）与 `src/sql/patch.sql`（增量）�
 | `catalog_issue` | 库表健康问题清单 |
 | `analysis_rule` | 分析规则的可配置元数据（启用开关 / 级别 / 阈值，见文末「进行中」） |
 
+> `datasource` 还记录**环境类型**（默认生产）与**测试库预置写账号**（与只读采集账号分离，密码加密）。两者在**创建/编辑数据源时由数据源创建者或管理员设置**：其他用户提交这些字段会被服务端拒绝（4005）。只有标记为测试且配置了写账号的数据源可用于 [测试库预置](test-db-provisioning.md)；生产数据源在服务端被拒绝。数据源列表返回 `env_type` / `env_type_label` / `write_username` / `has_write_credential`，**不返回写密码**。
+
 ## API
 
 路径前缀 `{SYS_NAME}/v1`，当前 `SYS_NAME = 'my-dba'`。实现见 `apps/datasource/views.py` 的 `DatasourceView` 与 `CatalogView`。

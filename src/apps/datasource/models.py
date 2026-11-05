@@ -23,6 +23,15 @@ class Datasource(AbstractTimeFiledModel):
     password = models.CharField(max_length=512, verbose_name="加密后的密码")
     description = models.CharField(max_length=255, default="", blank=True, verbose_name="描述")
     is_enabled = models.BooleanField(default=True, verbose_name="是否启用")
+    # 默认生产：测试库预置只认显式标记为测试的数据源
+    env_type = models.SmallIntegerField(
+        choices=custom_enum.DatasourceEnvEnum.choices,
+        default=custom_enum.DatasourceEnvEnum.PRODUCTION.value,
+        verbose_name="环境类型",
+    )
+    # 预置写账号与只读采集账号分离；未配置时预置功能不可用
+    write_username = models.CharField(max_length=64, default="", blank=True, verbose_name="预置写账号")
+    write_password = models.CharField(max_length=512, default="", blank=True, verbose_name="加密后的预置写密码")
 
     class Meta:
         db_table = "datasource"

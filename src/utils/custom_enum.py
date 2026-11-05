@@ -172,3 +172,25 @@ class StatementKindEnum(models.IntegerChoices):
     # 认不出来的（SET / VACUUM / BEGIN…）。分类采用白名单，认不出即按非只读处理——
     # 判错这一边只是「少跑一条本来能跑的语句」，判错另一边是在真实库上执行了不该执行的语句
     OTHER = 4, "其他"
+
+
+class DatasourceEnvEnum(models.IntegerChoices):
+    """
+    数据源环境类型
+
+    默认生产：测试库预置只对**显式标记为测试**的数据源开放，漏配的结果是不可用而非误操作。
+    """
+
+    PRODUCTION = 1, "生产"
+    TEST = 2, "测试"
+
+
+class ProvisionStatusEnum(models.IntegerChoices):
+    """
+    测试库预置记录状态
+    """
+
+    CREATING = 1, "创建中"
+    READY = 2, "可用"
+    FAILED = 3, "失败"
+    DROPPED = 4, "已删除"

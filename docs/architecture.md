@@ -116,6 +116,12 @@ src/                          # 后端代码根目录
 │   │   ├── middleware.py     #   按 URL 映射功能、写入归属上下文
 │   │   ├── services.py       #   record_call / 聚合查询 / 过期清理
 │   │   └── views.py          #   GET /v1/llm-usage（SuperUserView）
+│   ├── provisioning/         # 测试库预置（仅测试环境，按数据源归属）→ docs/test-db-provisioning.md
+│   │   ├── models.py         #   provisioned_database 记录
+│   │   ├── ddl.py            #   从快照生成近似 DDL
+│   │   ├── data.py           #   造数与简单语义推断
+│   │   ├── services.py       #   环境/限制校验、建库编排、失败清理
+│   │   └── views.py          #   ProvisioningView(SuperUserView)
 │   ├── overview/             # 首页状态总览（跨模块只读聚合，无模型）→ docs/overview.md
 │   │   ├── services.py       #   聚合各块数据 + 概览数字 + 分块兜底
 │   │   └── views.py          #   GET /v1/overview（StatelessView）

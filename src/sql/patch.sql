@@ -74,3 +74,37 @@ CREATE INDEX IF NOT EXISTS idx_llm_usage_feature ON llm_usage (feature, create_t
 
 ALTER TABLE metadata_snapshot ADD COLUMN IF NOT EXISTS change_summary jsonb NOT NULL DEFAULT '{}'::jsonb;
 COMMENT ON COLUMN metadata_snapshot.change_summary IS '与同一数据源上一次快照的紧凑结构变更摘要；空表示未记录，不可比时带 reason';
+
+-- ============================================================
+-- 2026-11-05  add-test-db-provisioning
+-- 数据源环境类型与独立预置写账号；测试库预置记录
+-- 默认生产：存量数据源全部不可预置，必须管理员显式改为测试
+-- ============================================================
+
+ALTER TABLE datasource ADD COLUMN IF NOT EXISTS env_type smallint NOT NULL DEFAULT 1;
+ALTER TABLE datasource ADD COLUMN IF NOT EXISTS write_username varchar(64) NOT NULL DEFAULT '';
+ALTER TABLE datasource ADD COLUMN IF NOT EXISTS write_password varchar(512) NOT NULL DEFAULT '';
+COMMENT ON COLUMN datasource.env_type IS '环境类型：1=生产 2=测试；默认生产，只有测试环境可预置测试库';
+COMMENT ON COLUMN datasource.write_username IS '测试库预置写账号；与只读采集账号分离';
+COMMENT ON COLUMN datasource.write_password IS '可逆加密后的预置写密码；为空表示未配置';
+
+CREATE TABLE IF NOT EXISTS provisioned_database (
+    id            serial        PRIMARY KEY,
+    datasource_id integer       NOT NULL REFERENCES datasource (id),
+    db_name       varchar(128)  NOT NULL,
+    status        smallint      NOT NULL DEFAULT 1,
+    tables        jsonb         NOT NULL DEFAULT '[]'::jsonb,
+    row_count     integer       NOT NULL DEFAULT 0,
+    error         varchar(1024) NOT NULL DEFAULT '',
+    create_time   timestamp     NOT NULL DEFAULT now(),
+    update_time   timestamp     NOT NULL DEFAULT now(),
+    creator       varchar(32)   NOT NULL DEFAULT '',
+    is_deleted    boolean       NOT NULL DEFAULT false
+);
+COMMENT ON TABLE provisioned_database IS '由测试库预置功能创建的独立数据库记录';
+COMMENT ON COLUMN provisioned_database.status IS '状态：1=创建中 2=可用 3=失败 4=已删除';
+COMMENT ON COLUMN provisioned_database.tables IS '选中的表与每表行数';
+COMMENT ON COLUMN provisioned_database.row_count IS '实际写入的总行数';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uk_provisioned_database_name ON provisioned_database (datasource_id, db_name);
+CREATE INDEX IF NOT EXISTS idx_provisioned_database_datasource ON provisioned_database (datasource_id, id DESC);
