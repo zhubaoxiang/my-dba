@@ -181,7 +181,9 @@ def build_tools(
             if not result["collected"]:
                 return "该数据源尚未完成采集，无法查询问题。请先在数据源页面触发采集。"
             if not result["issues"]:
-                scope = f"表名包含 {table_name!r} 的" if table_name else (f"{issue_level} 级别的" if issue_level else "")
+                scope = (
+                    f"表名包含 {table_name!r} 的" if table_name else (f"{issue_level} 级别的" if issue_level else "")
+                )
                 return f"没有查询到{scope}问题（已排除已静音项）。"
 
             lines = [f"共 {result['total']} 个问题，以下展示前 {len(result['issues'])} 个："]

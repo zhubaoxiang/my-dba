@@ -130,23 +130,13 @@ class UserView(baseviews.SuperUserView):
 
         if new_role is not None:
             is_admin = new_role == serializers.ROLE_ADMIN
-            if (
-                instance.is_superuser
-                and instance.is_active
-                and not is_admin
-                and self._active_superuser_count() <= 1
-            ):
+            if instance.is_superuser and instance.is_active and not is_admin and self._active_superuser_count() <= 1:
                 return baseviews.ResponseBadRequest("系统至少需要保留一个可用的超级管理员")
             instance.is_superuser = is_admin
             instance.is_staff = is_admin
 
         if new_active is not None:
-            if (
-                instance.is_superuser
-                and instance.is_active
-                and not new_active
-                and self._active_superuser_count() <= 1
-            ):
+            if instance.is_superuser and instance.is_active and not new_active and self._active_superuser_count() <= 1:
                 return baseviews.ResponseBadRequest("系统至少需要保留一个可用的超级管理员")
             instance.is_active = new_active
 

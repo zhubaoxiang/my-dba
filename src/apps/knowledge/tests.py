@@ -534,9 +534,7 @@ class QaModeBranchTests(SimpleTestCase):
 
     def test_knowledge_only_does_not_build_datasource_tools(self):
         self.retrieved = [self._hit()]
-        agent.answer(
-            "问题", knowledge_base_id=1, datasource_id=2, mode=custom_enum.QaModeEnum.KNOWLEDGE_ONLY
-        )
+        agent.answer("问题", knowledge_base_id=1, datasource_id=2, mode=custom_enum.QaModeEnum.KNOWLEDGE_ONLY)
         self.assertEqual(self.agent_calls[0], ["search_knowledge_base"])
 
     def test_missing_datasource_is_rejected_before_agent(self):
@@ -552,9 +550,7 @@ class QaModeBranchTests(SimpleTestCase):
         used = []
         tools = qa_tools.build_tools(datasource_id=2, used_tools=used)
         summary_tool = next(t for t in tools if t.name == "get_datasource_summary")
-        with mock.patch.object(
-            agent.datasource_services, "datasource_summary", return_value={"collected": False}
-        ):
+        with mock.patch.object(agent.datasource_services, "datasource_summary", return_value={"collected": False}):
             summary_tool.invoke({})
         self.assertEqual(used, ["get_datasource_summary"])
 
@@ -1347,9 +1343,11 @@ class QaSessionOwnershipTests(TestCase):
         self.assertFalse(models.QaSession.objects.get(id=self.bob.id).is_deleted)
 
     def test_other_users_session_cannot_be_continued(self):
-        payload = self._client("alice").post(
-            f"{self.URL}/ask", {"question": "问题", "session_id": self.bob.id}, format="json"
-        ).json()
+        payload = (
+            self._client("alice")
+            .post(f"{self.URL}/ask", {"question": "问题", "session_id": self.bob.id}, format="json")
+            .json()
+        )
         self.assertEqual(payload["code"], 4004)
 
     def test_other_users_session_cannot_be_continued_streaming(self):
@@ -1366,9 +1364,7 @@ class QaSessionOwnershipTests(TestCase):
 
     def test_admin_sees_all_sessions(self):
         payload = self._client("root", "admin").get(self.URL).json()
-        self.assertEqual(
-            {item["id"] for item in payload["data"]["results"]}, {self.alice.id, self.bob.id}
-        )
+        self.assertEqual({item["id"] for item in payload["data"]["results"]}, {self.alice.id, self.bob.id})
 
     def test_admin_can_read_any_session(self):
         payload = self._client("root", "admin").get(f"{self.URL}/{self.bob.id}").json()
@@ -1382,16 +1378,12 @@ class QaSessionOwnershipTests(TestCase):
 
     def test_direct_create_is_rejected(self):
         """会话只能由提问接口创建，否则可以伪造任意 creator"""
-        payload = self._client("alice").post(
-            self.URL, {"title": "伪造会话", "creator": "bob"}, format="json"
-        ).json()
+        payload = self._client("alice").post(self.URL, {"title": "伪造会话", "creator": "bob"}, format="json").json()
         self.assertEqual(payload["code"], 4000)
         self.assertFalse(models.QaSession.objects.filter(title="伪造会话").exists())
 
     def test_direct_update_is_rejected(self):
-        payload = self._client("alice").patch(
-            f"{self.URL}/{self.bob.id}", {"title": "被改了"}, format="json"
-        ).json()
+        payload = self._client("alice").patch(f"{self.URL}/{self.bob.id}", {"title": "被改了"}, format="json").json()
         self.assertEqual(payload["code"], 4000)
         self.bob.refresh_from_db()
         self.assertEqual(self.bob.title, "bob 的会话")

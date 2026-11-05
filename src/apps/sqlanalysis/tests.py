@@ -433,9 +433,7 @@ class SchemaRuleTests(SimpleTestCase):
             "SELECT * FROM performance_schema.threads",
             "SELECT 1 FROM dual",
         ):
-            self.assertNotIn(
-                "unknown_table", self.codes(sql, dialect=custom_enum.DbTypeEnum.MYSQL), sql
-            )
+            self.assertNotIn("unknown_table", self.codes(sql, dialect=custom_enum.DbTypeEnum.MYSQL), sql)
 
     def test_cte_name_is_not_treated_as_a_table(self):
         """CTE 是语句内自定义的名字，不是真实表，不能拿去快照里找"""

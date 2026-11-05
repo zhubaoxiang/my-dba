@@ -387,8 +387,7 @@ def _system_prompt(prep: _Prep) -> str:
     if not prep.datasource_id or prep.mode == custom_enum.QaModeEnum.KNOWLEDGE_ONLY.value:
         return _SYSTEM_PROMPT
     return (
-        _SYSTEM_PROMPT
-        + f"\n当前已选定数据源「{prep.datasource_name or prep.datasource_id}」。"
+        _SYSTEM_PROMPT + f"\n当前已选定数据源「{prep.datasource_name or prep.datasource_id}」。"
         "涉及该数据源的表数量、表结构、健康问题时，必须调用工具获取事实，不得凭记忆编造；"
         "工具没有返回的表名、数量或问题，不得出现在回答里。"
     )

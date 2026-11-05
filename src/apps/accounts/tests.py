@@ -367,9 +367,7 @@ class UserManagementApiTests(TestCase):
 
     def setUp(self):
         model = get_user_model()
-        self.admin = model.objects.create_user(
-            username="root", password=PASSWORD, is_staff=True, is_superuser=True
-        )
+        self.admin = model.objects.create_user(username="root", password=PASSWORD, is_staff=True, is_superuser=True)
         self.user = model.objects.create_user(username="alice", password=PASSWORD)
 
     @staticmethod
@@ -397,16 +395,20 @@ class UserManagementApiTests(TestCase):
         self.assertEqual(payload["code"], 4003)
 
     def test_create_user(self):
-        payload = self._client(self.admin).post(
-            USER,
-            {
-                "username": "bob",
-                "password": PASSWORD,
-                "email": "bob@example.com",
-                "role": "admin",
-            },
-            format="json",
-        ).json()
+        payload = (
+            self._client(self.admin)
+            .post(
+                USER,
+                {
+                    "username": "bob",
+                    "password": PASSWORD,
+                    "email": "bob@example.com",
+                    "role": "admin",
+                },
+                format="json",
+            )
+            .json()
+        )
         self.assertEqual(payload["code"], 2000)
         bob = get_user_model().objects.get(username="bob")
         self.assertTrue(bob.is_superuser)
@@ -414,17 +416,19 @@ class UserManagementApiTests(TestCase):
         self.assertTrue(bob.check_password(PASSWORD))
 
     def test_create_duplicate_username_is_rejected(self):
-        payload = self._client(self.admin).post(
-            USER, {"username": "root", "password": PASSWORD}, format="json"
-        ).json()
+        payload = self._client(self.admin).post(USER, {"username": "root", "password": PASSWORD}, format="json").json()
         self.assertEqual(payload["code"], 4000)
 
     def test_update_role_email_and_password(self):
-        payload = self._client(self.admin).put(
-            f"{USER}/{self.user.id}",
-            {"role": "admin", "email": "new@example.com", "password": self.NEW_PASSWORD},
-            format="json",
-        ).json()
+        payload = (
+            self._client(self.admin)
+            .put(
+                f"{USER}/{self.user.id}",
+                {"role": "admin", "email": "new@example.com", "password": self.NEW_PASSWORD},
+                format="json",
+            )
+            .json()
+        )
         self.assertEqual(payload["code"], 2000)
         self.user.refresh_from_db()
         self.assertTrue(self.user.is_superuser)
@@ -433,17 +437,17 @@ class UserManagementApiTests(TestCase):
         self.assertTrue(self.user.check_password(self.NEW_PASSWORD))
 
     def test_username_cannot_be_changed(self):
-        payload = self._client(self.admin).put(
-            f"{USER}/{self.user.id}", {"username": "renamed", "email": "x@example.com"}, format="json"
-        ).json()
+        payload = (
+            self._client(self.admin)
+            .put(f"{USER}/{self.user.id}", {"username": "renamed", "email": "x@example.com"}, format="json")
+            .json()
+        )
         self.assertEqual(payload["code"], 2000)
         self.user.refresh_from_db()
         self.assertEqual(self.user.username, "alice")
 
     def test_admin_cannot_change_own_role(self):
-        payload = self._client(self.admin).put(
-            f"{USER}/{self.admin.id}", {"role": "user"}, format="json"
-        ).json()
+        payload = self._client(self.admin).put(f"{USER}/{self.admin.id}", {"role": "user"}, format="json").json()
         self.assertEqual(payload["code"], 4000)
         self.admin.refresh_from_db()
         self.assertTrue(self.admin.is_superuser)
