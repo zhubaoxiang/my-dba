@@ -25,7 +25,7 @@
 ## 4. 验证
 
 - [x] 4.1 `python manage.py test`（`test apps`：687 个用例全部通过，其中 llmusage 22 个）
-- [ ] 4.2 `ruff check src/ --config .ci/lint-rules/ruff.toml`、`ruff format --check src/ --config .ci/lint-rules/ruff.toml`（新增/修改文件全部通过；全仓库仍存在 HEAD 上即有的 1 个 I001（`knowledge/tests.py`）与 9 个格式化差异，属既有问题，未扩大改动）
+- [x] 4.2 `ruff check src/ --config .ci/lint-rules/ruff.toml`、`ruff format --check src/ --config .ci/lint-rules/ruff.toml`（全仓库 121 个文件全部通过）
 - [x] 4.3 `python .ci/custom-checks/scaffold_check.py`
 - [x] 4.4 `static/` 下 `npm run build`
 - [x] 4.5 `openspec validate add-llm-usage-stats --strict --no-interactive`
