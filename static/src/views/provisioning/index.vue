@@ -4,212 +4,252 @@
       <template #header>
         <div class="card-header">
           <span>测试库</span>
+          <el-button type="primary" @click="openCreate">新建测试库</el-button>
         </div>
       </template>
 
-      <el-tabs v-model="activeTab">
-        <el-tab-pane label="创建测试库" name="create">
-      <el-alert
-        class="notice"
-        type="warning"
-        :closable="false"
-        show-icon
-        title="近似结构：不会还原 CHECK 约束、触发器、视图、序列、扩展与权限；生成的数据是合成数据。"
-      />
-
-      <el-row :gutter="12" class="picker-row">
-        <el-col :span="10">
-          <el-select
-            v-model="datasourceId"
-            placeholder="选择测试数据源"
-            filterable
-            style="width: 100%"
-            @change="onDatasourceChange"
-          >
-            <el-option
-              v-for="item in datasources"
-              :key="item.id"
-              :value="item.id"
-              :label="`${item.name}（${item.env_type_label}）`"
-            />
-          </el-select>
-        </el-col>
-        <el-col :span="6">
-          <div class="seed-field">
-            <el-input-number
-              v-model="seed"
-              :min="0"
-              :max="2147483647"
-              placeholder="随机种子（可选）"
-              controls-position="right"
-              style="flex: 1"
-            />
-            <el-tooltip
-              placement="top"
-              content="随机种子用于复现：数据源、表、行数与种子都相同时，生成的数据相同；不填则每次随机。"
-            >
-              <el-icon class="hint-icon"><QuestionFilled /></el-icon>
-            </el-tooltip>
-          </div>
-        </el-col>
-        <el-col :span="8" class="env-info">
-          <el-tag v-if="currentDatasource" :type="isTestEnv ? 'warning' : 'info'">
-            {{ currentDatasource.env_type_label }}
-          </el-tag>
-          <el-tag v-if="currentDatasource" :type="currentDatasource.has_write_credential ? 'success' : 'danger'">
-            {{ currentDatasource.has_write_credential ? '已配置写账号' : '未配置写账号' }}
-          </el-tag>
-        </el-col>
-      </el-row>
-
-      <el-alert
-        v-if="currentDatasource && !isTestEnv"
-        class="notice"
-        type="error"
-        :closable="false"
-        show-icon
-        title="只有测试环境的数据源可以预置测试库；请到「数据源管理」编辑该数据源，把环境类型改为测试"
-      />
-      <el-alert
-        v-if="currentDatasource && isTestEnv && !currentDatasource.has_write_credential"
-        class="notice"
-        type="warning"
-        :closable="false"
-        show-icon
-        title="尚未配置预置写账号，请到「数据源管理」编辑该数据源并填写预置写账号"
-      />
-
-      <el-empty
-        v-if="!datasourceId"
-        :description="datasources.length ? '请选择测试数据源' : '你还没有创建数据源，请先到「数据源管理」新建'"
-      />
-      <el-empty v-else-if="!snapshot" description="该数据源尚未采集，请先到「数据源管理」触发采集" />
-
-      <template v-else>
-        <div class="toolbar">
-          <div class="toolbar-left">
-            <el-input
-              v-model="tableKeyword"
-              placeholder="按表名/注释搜索"
-              clearable
-              style="width: 240px"
-            />
-            <span class="meta">
-              最新快照 #{{ snapshot.id }} · {{ snapshot.collect_time }} ·
-              共 {{ tableRows.length }} 张，匹配 {{ filteredTableRows.length }} 张，已选 {{ selectedTables.length }} 张
-            </span>
-          </div>
-          <el-button
-            type="primary"
-            :disabled="!isTestEnv || !currentDatasource?.has_write_credential || !selectedTables.length"
-            :loading="previewing"
-            @click="handlePreview"
-          >
-            预览
-          </el-button>
-        </div>
-
-        <el-table
-          ref="tableRef"
-          :data="filteredTableRows"
-          v-loading="tableLoading"
-          border
-          max-height="360"
-          row-key="key"
-          @selection-change="onSelectionChange"
-        >
-          <el-table-column type="selection" width="45" reserve-selection />
-          <el-table-column prop="name" label="表名" min-width="200" />
-          <el-table-column prop="schema" label="schema" width="140" />
-          <el-table-column prop="column_count" label="列数" width="80" />
-          <el-table-column label="行数" width="160">
-            <template #default="{ row }">
-              <el-input-number
-                v-model="rowCounts[row.key]"
-                :min="1"
-                :max="1000"
-                size="small"
-                controls-position="right"
-              />
-            </template>
-          </el-table-column>
-        </el-table>
-
-        <template v-if="plan">
-          <el-divider content-position="left">预览结果</el-divider>
-
-          <el-row :gutter="12" class="summary-row">
-            <el-col :span="8">
-              <el-card shadow="hover">
-                <div class="stat-value">{{ plan.total_rows }}</div>
-                <div class="stat-title">总行数</div>
-              </el-card>
-            </el-col>
-            <el-col :span="8">
-              <el-card shadow="hover">
-                <div class="stat-value">{{ plan.tables.length }}</div>
-                <div class="stat-title">表数量</div>
-              </el-card>
-            </el-col>
-            <el-col :span="8">
-              <el-card shadow="hover">
-                <div class="stat-value db-name">{{ plan.db_name }}</div>
-                <div class="stat-title">将创建的库</div>
-              </el-card>
-            </el-col>
-          </el-row>
-
+      <el-dialog
+        v-model="createVisible"
+        title="新建测试库"
+        width="min(900px, 94vw)"
+        top="8vh"
+        :close-on-click-modal="false"
+        destroy-on-close
+      >
+        <div class="create-dialog-body">
           <el-alert
-            v-for="(warning, index) in plan.warnings"
-            :key="index"
             class="notice"
             type="warning"
             :closable="false"
             show-icon
-            :title="warning"
+            title="近似结构：不会还原 CHECK 约束、触发器、视图、序列、扩展与权限；生成的数据是合成数据。"
           />
 
-          <el-table :data="plan.tables" border size="small" class="plan-tables">
-            <el-table-column prop="schema" label="schema" width="140" />
-            <el-table-column prop="name" label="表名" min-width="200" />
-            <el-table-column prop="rows" label="行数" width="100" />
-            <el-table-column label="语义列" min-width="260">
-              <template #default="{ row }">
-                <span v-if="!row.semantic_columns.length" class="muted">—</span>
-                <el-tag
-                  v-for="item in row.semantic_columns"
-                  :key="item.column"
-                  size="small"
-                  :type="item.applied ? 'success' : 'info'"
-                  class="semantic-tag"
+          <el-steps :active="createStep" simple class="create-steps">
+            <el-step title="选择表" />
+            <el-step title="预览执行" />
+          </el-steps>
+
+          <div v-show="createStep === 0">
+            <el-row :gutter="12" class="picker-row">
+              <el-col :span="10">
+                <el-select
+                  v-model="datasourceId"
+                  placeholder="请选择测试数据源"
+                  filterable
+                  style="width: 100%"
+                  @change="onDatasourceChange"
                 >
-                  {{ item.column }}: {{ item.semantic }}{{ item.applied ? '' : '（回退）' }}
+                  <el-option
+                    v-for="item in datasources"
+                    :key="item.id"
+                    :value="item.id"
+                    :label="`${item.name}（${item.env_type_label}）`"
+                  />
+                </el-select>
+              </el-col>
+              <el-col :span="6">
+                <div class="seed-field">
+                  <el-input-number
+                    v-model="seed"
+                    :min="0"
+                    :max="2147483647"
+                    placeholder="随机种子（可选）"
+                    controls-position="right"
+                    style="flex: 1"
+                  />
+                  <el-tooltip
+                    placement="top"
+                    content="随机种子用于复现：数据源、表、行数与种子都相同时，生成的数据相同；不填则每次随机。"
+                  >
+                    <el-icon class="hint-icon"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </div>
+              </el-col>
+              <el-col :span="8" class="env-info">
+                <el-tag v-if="currentDatasource" :type="isTestEnv ? 'warning' : 'info'">
+                  {{ currentDatasource.env_type_label }}
                 </el-tag>
+                <el-tag
+                  v-if="currentDatasource"
+                  :type="currentDatasource.has_write_credential ? 'success' : 'danger'"
+                >
+                  {{ currentDatasource.has_write_credential ? '已配置写账号' : '未配置写账号' }}
+                </el-tag>
+              </el-col>
+            </el-row>
+
+            <el-alert
+              v-if="currentDatasource && !isTestEnv"
+              class="notice"
+              type="error"
+              :closable="false"
+              show-icon
+              title="只有测试环境的数据源可以预置测试库；请到「数据源管理」编辑该数据源，把环境类型改为测试"
+            />
+            <el-alert
+              v-if="currentDatasource && isTestEnv && !currentDatasource.has_write_credential"
+              class="notice"
+              type="warning"
+              :closable="false"
+              show-icon
+              title="尚未配置预置写账号，请到「数据源管理」编辑该数据源并填写预置写账号"
+            />
+
+            <el-empty
+              v-if="!datasourceId"
+              :description="datasources.length ? '请选择数据源后加载库表' : '你还没有创建数据源，请先到「数据源管理」新建'"
+            />
+            <el-empty v-else-if="!snapshot" description="该数据源尚未采集，请先到「数据源管理」触发采集" />
+
+            <template v-else>
+              <div class="toolbar">
+                <div class="toolbar-left">
+                  <el-input
+                    v-model="tableKeyword"
+                    placeholder="按表名/注释搜索"
+                    clearable
+                    style="width: 220px"
+                    @keyup.enter="searchTables"
+                    @clear="searchTables"
+                  />
+                  <el-button @click="searchTables">搜索</el-button>
+                  <span class="meta">
+                    快照 #{{ snapshot.id }} · 共 {{ tableTotal }} 张 · 已选 {{ selectedTables.length }} 张
+                  </span>
+                  <el-button v-if="selectedTables.length" link type="primary" @click="clearSelectedTables">
+                    清空已选
+                  </el-button>
+                </div>
+              </div>
+
+              <el-empty
+                v-if="!tableTotal"
+                :description="tableKeyword ? '没有匹配的表' : '该数据源没有表'"
+              />
+              <template v-else>
+                <el-table
+                  ref="tableRef"
+                  :data="tableRows"
+                  v-loading="tableLoading"
+                  border
+                  row-key="key"
+                  @selection-change="onSelectionChange"
+                >
+                  <el-table-column type="selection" width="45" reserve-selection />
+                  <el-table-column prop="name" label="表名" min-width="160" show-overflow-tooltip />
+                  <el-table-column prop="schema" label="schema" width="200" />
+                  <el-table-column prop="column_count" label="列数" width="80" />
+                  <el-table-column label="行数" width="160">
+                    <template #default="{ row }">
+                      <el-input-number
+                        v-model="rowCounts[row.key]"
+                        :min="1"
+                        :max="1000"
+                        size="small"
+                        controls-position="right"
+                      />
+                    </template>
+                  </el-table-column>
+                </el-table>
+
+                <el-pagination
+                  class="table-pager"
+                  background
+                  layout="total, prev, pager, next"
+                  :total="tableTotal"
+                  :current-page="tableQuery.page"
+                  :page-size="tableQuery.page_size"
+                  @current-change="onTablePageChange"
+                />
               </template>
-            </el-table-column>
-          </el-table>
-
-          <el-collapse class="ddl-collapse">
-            <el-collapse-item title="查看将执行的 DDL" name="ddl">
-              <pre class="ddl">{{ plan.statements.join(';\n\n') }};</pre>
-            </el-collapse-item>
-          </el-collapse>
-
-          <el-checkbox v-model="confirmed" class="confirm-check">
-            我已确认对测试环境数据源发起建库与造数，库名为「{{ plan.db_name }}」
-          </el-checkbox>
-          <el-button type="danger" :disabled="!confirmed" :loading="executing" @click="handleProvision">
-            执行预置
-          </el-button>
-        </template>
-      </template>
-        </el-tab-pane>
-
-        <el-tab-pane label="已创建的测试库" name="records">
-          <div class="toolbar">
-            <span class="meta">共 {{ recordsTotal }} 个</span>
-            <el-button @click="loadRecords">刷新</el-button>
+            </template>
           </div>
+
+          <div v-if="plan" v-show="createStep === 1">
+            <div class="preview-summary">
+              <div class="summary-item">
+                <span class="summary-label">将创建</span>
+                <span class="summary-value mono">{{ plan.db_name }}</span>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">表数量</span>
+                <span class="summary-value">{{ plan.tables.length }}</span>
+              </div>
+              <div class="summary-item">
+                <span class="summary-label">总行数</span>
+                <span class="summary-value">{{ plan.total_rows }}</span>
+              </div>
+            </div>
+
+            <el-alert
+              v-for="(warning, index) in plan.warnings"
+              :key="index"
+              class="notice"
+              type="warning"
+              :closable="false"
+              show-icon
+              :title="warning"
+            />
+
+            <el-tabs v-model="previewTab" class="preview-tabs">
+              <el-tab-pane label="表清单" name="tables">
+                <el-table :data="plan.tables" border size="small" max-height="240">
+                  <el-table-column prop="schema" label="schema" width="180" />
+                  <el-table-column prop="name" label="表名" min-width="160" show-overflow-tooltip />
+                  <el-table-column prop="rows" label="行数" width="80" />
+                  <el-table-column label="语义列" min-width="220">
+                    <template #default="{ row }">
+                      <span v-if="!row.semantic_columns.length" class="muted">—</span>
+                      <el-tag
+                        v-for="item in row.semantic_columns"
+                        :key="item.column"
+                        size="small"
+                        :type="item.applied ? 'success' : 'info'"
+                        class="semantic-tag"
+                      >
+                        {{ item.column }}: {{ item.semantic }}{{ item.applied ? '' : '（回退）' }}
+                      </el-tag>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </el-tab-pane>
+              <el-tab-pane label="DDL" name="ddl">
+                <pre class="ddl preview-ddl">{{ plan.statements.join(';\n\n') }};</pre>
+              </el-tab-pane>
+            </el-tabs>
+
+            <el-checkbox v-model="confirmed" class="confirm-check">
+              我已确认对测试环境数据源发起建库与造数，库名为「{{ plan.db_name }}」
+            </el-checkbox>
+          </div>
+        </div>
+
+        <template #footer>
+          <div v-if="createStep === 0" class="dialog-footer">
+            <el-button @click="createVisible = false">取消</el-button>
+            <el-button
+              type="primary"
+              :disabled="!canPreview"
+              :loading="previewing"
+              @click="handlePreview"
+            >
+              下一步：预览
+            </el-button>
+          </div>
+          <div v-else class="dialog-footer">
+            <el-button @click="backToSelect">返回修改</el-button>
+            <el-button type="danger" :disabled="!confirmed" :loading="executing" @click="handleProvision">
+              执行预置
+            </el-button>
+          </div>
+        </template>
+      </el-dialog>
+
+      <div class="toolbar">
+        <span class="meta">已创建的测试库 · 共 {{ recordsTotal }} 个</span>
+        <el-button @click="loadRecords">刷新</el-button>
+      </div>
           <el-table :data="records" v-loading="recordsLoading" border>
             <el-table-column type="expand">
               <template #default="{ row }">
@@ -280,9 +320,6 @@
             :page-size="recordsQuery.page_size"
             @current-change="onRecordsPageChange"
           />
-        </el-tab-pane>
-      </el-tabs>
-
       <el-dialog v-model="manageVisible" :title="manageTitle" width="560px">
         <el-form label-width="90px">
           <el-form-item v-if="manageMode === 'addTable'" label="表">
@@ -358,17 +395,21 @@ import { useUserStore } from '@/store/user'
 const userStore = useUserStore()
 const isAdmin = computed(() => userStore.userInfo.role === 'admin')
 
-const activeTab = ref('create')
+const createVisible = ref(false)
+const createStep = ref(0)
 const datasources = ref([])
 const datasourceId = ref(null)
 const snapshot = ref(null)
 const tableRows = ref([])
+const tableTotal = ref(0)
 const tableKeyword = ref('')
+const tableQuery = reactive({ page: 1, page_size: 5 })
 const tableLoading = ref(false)
 const tableRef = ref(null)
 const selectedTables = ref([])
 const rowCounts = reactive({})
 const seed = ref(null)
+const previewTab = ref('tables')
 
 const previewing = ref(false)
 const executing = ref(false)
@@ -392,15 +433,30 @@ const manageTitle = computed(() =>
 
 const currentDatasource = computed(() => datasources.value.find((item) => item.id === datasourceId.value) || null)
 const isTestEnv = computed(() => currentDatasource.value?.env_type === 2)
-const filteredTableRows = computed(() => {
-  const keyword = tableKeyword.value.trim().toLowerCase()
-  if (!keyword) return tableRows.value
-  return tableRows.value.filter((row) =>
-    [row.name, row.schema, row.comment].some((value) =>
-      String(value || '').toLowerCase().includes(keyword)
-    )
-  )
-})
+const canPreview = computed(
+  () =>
+    Boolean(selectedTables.value.length) &&
+    Boolean(isTestEnv.value) &&
+    Boolean(currentDatasource.value?.has_write_credential)
+)
+
+async function openCreate() {
+  createStep.value = 0
+  datasourceId.value = null
+  snapshot.value = null
+  tableRows.value = []
+  tableTotal.value = 0
+  tableKeyword.value = ''
+  tableQuery.page = 1
+  selectedTables.value = []
+  plan.value = null
+  confirmed.value = false
+  previewTab.value = 'tables'
+  tableRef.value?.clearSelection()
+  Object.keys(rowCounts).forEach((key) => delete rowCounts[key])
+  await loadDatasources()
+  createVisible.value = true
+}
 
 async function loadDatasources() {
   // 普通用户只对接自己的数据源；管理员可看到全部
@@ -416,18 +472,19 @@ async function loadDatasources() {
   datasources.value = isAdmin.value
     ? rows
     : rows.filter((item) => item.creator === userStore.userInfo.username)
-  const preferred = datasources.value.find((item) => item.env_type === 2) || datasources.value[0]
-  datasourceId.value = preferred?.id || null
-  if (datasourceId.value) await onDatasourceChange(datasourceId.value)
 }
 
 async function onDatasourceChange(value) {
+  createStep.value = 0
   plan.value = null
   confirmed.value = false
+  previewTab.value = 'tables'
   selectedTables.value = []
   snapshot.value = null
   tableRows.value = []
+  tableTotal.value = 0
   tableKeyword.value = ''
+  tableQuery.page = 1
   tableRef.value?.clearSelection()
   Object.keys(rowCounts).forEach((key) => delete rowCounts[key])
   if (!value) return
@@ -437,15 +494,46 @@ async function onDatasourceChange(value) {
     const data = await catalogApi.snapshots({ datasource_id: value, page: 1, page_size: 1 })
     snapshot.value = (data.results || [])[0] || null
     if (!snapshot.value) return
-    const tables = await catalogApi.tables({ snapshot_id: snapshot.value.id, page: 1, page_size: 1000 })
-    tableRows.value = (tables.results || []).map((row) => {
-      const key = `${row.schema}.${row.name}`
-      rowCounts[key] = 50
-      return { ...row, key }
-    })
+    await loadTables()
   } finally {
     tableLoading.value = false
   }
+}
+
+async function loadTables() {
+  if (!snapshot.value) return
+  tableLoading.value = true
+  try {
+    const data = await catalogApi.tables({
+      snapshot_id: snapshot.value.id,
+      keyword: tableKeyword.value,
+      page: tableQuery.page,
+      page_size: tableQuery.page_size
+    })
+    tableRows.value = (data.results || []).map((row) => {
+      const key = `${row.schema}.${row.name}`
+      if (rowCounts[key] === undefined) rowCounts[key] = 50
+      return { ...row, key }
+    })
+    tableTotal.value = data.total || 0
+  } finally {
+    tableLoading.value = false
+  }
+}
+
+function searchTables() {
+  tableQuery.page = 1
+  loadTables()
+}
+
+function onTablePageChange(page) {
+  tableQuery.page = page
+  loadTables()
+}
+
+function clearSelectedTables() {
+  selectedTables.value = []
+  tableRef.value?.clearSelection()
 }
 
 function onSelectionChange(rows) {
@@ -461,6 +549,7 @@ function buildTables() {
 }
 
 async function handlePreview() {
+  if (!canPreview.value) return
   previewing.value = true
   try {
     plan.value = await provisioningApi.preview({
@@ -469,9 +558,18 @@ async function handlePreview() {
       seed: seed.value ?? undefined
     })
     confirmed.value = false
+    previewTab.value = 'tables'
+    createStep.value = 1
   } finally {
     previewing.value = false
   }
+}
+
+function backToSelect() {
+  createStep.value = 0
+  plan.value = null
+  confirmed.value = false
+  previewTab.value = 'tables'
 }
 
 async function handleProvision() {
@@ -489,7 +587,9 @@ async function handleProvision() {
     ElMessage.success(`测试库 ${data.db_name} 已创建，共 ${data.row_count} 行`)
     plan.value = null
     confirmed.value = false
-    activeTab.value = 'records'
+    createStep.value = 0
+    previewTab.value = 'tables'
+    createVisible.value = false
     await loadRecords()
   } finally {
     executing.value = false
@@ -642,9 +742,7 @@ function statusTagType(status) {
   return 'warning'
 }
 
-onMounted(async () => {
-  await Promise.all([loadDatasources(), loadRecords()])
-})
+onMounted(loadRecords)
 </script>
 
 <style scoped>
@@ -652,6 +750,12 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.create-dialog-body {
+  max-height: 64vh;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .header-actions {
@@ -715,30 +819,65 @@ onMounted(async () => {
   color: #909399;
 }
 
-.summary-row {
+.create-steps {
   margin-bottom: 16px;
-  text-align: center;
 }
 
-.stat-value {
-  font-size: 22px;
+.table-pager {
+  margin-top: 12px;
+  justify-content: flex-end;
+}
+
+.preview-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  background: #f5f7fa;
+  border-radius: 4px;
+}
+
+.summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.summary-label {
+  font-size: 12px;
+  color: #909399;
+}
+
+.summary-value {
+  font-size: 16px;
   font-weight: 600;
   color: #303133;
 }
 
-.stat-value.db-name {
+.summary-value.mono {
   font-size: 14px;
+  font-family: Consolas, Monaco, monospace;
   word-break: break-all;
 }
 
-.stat-title {
-  font-size: 13px;
-  color: #909399;
-  margin-top: 4px;
+.preview-tabs {
+  margin-top: 8px;
 }
 
-.plan-tables {
+.preview-ddl {
+  max-height: 240px;
+}
+
+.confirm-check {
+  display: block;
   margin-top: 12px;
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .semantic-tag {
@@ -750,10 +889,6 @@ onMounted(async () => {
   font-size: 12px;
 }
 
-.ddl-collapse {
-  margin-top: 12px;
-}
-
 .ddl {
   max-height: 320px;
   overflow: auto;
@@ -763,11 +898,6 @@ onMounted(async () => {
   font-size: 12px;
   line-height: 1.6;
   white-space: pre-wrap;
-}
-
-.confirm-check {
-  display: block;
-  margin: 12px 0;
 }
 
 .pager {
