@@ -11,6 +11,68 @@ from apps.provisioning import models, serializers, services
 from utils import common, pagination
 
 
+class TestDataView(baseviews.StatelessView):
+    """
+    测试数据文件导出
+
+    只读快照、生成可下载的 SQL 文件，不连接目标库；普通用户限自己创建的数据源。
+    """
+
+    @staticmethod
+    def _creator(request) -> str:
+        return getattr(getattr(request, "user", None), "username", "") or ""
+
+    @staticmethod
+    def _is_admin(request) -> bool:
+        return bool(getattr(getattr(request, "user", None), "is_staff", False))
+
+    @action(detail=False, methods=["POST"], url_path="parse")
+    def parse(self, request):
+        """
+        解析手动输入的表结构，返回表清单摘要
+        """
+        serializer = serializers.TestDataParseSerializer(data=request.data)
+        if not serializer.is_valid():
+            return baseviews.ResponseBadRequest(common.ToolUtil.format_drf_error(serializer.errors))
+        data = serializer.validated_data
+        try:
+            payload = services.parse_table_structure(data["db_type"], data["ddl"])
+        except services.ProvisionError as exc:
+            return baseviews.ResponseExpectationFailed(str(exc))
+        return baseviews.ResponseOK(payload)
+
+    @action(detail=False, methods=["POST"], url_path="file")
+    def file(self, request):
+        serializer = serializers.TestDataGenerateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return baseviews.ResponseBadRequest(common.ToolUtil.format_drf_error(serializer.errors))
+        data = serializer.validated_data
+        try:
+            if data.get("datasource_id") is not None:
+                payload = services.export_test_data(
+                    data["datasource_id"],
+                    data["tables"],
+                    seed=data.get("seed"),
+                    include_ddl=data.get("include_ddl", False),
+                    actor=self._creator(request),
+                    is_admin=self._is_admin(request),
+                )
+            else:
+                payload = services.export_test_data_from_ddl(
+                    data["db_type"],
+                    data["ddl"],
+                    data["tables"],
+                    seed=data.get("seed"),
+                    include_ddl=data.get("include_ddl", False),
+                    actor=self._creator(request),
+                )
+        except services.ProvisionPermissionError as exc:
+            return baseviews.ResponsePermissionDenied(str(exc))
+        except services.ProvisionError as exc:
+            return baseviews.ResponseExpectationFailed(str(exc))
+        return baseviews.ResponseOK(payload)
+
+
 class ProvisioningView(baseviews.BaseView):
     """
     测试库预置记录、预览、执行与删除

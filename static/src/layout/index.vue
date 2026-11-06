@@ -109,6 +109,7 @@ onMounted(async () => {
 const MENU_GROUP_ICONS = {
   库表: 'Coin',
   SQL: 'MagicStick',
+  造数: 'FolderAdd',
   知识: 'Collection',
   设置: 'Setting'
 }

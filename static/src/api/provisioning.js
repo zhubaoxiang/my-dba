@@ -32,5 +32,13 @@ export const provisioningApi = {
   // 删除本功能创建的表
   dropTable(id, params) {
     return request.delete(`/v1/test-db/${id}/tables`, { params })
+  },
+  // 解析手动输入的表结构
+  parseTableStructure(data) {
+    return request.post('/v1/test-data/parse', data)
+  },
+  // 生成测试数据 SQL 文件（只读快照/表结构，不连接目标库）
+  generateTestData(data) {
+    return request.post('/v1/test-data/file', data, { timeout: PROVISION_TIMEOUT })
   }
 }

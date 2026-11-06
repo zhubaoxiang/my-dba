@@ -116,7 +116,7 @@ src/                          # 后端代码根目录
 │   │   ├── middleware.py     #   按 URL 映射功能、写入归属上下文
 │   │   ├── services.py       #   record_call / 聚合查询 / 过期清理
 │   │   └── views.py          #   GET /v1/llm-usage（SuperUserView）
-│   ├── provisioning/         # 测试库预置（仅测试环境，按数据源归属）→ docs/test-db-provisioning.md
+│   ├── provisioning/         # 造数：测试库预置 + 测试数据文件导出（按数据源归属）→ docs/test-db-provisioning.md / docs/test-data-export.md
 │   │   ├── models.py         #   provisioned_database 记录
 │   │   ├── ddl.py            #   从快照生成近似 DDL
 │   │   ├── data.py           #   造数与简单语义推断

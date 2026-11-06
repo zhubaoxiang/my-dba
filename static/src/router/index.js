@@ -64,12 +64,6 @@ const routes = [
         meta: { title: '结构对比', icon: 'Switch', showInMenu: true, group: '库表' }
       },
       {
-        path: 'test-db',
-        name: 'TestDbProvisioning',
-        component: () => import('@/views/provisioning/index.vue'),
-        meta: { title: '测试库预置', icon: 'FolderAdd', showInMenu: true, group: '库表' }
-      },
-      {
         path: 'sqlanalysis',
         name: 'SqlAnalysis',
         component: () => import('@/views/sqlanalysis/index.vue'),
@@ -86,6 +80,18 @@ const routes = [
         name: 'DdlReview',
         component: () => import('@/views/ddlreview/index.vue'),
         meta: { title: 'DDL 评审', icon: 'DocumentChecked', showInMenu: true, group: 'SQL' }
+      },
+      {
+        path: 'test-data',
+        name: 'TestDataExport',
+        component: () => import('@/views/provisioning/test-data.vue'),
+        meta: { title: '数据文件', icon: 'Download', showInMenu: true, group: '造数' }
+      },
+      {
+        path: 'test-db',
+        name: 'TestDbProvisioning',
+        component: () => import('@/views/provisioning/index.vue'),
+        meta: { title: '测试库', icon: 'FolderAdd', showInMenu: true, group: '造数' }
       },
       {
         path: 'datasource/rules',

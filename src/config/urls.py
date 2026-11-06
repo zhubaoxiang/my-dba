@@ -46,5 +46,6 @@ router.register(rf"{SYS_NAME}/v1/nl2sql", nl2sql_views.Nl2SqlView, basename="nl2
 router.register(rf"{SYS_NAME}/v1/overview", overview_views.OverviewView, basename="overview")
 router.register(rf"{SYS_NAME}/v1/llm-usage", llmusage_views.LlmUsageView, basename="llm_usage")
 router.register(rf"{SYS_NAME}/v1/test-db", provisioning_views.ProvisioningView, basename="test_db")
+router.register(rf"{SYS_NAME}/v1/test-data", provisioning_views.TestDataView, basename="test_data")
 
 urlpatterns += router.urls

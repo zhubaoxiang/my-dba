@@ -412,6 +412,268 @@ class ProvisionExecuteTests(TestCase):
             services.delete_record(record)
 
 
+class TestDataExportTests(TestCase):
+    """
+    测试数据文件导出：只读快照，不需要测试环境或写账号
+    """
+
+    def setUp(self):
+        # 故意用生产环境且不配置写账号：导出只读元数据，应当可用
+        self.datasource = _datasource("export-ds", env_type=PROD_ENV, write=False, creator="owner")
+        _snapshot(
+            self.datasource,
+            [
+                _table(
+                    "users",
+                    columns=[_column("id"), _column("email", "character varying", 64, comment="邮箱")],
+                ),
+                _table(
+                    "orders",
+                    columns=[_column("id"), _column("user_id")],
+                    foreign_keys=[_foreign_key("fk_user", ["user_id"], "users", ["id"])],
+                ),
+            ],
+        )
+
+    def test_non_owner_is_denied(self):
+        with self.assertRaises(services.ProvisionPermissionError):
+            services.export_test_data(
+                self.datasource.id,
+                [{"schema": "public", "name": "users", "rows": 1}],
+                actor="other",
+                is_admin=False,
+            )
+
+    def test_export_generates_sql_without_connecting(self):
+        with (
+            mock.patch.object(services, "_connect_admin", side_effect=AssertionError("不应连接目标库")),
+            mock.patch.object(services, "_connect_target", side_effect=AssertionError("不应连接目标库")),
+        ):
+            payload = services.export_test_data(
+                self.datasource.id,
+                [{"schema": "public", "name": "users", "rows": 2}],
+                seed=1,
+                actor="owner",
+                is_admin=False,
+            )
+
+        self.assertTrue(payload["filename"].endswith(".sql"))
+        self.assertEqual(payload["total_rows"], 2)
+        self.assertIn('INSERT INTO "public"."users"', payload["content"])
+        self.assertIn("test1@example.com", payload["content"])
+        self.assertNotIn("CREATE TABLE", payload["content"])
+
+    def test_include_ddl_adds_create_table(self):
+        payload = services.export_test_data(
+            self.datasource.id,
+            [{"schema": "public", "name": "users", "rows": 1}],
+            include_ddl=True,
+            actor="owner",
+            is_admin=False,
+        )
+
+        self.assertIn('CREATE TABLE "public"."users"', payload["content"])
+
+    def test_parent_rows_are_inserted_before_children(self):
+        payload = services.export_test_data(
+            self.datasource.id,
+            [
+                {"schema": "public", "name": "orders", "rows": 2},
+                {"schema": "public", "name": "users", "rows": 2},
+            ],
+            seed=1,
+            actor="owner",
+            is_admin=False,
+        )
+
+        parent = payload["content"].index('INSERT INTO "public"."users"')
+        child = payload["content"].index('INSERT INTO "public"."orders"')
+        self.assertLess(parent, child)
+
+    def test_unselected_fk_is_warned(self):
+        payload = services.export_test_data(
+            self.datasource.id,
+            [{"schema": "public", "name": "orders", "rows": 1}],
+            actor="owner",
+            is_admin=False,
+        )
+
+        self.assertTrue(any("未选中的表" in warning for warning in payload["warnings"]))
+
+    def test_same_seed_produces_same_data_section(self):
+        tables = [{"schema": "public", "name": "users", "rows": 2}]
+        first = services.export_test_data(self.datasource.id, tables, seed=7, actor="owner", is_admin=False)
+        second = services.export_test_data(self.datasource.id, tables, seed=7, actor="owner", is_admin=False)
+
+        first_data = first["content"].split("-- ===== 数据 =====")[1]
+        second_data = second["content"].split("-- ===== 数据 =====")[1]
+        self.assertEqual(first_data, second_data)
+
+    def test_row_limit_is_enforced(self):
+        with self.assertRaisesMessage(services.ProvisionError, "单表行数"):
+            services.export_test_data(
+                self.datasource.id,
+                [{"schema": "public", "name": "users", "rows": 1001}],
+                actor="owner",
+                is_admin=False,
+            )
+
+    DDL = "CREATE TABLE users (id integer PRIMARY KEY, email varchar(64) NOT NULL);"
+
+    def test_parse_table_structure(self):
+        result = services.parse_table_structure(POSTGRESQL, self.DDL)
+
+        self.assertEqual(result["tables"][0]["name"], "users")
+        self.assertEqual(result["tables"][0]["column_count"], 2)
+
+    def test_parse_rejects_drop(self):
+        with self.assertRaisesMessage(services.ProvisionError, "仅支持"):
+            services.parse_table_structure(POSTGRESQL, "DROP TABLE users;")
+
+    def test_export_from_ddl(self):
+        with (
+            mock.patch.object(services, "_connect_admin", side_effect=AssertionError("不应连接目标库")),
+            mock.patch.object(services, "_connect_target", side_effect=AssertionError("不应连接目标库")),
+        ):
+            payload = services.export_test_data_from_ddl(
+                POSTGRESQL,
+                self.DDL,
+                [{"schema": "public", "name": "users", "rows": 2}],
+                seed=1,
+            )
+
+        self.assertIsNone(payload["datasource_id"])
+        self.assertIn("manual", payload["filename"])
+        self.assertIn('INSERT INTO "public"."users"', payload["content"])
+        self.assertEqual(payload["total_rows"], 2)
+
+    def test_export_from_ddl_include_ddl(self):
+        payload = services.export_test_data_from_ddl(
+            POSTGRESQL,
+            self.DDL,
+            [{"schema": "public", "name": "users", "rows": 1}],
+            include_ddl=True,
+        )
+
+        self.assertIn('CREATE TABLE "public"."users"', payload["content"])
+
+    def test_export_from_ddl_orders_parent_first(self):
+        ddl = (
+            "CREATE TABLE users (id integer PRIMARY KEY);"
+            "CREATE TABLE orders (id integer PRIMARY KEY, user_id integer REFERENCES users(id));"
+        )
+        payload = services.export_test_data_from_ddl(
+            POSTGRESQL,
+            ddl,
+            [
+                {"schema": "public", "name": "orders", "rows": 2},
+                {"schema": "public", "name": "users", "rows": 2},
+            ],
+            seed=1,
+        )
+
+        parent = payload["content"].index('INSERT INTO "public"."users"')
+        child = payload["content"].index('INSERT INTO "public"."orders"')
+        self.assertLess(parent, child)
+
+
+class TestDataApiTests(TestCase):
+    URL = "/my-dba/v1/test-data/file"
+
+    def setUp(self):
+        self.datasource = _datasource("export-api", creator="owner")
+        _snapshot(self.datasource, [_table("users", columns=[_column("id")])])
+        self.tables = [{"schema": "public", "name": "users", "rows": 1}]
+
+    def test_owner_can_generate_file(self):
+        client = APIClient()
+        client.force_authenticate(user=AuthedUser(3, "owner", "user"))
+
+        payload = client.post(
+            self.URL,
+            {"datasource_id": self.datasource.id, "tables": self.tables, "seed": 1},
+            format="json",
+        ).json()
+
+        self.assertEqual(payload["code"], 2000)
+        self.assertIn("INSERT INTO", payload["data"]["content"])
+
+    def test_non_owner_is_denied(self):
+        client = APIClient()
+        client.force_authenticate(user=AuthedUser(2, "user", "user"))
+
+        payload = client.post(
+            self.URL,
+            {"datasource_id": self.datasource.id, "tables": self.tables},
+            format="json",
+        ).json()
+
+        self.assertEqual(payload["code"], 4005)
+
+    def test_unauthenticated_is_rejected(self):
+        payload = (
+            APIClient()
+            .post(
+                self.URL,
+                {"datasource_id": self.datasource.id, "tables": self.tables},
+                format="json",
+            )
+            .json()
+        )
+
+        self.assertEqual(payload["code"], 4003)
+
+    def test_parse_api(self):
+        client = APIClient()
+        client.force_authenticate(user=AuthedUser(3, "owner", "user"))
+
+        payload = client.post(
+            "/my-dba/v1/test-data/parse",
+            {"db_type": POSTGRESQL, "ddl": "CREATE TABLE users (id integer PRIMARY KEY);"},
+            format="json",
+        ).json()
+
+        self.assertEqual(payload["code"], 2000)
+        self.assertEqual(payload["data"]["tables"][0]["name"], "users")
+
+    def test_generate_from_ddl_api(self):
+        client = APIClient()
+        client.force_authenticate(user=AuthedUser(3, "owner", "user"))
+
+        payload = client.post(
+            self.URL,
+            {
+                "db_type": POSTGRESQL,
+                "ddl": "CREATE TABLE users (id integer PRIMARY KEY);",
+                "tables": [{"schema": "public", "name": "users", "rows": 1}],
+                "seed": 1,
+            },
+            format="json",
+        ).json()
+
+        self.assertEqual(payload["code"], 2000)
+        self.assertIn("INSERT INTO", payload["data"]["content"])
+
+    def test_generate_requires_exactly_one_source(self):
+        client = APIClient()
+        client.force_authenticate(user=AuthedUser(3, "owner", "user"))
+
+        missing = client.post(self.URL, {"tables": self.tables}, format="json").json()
+        both = client.post(
+            self.URL,
+            {
+                "datasource_id": self.datasource.id,
+                "db_type": POSTGRESQL,
+                "ddl": "CREATE TABLE users (id integer PRIMARY KEY);",
+                "tables": self.tables,
+            },
+            format="json",
+        ).json()
+
+        self.assertEqual(missing["code"], 4000)
+        self.assertEqual(both["code"], 4000)
+
+
 class _FakeCursor:
     def __init__(self):
         self.statements = []

@@ -3,7 +3,7 @@
     <el-card shadow="never">
       <template #header>
         <div class="card-header">
-          <span>测试库预置</span>
+          <span>测试库</span>
         </div>
       </template>
 
@@ -35,14 +35,22 @@
           </el-select>
         </el-col>
         <el-col :span="6">
-          <el-input-number
-            v-model="seed"
-            :min="0"
-            :max="2147483647"
-            placeholder="随机种子（可选）"
-            controls-position="right"
-            style="width: 100%"
-          />
+          <div class="seed-field">
+            <el-input-number
+              v-model="seed"
+              :min="0"
+              :max="2147483647"
+              placeholder="随机种子（可选）"
+              controls-position="right"
+              style="flex: 1"
+            />
+            <el-tooltip
+              placement="top"
+              content="随机种子用于复现：数据源、表、行数与种子都相同时，生成的数据相同；不填则每次随机。"
+            >
+              <el-icon class="hint-icon"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </div>
         </el-col>
         <el-col :span="8" class="env-info">
           <el-tag v-if="currentDatasource" :type="isTestEnv ? 'warning' : 'info'">
@@ -299,13 +307,21 @@
             <el-input-number v-model="manageForm.rows" :min="1" :max="1000" controls-position="right" />
           </el-form-item>
           <el-form-item label="随机种子">
-            <el-input-number
-              v-model="manageForm.seed"
-              :min="0"
-              :max="2147483647"
-              placeholder="可选"
-              controls-position="right"
-            />
+            <div class="seed-field">
+              <el-input-number
+                v-model="manageForm.seed"
+                :min="0"
+                :max="2147483647"
+                placeholder="可选"
+                controls-position="right"
+              />
+              <el-tooltip
+                placement="top"
+                content="相同种子与相同的表/行数会生成相同数据；不填则每次随机。追加数据时内部会错开编号，避免与已有行冲突。"
+              >
+                <el-icon class="hint-icon"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </div>
           </el-form-item>
           <el-alert
             v-if="manageMode === 'append'"
@@ -676,6 +692,18 @@ onMounted(async () => {
 
 .record-meta {
   margin-bottom: 8px;
+}
+
+.seed-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hint-icon {
+  color: #909399;
+  cursor: help;
+  flex: none;
 }
 
 .record-hint {

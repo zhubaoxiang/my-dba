@@ -11,7 +11,8 @@
 import random
 import re
 import secrets
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
+from decimal import Decimal
 
 import psycopg2
 import pymysql
@@ -169,6 +170,282 @@ def delete_record(record, actor: str = "", is_admin: bool = True) -> None:
     record.error = ""
     record.save(update_fields=["status", "error", "update_time"])
     LOGGER.info("测试库已删除 datasource_id=%s db_name=%s", record.datasource_id, record.db_name)
+
+
+# ----------------------------------------------------------------------
+# 测试数据文件导出（只读快照，不连接目标库）
+# ----------------------------------------------------------------------
+
+
+def export_test_data(
+    datasource_id: int,
+    tables: list,
+    seed=None,
+    include_ddl: bool = False,
+    actor: str = "",
+    is_admin: bool = True,
+) -> dict:
+    """
+    按快照结构生成 INSERT SQL 文件内容，供使用者下载后自行导入
+
+    只读元数据，不连接目标库、不执行任何语句；普通用户限自己创建的数据源。
+    """
+    target = datasource_services.provisioning_target(datasource_id)
+    if target is None:
+        raise ProvisionError("数据源不存在")
+    if not is_admin and target.get("creator") != actor:
+        raise ProvisionPermissionError("只能使用自己创建的数据源")
+
+    snapshot = datasource_services.latest_snapshot_data(datasource_id)
+    if snapshot is None:
+        raise ProvisionError("该数据源尚未采集，无法生成测试数据")
+    return _build_export(
+        db_type=target["db_type"],
+        datasource_id=target["id"],
+        datasource_name=target["name"],
+        snapshot_time=snapshot.get("collect_time", ""),
+        all_tables=snapshot.get("tables") or [],
+        selection=tables,
+        seed=seed,
+        include_ddl=include_ddl,
+        actor=actor,
+    )
+
+
+def parse_table_structure(db_type: int, ddl_text: str) -> dict:
+    """
+    解析手写的 CREATE TABLE / CREATE INDEX / ALTER TABLE，返回表结构摘要
+    """
+    tables, warnings = _parse_ddl_tables(db_type, ddl_text)
+    return {
+        "db_type": db_type,
+        "db_type_label": custom_enum.DbTypeEnum(db_type).label,
+        "tables": [
+            {
+                "schema": table.get("schema"),
+                "name": table.get("name"),
+                "column_count": len(table.get("columns") or []),
+            }
+            for table in tables
+        ],
+        "warnings": warnings,
+    }
+
+
+def export_test_data_from_ddl(
+    db_type: int,
+    ddl_text: str,
+    tables: list,
+    seed=None,
+    include_ddl: bool = False,
+    actor: str = "",
+) -> dict:
+    """
+    基于手动输入的表结构生成数据文件；不依赖数据源，因此没有归属限制
+    """
+    parsed_tables, parse_warnings = _parse_ddl_tables(db_type, ddl_text)
+    payload = _build_export(
+        db_type=db_type,
+        datasource_id=None,
+        datasource_name="手动输入的表结构",
+        snapshot_time="",
+        all_tables=parsed_tables,
+        selection=tables,
+        seed=seed,
+        include_ddl=include_ddl,
+        actor=actor,
+    )
+    payload["warnings"] = parse_warnings + payload["warnings"]
+    return payload
+
+
+def _parse_ddl_tables(db_type: int, ddl_text: str) -> tuple:
+    """
+    解析手写 DDL 为快照形态的表结构
+
+    只接受 CREATE TABLE / CREATE INDEX / ALTER TABLE；注释类语句忽略并给出提示，
+    其余（DROP / TRUNCATE / 视图等）直接拒绝，避免把「删表」当成结构定义。
+    """
+    from apps.ddlreview import merge as ddl_merge
+    from apps.ddlreview import parser as ddl_parser
+
+    parsed = ddl_parser.parse_ddl(ddl_text, db_type)
+    if not parsed.ok:
+        messages = "；".join(str(item.get("description") or "解析失败") for item in parsed.errors[:3])
+        raise ProvisionError(f"表结构解析失败：{messages}")
+
+    tables = []
+    warnings = []
+    for statement in parsed.statements:
+        if statement.kind == "COMMENT" or (not statement.supported and statement.kind == "OTHER"):
+            warnings.append(f"第 {statement.index} 条语句已忽略：{statement.reason}")
+            continue
+        if statement.kind not in {"CREATE_TABLE", "CREATE_INDEX", "ALTER_TABLE"}:
+            raise ProvisionError(
+                f"仅支持 CREATE TABLE / CREATE INDEX / ALTER TABLE，"
+                f"暂不支持第 {statement.index} 条语句（{statement.kind}）"
+            )
+        if not statement.supported:
+            raise ProvisionError(f"第 {statement.index} 条语句不支持：{statement.reason}")
+        applied = ddl_merge.apply(tables, statement.expression)
+        if not applied["applied"]:
+            raise ProvisionError(f"第 {statement.index} 条语句无法应用：{applied['error']}")
+    if not tables:
+        raise ProvisionError("没有解析到任何表结构")
+    # 手写 DDL 里未限定 schema 的外键，按子表所在 schema 归一，否则拓扑排序匹配不到父表
+    for table in tables:
+        for foreign_key in table.get("foreign_keys") or []:
+            if not foreign_key.get("ref_schema"):
+                foreign_key["ref_schema"] = table.get("schema") or "public"
+    return tables, warnings
+
+
+def _build_export(
+    db_type: int,
+    datasource_id,
+    datasource_name: str,
+    snapshot_time: str,
+    all_tables: list,
+    selection: list,
+    seed,
+    include_ddl: bool,
+    actor: str,
+) -> dict:
+    config = _config()
+    _validate_limits(selection, config)
+
+    index = {(table.get("schema"), table.get("name")): table for table in all_tables}
+    selected = []
+    rows_map = {}
+    for item in selection:
+        table = _resolve_table(index, item)
+        selected.append(table)
+        rows_map[_key(table)] = item["rows"]
+
+    warnings = []
+    ordered = _ordered_tables(selected, warnings)
+    selected_keys = {_key(table) for table in ordered}
+    for table in ordered:
+        for foreign_key in table.get("foreign_keys") or []:
+            ref = (foreign_key.get("ref_schema"), foreign_key.get("ref_table"))
+            if ref not in selected_keys:
+                warnings.append(
+                    f"表 {table.get('name')} 的外键 {foreign_key.get('name')} 引用了未选中的表 "
+                    f"{foreign_key.get('ref_table')}，生成的外键值可能无法通过目标库校验"
+                )
+
+    if seed is None:
+        seed = secrets.randbelow(2**31)
+
+    ddl_statements = []
+    if include_ddl:
+        plan = ddl.build_plan(db_type, "export", ordered)
+        ddl_statements = plan["statements"]
+        warnings.extend(plan["warnings"])
+
+    rng = random.Random(seed)
+    generated = {}
+    insert_statements = []
+    total_rows = 0
+    for table in ordered:
+        key = _key(table)
+        rows = data_gen.generate_rows(table, rows_map[key], generated, selected_keys, rng)
+        insert_statements.extend(_insert_statements(db_type, table, rows))
+        generated[key] = rows
+        total_rows += len(rows)
+
+    db_type_label = custom_enum.DbTypeEnum(db_type).label
+    lines = [
+        "-- 由 my-dba 生成的测试数据文件",
+        (
+            f"-- 数据源：{datasource_name}（{db_type_label}）"
+            if datasource_id is not None
+            else f"-- 表结构来源：手动输入（{db_type_label}）"
+        ),
+    ]
+    if snapshot_time:
+        lines.append(f"-- 快照采集时间：{snapshot_time}")
+    lines.extend(
+        [
+            f"-- 表数量：{len(ordered)}，总行数：{total_rows}",
+            f"-- 生成时间：{datetime.now():%Y-%m-%d %H:%M:%S}",
+            "-- 系统不会执行本文件；请确认目标环境后再手动导入。",
+        ]
+    )
+    if db_type == MYSQL:
+        lines.append("-- MySQL 导入前请先 USE 目标数据库。")
+    for warning in warnings:
+        lines.append(f"-- 警告：{warning}")
+    lines.append("")
+    if ddl_statements:
+        lines.append("-- ===== DDL =====")
+        lines.extend(f"{statement};" for statement in ddl_statements)
+        lines.append("")
+    if insert_statements:
+        lines.append("-- ===== 数据 =====")
+        lines.extend(insert_statements)
+
+    source = datasource_id if datasource_id is not None else "manual"
+    filename = f"test_data_{source}_{datetime.now():%Y%m%d%H%M%S}.sql"
+    LOGGER.info(
+        "导出测试数据文件 source=%s tables=%s rows=%s actor=%s",
+        source,
+        len(ordered),
+        total_rows,
+        actor,
+    )
+    return {
+        "filename": filename,
+        "content": "\n".join(lines) + "\n",
+        "datasource_id": datasource_id,
+        "datasource_name": datasource_name,
+        "db_type": db_type,
+        "db_type_label": db_type_label,
+        "snapshot_collect_time": snapshot_time,
+        "tables": [
+            {"schema": item.get("schema"), "name": item.get("name"), "rows": rows_map[_key(item)]} for item in ordered
+        ],
+        "total_rows": total_rows,
+        "warnings": warnings,
+    }
+
+
+def _insert_statements(db_type: int, table: dict, rows: list) -> list:
+    columns = [column.get("name") for column in table.get("columns") or []]
+    if not columns or not rows:
+        return []
+    target = ddl.qualified_table(db_type, table)
+    quoted_columns = ", ".join(ddl.quote_ident(db_type, column) for column in columns)
+    statements = []
+    for start in range(0, len(rows), 100):
+        batch = rows[start : start + 100]
+        values = ",\n".join(
+            "(" + ", ".join(_sql_literal(row.get(column), db_type) for column in columns) + ")" for row in batch
+        )
+        statements.append(f"INSERT INTO {target} ({quoted_columns}) VALUES\n{values};")
+    return statements
+
+
+def _sql_literal(value, db_type: int) -> str:
+    if value is None:
+        return "NULL"
+    if isinstance(value, bool):
+        if db_type == POSTGRESQL:
+            return "TRUE" if value else "FALSE"
+        return "1" if value else "0"
+    if isinstance(value, int | float | Decimal):
+        return str(value)
+    if isinstance(value, datetime):
+        return f"'{value.isoformat(sep=' ')}'"
+    if isinstance(value, date | time):
+        return f"'{value.isoformat()}'"
+    if isinstance(value, bytes):
+        encoded = value.hex()
+        return f"E'\\\\x{encoded}'::bytea" if db_type == POSTGRESQL else f"0x{encoded}"
+    text = str(value).replace("'", "''")
+    if db_type == MYSQL:
+        text = text.replace("\\", "\\\\")
+    return f"'{text}'"
 
 
 # ----------------------------------------------------------------------
