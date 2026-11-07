@@ -59,6 +59,11 @@ def _config() -> dict:
         "max_total_rows": _int_config("provisioning_max_total_rows", 5000),
         "timeout_seconds": _int_config("provisioning_timeout_seconds", 120),
         "snapshot_max_age_days": _int_config("provisioning_snapshot_max_age_days", 7),
+        "bulk_threshold": _int_config("provisioning_bulk_threshold", 100000),
+        "bulk_max_rows_per_table": _int_config("provisioning_bulk_max_rows_per_table", 100000000),
+        "bulk_max_total_rows": _int_config("provisioning_bulk_max_total_rows", 100000000),
+        "bulk_batch_rows": _int_config("provisioning_bulk_batch_rows", 20000),
+        "bulk_commit_rows": _int_config("provisioning_bulk_commit_rows", 1000000),
     }
 
 

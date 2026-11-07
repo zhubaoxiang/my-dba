@@ -104,50 +104,126 @@ def describe_semantics(table: dict) -> list:
     return notes
 
 
+class KeyPool:
+    """
+    有界父键池：只保留最多 limit 个已写入的父表引用列元组，供子表外键采样
+
+    大数据模式不保存父表整表行，只保留键池；父表写入时按 stride 采样即可。
+    """
+
+    def __init__(self, limit: int = 100_000):
+        self.limit = max(1, int(limit))
+        self._values = []
+
+    def add(self, values):
+        if len(self._values) < self.limit:
+            self._values.append(tuple(values))
+
+    def sample(self, rng):
+        if not self._values:
+            raise DataError("父表没有可引用的键值")
+        return self._values[rng.randrange(len(self._values))]
+
+    def __len__(self):
+        return len(self._values)
+
+
+def iter_rows(table: dict, row_count: int, pools: dict, selected_keys: set, rng, start_index: int = 0):
+    """
+    流式生成一张表的行，不物化整表、不做内存唯一校验
+
+    `pools` 的 key 为 `((ref_schema, ref_table), ref_columns_tuple)`，由调用方维护。
+    """
+    plans = _column_plans(table, selected_keys)
+    for offset in range(row_count):
+        index = start_index + offset
+        row = {}
+        for plan in plans:
+            name = plan["name"]
+            if plan["fk_kind"] == "self":
+                row[name] = None
+                continue
+            if plan["fk_kind"] == "ref":
+                pool = pools.get(plan["pool_key"])
+                if pool is None or len(pool) == 0:
+                    raise DataError(f"表 {table.get('name')} 的外键找不到父表数据")
+                values = pool.sample(rng)
+                row[name] = values[plan["fk_position"]]
+                continue
+
+            if plan["applied"]:
+                value = _semantic_value(plan["semantic"], index)
+            else:
+                value = _generic_value(plan["family"], index, rng, plan)
+            if value is None and not plan["nullable"]:
+                raise DataError(f"列 {name} 的类型 {plan['data_type']} 无法生成数据，请缩小表范围")
+            row[name] = _fit_length(value, plan["length"])
+        _check_not_null(table, row)
+        yield row
+
+
 def generate_rows(table: dict, row_count: int, generated: dict, selected_keys: set, rng, start_index: int = 0) -> list:
     """
     生成一张表的数据；父表数据必须已在 `generated` 中
 
-    `start_index` 用于向已有表追加数据：让按行号生成的语义值避开已有行的编号区间。
+    普通模式保留整表返回与内存唯一校验；大数据路径改用 `iter_rows`。
     """
-    columns = table.get("columns") or []
-    fk_map = _fk_map(table, selected_keys)
-    rows = []
-
-    for offset in range(row_count):
-        index = start_index + offset
-        row = {}
-        for column in columns:
-            name = column.get("name")
-            if name in fk_map:
-                foreign_key = fk_map[name]
-                if foreign_key is None:
-                    row[name] = None
-                    continue
-                parent_key = (foreign_key.get("ref_schema"), foreign_key.get("ref_table"))
-                parents = generated.get(parent_key) or []
-                if not parents:
-                    raise DataError(f"表 {table.get('name')} 的外键 {foreign_key.get('name')} 找不到父表数据")
-                position = list(foreign_key.get("columns") or []).index(name)
-                ref_column = (foreign_key.get("ref_columns") or [])[position]
-                parent = parents[rng.randrange(len(parents))]
-                row[name] = parent.get(ref_column)
-                continue
-
-            family = type_family(column.get("data_type"))
-            semantic = semantic_of(column)
-            if semantic and _compatible(semantic, family):
-                value = _semantic_value(semantic, index)
-            else:
-                value = _generic_value(family, index, rng, column)
-            if value is None and not column.get("nullable", True):
-                raise DataError(f"列 {column.get('name')} 的类型 {column.get('data_type')} 无法生成数据，请缩小表范围")
-            row[name] = _fit_length(value, column.get("length"))
-        _check_not_null(table, row)
-        rows.append(row)
-
+    pools = _pools_from_generated(table, generated, selected_keys)
+    rows = list(iter_rows(table, row_count, pools, selected_keys, rng, start_index))
     _validate_unique(table, rows)
     return rows
+
+
+def _column_plans(table: dict, selected_keys: set) -> list:
+    fk_map = _fk_map(table, selected_keys)
+    plans = []
+    for column in table.get("columns") or []:
+        name = column.get("name")
+        family = type_family(column.get("data_type"))
+        semantic = semantic_of(column)
+        plan = {
+            "name": name,
+            "data_type": column.get("data_type"),
+            "family": family,
+            "semantic": semantic,
+            "applied": bool(semantic and _compatible(semantic, family)),
+            "length": column.get("length"),
+            "nullable": column.get("nullable", True),
+            "fk_kind": None,
+            "pool_key": None,
+            "fk_position": 0,
+        }
+        if name in fk_map:
+            foreign_key = fk_map[name]
+            if foreign_key is None:
+                plan["fk_kind"] = "self"
+            else:
+                columns = list(foreign_key.get("columns") or [])
+                ref_columns = tuple(foreign_key.get("ref_columns") or [])
+                plan["fk_kind"] = "ref"
+                plan["fk_position"] = columns.index(name)
+                plan["pool_key"] = ((foreign_key.get("ref_schema"), foreign_key.get("ref_table")), ref_columns)
+        plans.append(plan)
+    return plans
+
+
+def _pools_from_generated(table: dict, generated: dict, selected_keys: set) -> dict:
+    pools = {}
+    self_key = (table.get("schema"), table.get("name"))
+    for foreign_key in table.get("foreign_keys") or []:
+        ref = (foreign_key.get("ref_schema"), foreign_key.get("ref_table"))
+        if ref not in selected_keys or ref == self_key:
+            continue
+        ref_columns = tuple(foreign_key.get("ref_columns") or [])
+        pool_key = (ref, ref_columns)
+        if pool_key in pools:
+            continue
+        parents = generated.get(ref) or []
+        pool = KeyPool(limit=max(1, len(parents)))
+        for parent in parents:
+            pool.add(parent.get(column) for column in ref_columns)
+        pools[pool_key] = pool
+    return pools
 
 
 def _fk_map(table: dict, selected_keys: set) -> dict:
@@ -189,15 +265,15 @@ def _semantic_value(semantic: str, index: int):
     if semantic == "email":
         return f"test{number}@example.com"
     if semantic == "phone":
-        return f"138{number:08d}"
+        return f"138{number % 100_000_000:08d}"
     if semantic == "username":
         return f"test_user_{number}"
     if semantic == "name":
         return f"测试用户{number}"
     if semantic == "amount":
-        return Decimal(number) + Decimal("0.25")
+        return Decimal(number % 100_000_000) + Decimal("0.25")
     if semantic == "code":
-        return f"CODE{number:08d}"
+        return f"CODE{number % 100_000_000:08d}"
     if semantic == "url":
         return f"https://example.com/{number}"
     if semantic == "ip":
@@ -218,7 +294,7 @@ def _generic_value(family: str, index: int, rng, column: dict):
     if family == _INT:
         return number
     if family == _NUMBER:
-        return Decimal(number) + Decimal("0.5")
+        return Decimal(number % 100_000_000) + Decimal("0.5")
     if family == _STRING:
         return f"{column.get('name')}_{number}"
     if family == _BOOL:
@@ -229,7 +305,8 @@ def _generic_value(family: str, index: int, rng, column: dict):
         # 统一给 JSON 字符串：psycopg2 不会自动适配 dict
         return json.dumps({"row": number}, ensure_ascii=False)
     if family == _DATETIME:
-        return datetime(2020, 1, 1, 9, 0, 0) + timedelta(minutes=index)
+        # 有界循环，避免亿级行越过 TIMESTAMP 上限
+        return datetime(2020, 1, 1, 9, 0, 0) + timedelta(minutes=index % 5_000_000)
     if family == _DATE:
         return date(2020, 1, 1) + timedelta(days=index % 3650)
     if family == _TIME:
@@ -257,7 +334,7 @@ def _check_not_null(table: dict, row: dict):
             raise DataError(f"表 {table.get('name')} 的列 {column.get('name')} 不可为空，但无法生成值")
 
 
-def _validate_unique(table: dict, rows: list):
+def _unique_keys(table: dict) -> list:
     keys = []
     primary_key = table.get("primary_key") or {}
     if primary_key.get("columns"):
@@ -267,6 +344,82 @@ def _validate_unique(table: dict, rows: list):
             columns = tuple(index.get("columns") or [])
             if columns:
                 keys.append(columns)
+    return keys
+
+
+def bulk_risks(table: dict, row_count: int) -> list:
+    """
+    大数据模式预检：估算唯一约束的取值空间
+
+    返回 `[{"level": "error"|"warning", "message": str}]`；error 时调用方应拒绝，
+    warning 只提示。空间未知时不猜测。
+    """
+    columns = {column.get("name"): column for column in table.get("columns") or []}
+    risks = []
+    for key in _unique_keys(table):
+        capacity = _key_capacity(key, columns)
+        if capacity is None:
+            continue
+        label = "、".join(key)
+        if capacity < row_count:
+            risks.append(
+                {
+                    "level": "error",
+                    "message": f"唯一约束（{label}）的取值空间约 {capacity}，小于计划行数 {row_count}",
+                }
+            )
+        elif capacity < row_count * 10:
+            risks.append(
+                {
+                    "level": "warning",
+                    "message": f"唯一约束（{label}）的取值空间约 {capacity}，接近计划行数，可能冲突",
+                }
+            )
+    return risks
+
+
+def _key_capacity(columns: tuple, column_map: dict):
+    total = 1
+    for name in columns:
+        column = column_map.get(name)
+        if column is None:
+            return None
+        family = type_family(column.get("data_type"))
+        semantic = semantic_of(column)
+        if semantic == "status":
+            capacity = 3
+        elif semantic == "ip":
+            capacity = 254
+        elif family == _BOOL:
+            capacity = 2
+        elif family == _BINARY:
+            capacity = 1
+        elif family == _DATE:
+            capacity = 3650
+        elif family == _TIME:
+            capacity = 60
+        elif family == _DATETIME:
+            capacity = 5_000_000
+        elif family == _INT:
+            capacity = 32767 if "smallint" in (column.get("data_type") or "").lower() else None
+        elif family == _STRING:
+            length = column.get("length")
+            try:
+                capacity = 10 ** int(length) if length not in (None, -1) else None
+            except (TypeError, ValueError):
+                capacity = None
+        else:
+            capacity = None
+        if capacity is None:
+            return None
+        total *= capacity
+        if total > 10**12:
+            return None
+    return total
+
+
+def _validate_unique(table: dict, rows: list):
+    keys = _unique_keys(table)
 
     for columns in keys:
         seen = set()

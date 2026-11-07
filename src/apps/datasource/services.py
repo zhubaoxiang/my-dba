@@ -424,6 +424,18 @@ def latest_snapshot_data(datasource_id: int):
     return data
 
 
+def snapshot_data_by_id(snapshot_id: int):
+    """
+    按快照 id 取完整 raw_data 副本；大数据任务使用固定快照，避免排队期间 latest 变化
+    """
+    snapshot = models.MetadataSnapshot.objects.filter(id=snapshot_id, is_deleted=False).first()
+    if snapshot is None:
+        return None
+    data = dict(snapshot.raw_data or {})
+    data["collect_time"] = snapshot.collect_time.strftime("%Y-%m-%d %H:%M:%S")
+    return data
+
+
 def analyze_snapshot_data(data: dict, rule_codes=None, scope=None, rule_overrides=None) -> list:
     """
     对「快照形态」的数据跑表规则

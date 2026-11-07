@@ -81,9 +81,12 @@ def build_single_table(db_type: int, table: dict, existing_tables: list) -> tupl
     return statements, warnings
 
 
-def build_plan(db_type: int, db_name: str, ordered_tables: list) -> dict:
+def build_plan(db_type: int, db_name: str, ordered_tables: list, *, defer_indexes: bool = False) -> dict:
     """
-    生成建库之后的全部语句（PG 的 CREATE DATABASE 单独返回）
+    生成建库之后的语句（PG 的 CREATE DATABASE 单独返回）
+
+    `defer_indexes=True` 时只返回建 schema/表语句，索引与外键放进 `post_statements`，
+    供大数据模式先灌数据、后建索引与外键。
     """
     warnings = []
     statements = []
@@ -97,16 +100,26 @@ def build_plan(db_type: int, db_name: str, ordered_tables: list) -> dict:
     for table in ordered_tables:
         statements.append(_create_table(db_type, table, warnings))
 
+    index_statements = []
     for table in ordered_tables:
-        statements.extend(_create_indexes(db_type, table, warnings))
+        index_statements.extend(_create_indexes(db_type, table, warnings))
 
     selected = {(t.get("schema"), t.get("name")): t for t in ordered_tables}
+    fk_statements = []
     for table in ordered_tables:
-        statements.extend(_create_foreign_keys(db_type, table, selected, warnings))
+        fk_statements.extend(_create_foreign_keys(db_type, table, selected, warnings))
+
+    post_statements = []
+    if defer_indexes:
+        post_statements = index_statements + fk_statements
+    else:
+        statements.extend(index_statements)
+        statements.extend(fk_statements)
 
     return {
         "create_database_sql": create_database_sql(db_type, db_name),
         "statements": statements,
+        "post_statements": post_statements,
         "warnings": warnings,
     }
 

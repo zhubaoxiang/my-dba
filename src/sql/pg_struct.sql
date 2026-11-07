@@ -96,9 +96,21 @@ CREATE TABLE IF NOT EXISTS provisioned_database (
     datasource_id integer       NOT NULL,
     db_name       varchar(128)  NOT NULL,
     status        smallint      NOT NULL DEFAULT 1,
-    tables        jsonb         NOT NULL DEFAULT '[]'::jsonb,
-    row_count     integer       NOT NULL DEFAULT 0,
-    error         varchar(1024) NOT NULL DEFAULT '',
+    tables         jsonb         NOT NULL DEFAULT '[]'::jsonb,
+    row_count      integer       NOT NULL DEFAULT 0,
+    error          varchar(1024) NOT NULL DEFAULT '',
+    snapshot_id    integer       NULL,
+    seed           integer       NULL,
+    bulk           boolean       NOT NULL DEFAULT false,
+    total_rows     bigint        NOT NULL DEFAULT 0,
+    processed_rows bigint        NOT NULL DEFAULT 0,
+    current_table  varchar(256)  NOT NULL DEFAULT '',
+    database_created boolean     NOT NULL DEFAULT false,
+    cancel_requested boolean     NOT NULL DEFAULT false,
+    worker_id      varchar(128)  NOT NULL DEFAULT '',
+    heartbeat_time timestamp     NULL,
+    start_time     timestamp     NULL,
+    end_time       timestamp     NULL,
     create_time   timestamp     NOT NULL DEFAULT now(),
     update_time   timestamp     NOT NULL DEFAULT now(),
     creator       varchar(32)   NOT NULL DEFAULT '',
@@ -106,12 +118,26 @@ CREATE TABLE IF NOT EXISTS provisioned_database (
 );
 
 COMMENT ON TABLE provisioned_database IS '由测试库预置功能创建的独立数据库记录';
-COMMENT ON COLUMN provisioned_database.status IS '状态：1=创建中 2=可用 3=失败 4=已删除';
+COMMENT ON COLUMN provisioned_database.status IS '状态：1=创建中 2=可用 3=失败 4=已删除 5=排队中 6=执行中 7=已取消';
 COMMENT ON COLUMN provisioned_database.tables IS '选中的表与每表行数';
 COMMENT ON COLUMN provisioned_database.row_count IS '实际写入的总行数';
+COMMENT ON COLUMN provisioned_database.snapshot_id IS '大数据任务执行时固定的快照 id';
+COMMENT ON COLUMN provisioned_database.seed IS '随机种子，worker 在独立进程中复现';
+COMMENT ON COLUMN provisioned_database.bulk IS '是否大数据模式（COPY/LOAD DATA + 后置索引与外键）';
+COMMENT ON COLUMN provisioned_database.total_rows IS '计划总行数';
+COMMENT ON COLUMN provisioned_database.processed_rows IS '已写入行数（进度）';
+COMMENT ON COLUMN provisioned_database.current_table IS '当前写入的表 schema.name';
+COMMENT ON COLUMN provisioned_database.database_created IS '目标 database 是否已创建，用于崩溃恢复清理';
+COMMENT ON COLUMN provisioned_database.cancel_requested IS '用户请求取消，worker 在批次边界协作退出';
+COMMENT ON COLUMN provisioned_database.worker_id IS '领取任务的 worker（host:pid）';
+COMMENT ON COLUMN provisioned_database.heartbeat_time IS 'worker 心跳，用于识别进程中断';
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_provisioned_database_name ON provisioned_database (datasource_id, db_name);
 CREATE INDEX IF NOT EXISTS idx_provisioned_database_datasource ON provisioned_database (datasource_id, id DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_provisioned_database_active ON provisioned_database (datasource_id)
+    WHERE is_deleted = false AND status IN (5, 6);
+CREATE INDEX IF NOT EXISTS idx_provisioned_database_status ON provisioned_database (status, id)
+    WHERE is_deleted = false;
 
 -- 库表健康问题
 CREATE TABLE IF NOT EXISTS catalog_issue (

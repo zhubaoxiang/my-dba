@@ -188,9 +188,14 @@ class DatasourceEnvEnum(models.IntegerChoices):
 class ProvisionStatusEnum(models.IntegerChoices):
     """
     测试库预置记录状态
+
+    普通模式同步执行，使用 CREATING；大数据模式异步执行，使用 PENDING/RUNNING。
     """
 
     CREATING = 1, "创建中"
     READY = 2, "可用"
     FAILED = 3, "失败"
     DROPPED = 4, "已删除"
+    PENDING = 5, "排队中"
+    RUNNING = 6, "执行中"
+    CANCELLED = 7, "已取消"
