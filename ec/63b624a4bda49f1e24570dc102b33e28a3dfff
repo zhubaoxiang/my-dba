@@ -1,0 +1,21 @@
+static/src/layout/index.vue
+  s_40b41b06c8ed6d::t_f77a3fa3f96421 232
+  s_40b41b06c8ed6d::t_c8ebc28d10920b 52-66
+  s_40b41b06c8ed6d::t_2b18a6180e36a2 227-231,233-239
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ec63b624a4bda49f1e24570dc102b33e28a3dfff",
+  "prompts": {},
+  "sessions": {
+    "s_40b41b06c8ed6d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8745741f-5443-4735-be94-58eabd83aa82",
+        "model": "deepseek-flash"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    }
+  }
+}
