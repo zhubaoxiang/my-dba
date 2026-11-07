@@ -1,0 +1,37 @@
+src/apps/provisioning/tests.py
+  s_391980184528ae::t_924f8ecb900c36 1061-1099
+src/apps/datasource/services.py
+  s_391980184528ae::t_20e0c08b7d8991 367-377
+src/apps/provisioning/views.py
+  s_391980184528ae::t_0e2b5eb19970ee 7,11
+  s_391980184528ae::t_be6a97b19a7114 101-107
+openspec/changes/add-test-db-provisioning/tasks.md
+  s_391980184528ae::t_641f98a0dbbe2c 61
+openspec/changes/add-test-db-provisioning/specs/test-db-provisioning/spec.md
+  s_391980184528ae::t_d328a2b22c3e95 244-245
+  s_391980184528ae::t_c0e725776c1b76 259-264
+static/src/views/provisioning/index.vue
+  s_391980184528ae::t_abdef3aea58d11 250-261
+  s_391980184528ae::t_a6ba20f8997b30 614-618,626-628
+  s_391980184528ae::t_4aa618c99120ee 433
+  s_391980184528ae::t_ce619fa606ff15 629-630
+docs/test-db-provisioning.md
+  s_391980184528ae::t_5b8b78fbf1280c 30-31
+  s_391980184528ae::t_9885fe36debbf2 35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d4ee6e512eb170630aa6f0f93199ff90d67825f4",
+  "prompts": {},
+  "sessions": {
+    "s_391980184528ae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e7bece69-09ff-42a7-965f-c10260ab6fd3",
+        "model": "deepseek-flash"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    }
+  }
+}
