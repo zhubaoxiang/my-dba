@@ -4,7 +4,10 @@
       <template #header>
         <div class="card-header">
           <span>测试库</span>
-          <el-button type="primary" @click="openCreate">新建测试库</el-button>
+          <div class="header-actions">
+            <el-button type="primary" @click="openCreate">新建测试库</el-button>
+            <el-button @click="loadRecords">刷新</el-button>
+          </div>
         </div>
       </template>
 
@@ -259,7 +262,6 @@
           <el-button @click="searchRecords">搜索</el-button>
           <span class="meta">已创建的测试库 · 共 {{ recordsTotal }} 个</span>
         </div>
-        <el-button @click="loadRecords">刷新</el-button>
       </div>
           <el-table :data="records" v-loading="recordsLoading" border>
             <el-table-column type="expand">
