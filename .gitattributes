@@ -1,0 +1,2 @@
+# 容器内执行的脚本必须保持 LF，否则 Windows 检出后在 Linux 容器里无法执行
+*.sh text eol=lf

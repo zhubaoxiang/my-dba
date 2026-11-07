@@ -7,7 +7,7 @@
 ## 部署形态
 
 ```
-浏览器 :443（80 自动跳转）
+浏览器 :443（80 自动跳转）或 :8765（纯 HTTP）
   → frontend（nginx）
       ├─ /static/*、/login、/home …  → 前端静态资源
       └─ /my-dba/*                   → 127.0.0.1:8080
@@ -18,7 +18,7 @@
 
 | 服务 | 网络 | 端口 | 说明 |
 |------|------|------|------|
-| `frontend` | host | 80 / 443 | 前端 nginx；80 跳 443，静态资源 + `/my-dba` 反代 |
+| `frontend` | host | 80 / 443 / 8765 | 前端 nginx；80 跳 443（受 `NGINX_HTTPS` 控制），8765 为常驻 HTTP 入口，静态资源 + `/my-dba` 反代 |
 | `web` | host | 8080 | Django + gunicorn；同时启动指标采集进程 |
 | `postgres` | host | 5432 | 业务库；使用已有数据卷 |
 | `qdrant` | bridge | 6333 / 6334 | 知识问答向量库 |
@@ -160,7 +160,14 @@ LDAP 用户不需要本地账号；本地账号优先，只有本地不存在该
 
 ## 五、前端与 nginx
 
-前端镜像基于 `static/Dockerfile`，nginx 配置在 `static/nginx/conf/nginx.conf`：
+前端镜像基于 `static/Dockerfile`，nginx 配置在 `static/nginx/conf/`：
+
+- `nginx.conf`：全局配置，加载 `conf.d/*.conf`
+- `conf.d/http.conf`：8765 纯 HTTP 入口，始终启用
+- `conf.d/https.conf`：80 跳 443 与 443 SSL，可关闭
+- `snippets/locations.inc`：HTTP / HTTPS 共用的路由
+
+共用路由包括：
 
 - `/` 与前端路由（`/login`、`/home`）回落到 `index.html`
 - `/static/*` 直接返回 Vite 产物并缓存 30 天
@@ -168,18 +175,24 @@ LDAP 用户不需要本地账号；本地账号优先，只有本地不存在该
 - 知识问答 SSE 单独关闭了 `proxy_buffering`，避免流式回答被攒住
 - 上传限制 `client_max_body_size 25m`
 
-nginx 监听 80（跳转）和 443（SSL），证书放在宿主机：
+HTTPS 由 compose 的 `NGINX_HTTPS` 控制：
+
+| 值 | 行为 |
+|----|------|
+| `auto`（默认） | 证书存在才启用 443 与 80 跳转 |
+| `on` | 强制启用（缺证书会启动失败） |
+| `off` | 关闭 443 与 80，仅保留 8765 的 HTTP |
+
+证书放在宿主机，compose 只读挂载到容器的 `/etc/nginx/cert`：
 
 ```text
 static/nginx/cert/server.crt   # 完整证书链
 static/nginx/cert/server.key   # 私钥，权限 600
 ```
 
-compose 已把该目录只读挂载到容器的 `/etc/nginx/cert`。注意：
-
 - 证书目录被 `static/.gitignore` 忽略，不会进 git；也被 `.dockerignore` 排除，不会进镜像
-- **启动前必须放好证书**，否则 nginx 会因加载证书失败而退出
-- 如果不用容器做 TLS，可以去掉 compose 的证书挂载并调整 nginx 配置，改由宿主机已有 nginx 终止 TLS
+- `auto` 下缺证书不会导致 nginx 退出，只是不监听 443/80
+- 如果不用容器做 TLS，可以设置 `NGINX_HTTPS=off`，改由宿主机已有 nginx 终止 TLS
 
 ## 六、运行与运维
 

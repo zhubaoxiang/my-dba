@@ -63,6 +63,9 @@ services:
     container_name: my-dba-frontend
     # 与 web 同为 host 网络，nginx 直接反代 127.0.0.1:8080
     network_mode: "host"
+    environment:
+      # auto=证书存在才启用 443 与 80 跳转；on=强制启用；off=仅保留 8765 的 HTTP
+      NGINX_HTTPS: ${NGINX_HTTPS:-auto}
     volumes:
       # 证书只在宿主机，挂载进容器；不要 COPY 进镜像
       - ./static/nginx/cert:/etc/nginx/cert:ro
