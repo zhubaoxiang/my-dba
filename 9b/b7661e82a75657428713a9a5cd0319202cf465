@@ -1,0 +1,26 @@
+.gitignore
+  s_40b41b06c8ed6d::t_10c1f3edf2c668 16-18
+.dockerignore
+  s_40b41b06c8ed6d::t_3b62624328df23 33-35
+docs/deployment.md
+  s_40b41b06c8ed6d::t_f3579f0920de5c 68-72,80,83
+  s_40b41b06c8ed6d::t_66b44447363017 84
+.env.example
+  s_40b41b06c8ed6d::t_012426f846fdd0 1-16
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9bb7661e82a75657428713a9a5cd0319202cf465",
+  "prompts": {},
+  "sessions": {
+    "s_40b41b06c8ed6d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8745741f-5443-4735-be94-58eabd83aa82",
+        "model": "deepseek-flash"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    }
+  }
+}
