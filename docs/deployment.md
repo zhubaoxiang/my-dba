@@ -65,7 +65,11 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 
 ### 2. 环境变量
 
-在部署目录创建 `.env`：
+复制模板并按实际环境填写（模板见根目录 `.env.example`）：
+
+```bash
+cp .env.example .env
+```
 
 ```ini
 POSTGRES_PASSWORD=<与 [db_prod] 的 password 一致>
@@ -73,7 +77,10 @@ PG_VOLUME_NAME=<已有 PG 数据卷名>
 POSTGRES_DB=<与 [db_prod] 的 name 一致>
 POSTGRES_USER=<与 [db_prod] 的 username 一致>
 ENV_TYPE=prod
+NGINX_HTTPS=auto
 ```
+
+`.env` 已被 `.gitignore` 与 `.dockerignore` 排除，不会进仓库或镜像。
 
 > `POSTGRES_PASSWORD` 只在**首次初始化空卷**时生效；已有数据卷的密码以库内实际值为准，`[db_prod].password` 必须填实际口令。
 

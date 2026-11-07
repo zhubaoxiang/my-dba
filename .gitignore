@@ -13,3 +13,6 @@ logs
 .ci
 .ruff_cache
 .workbuddy
+
+# 环境变量（.env.example 是模板，保留入库）
+.env
