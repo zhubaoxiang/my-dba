@@ -1,0 +1,19 @@
+src/config/conf.ini
+  s_40b41b06c8ed6d::t_e9be4e0699d0ae 87,89,91,105-109
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "52a9aff9c109c81d423aeed90a846fea96a0173d",
+  "prompts": {},
+  "sessions": {
+    "s_40b41b06c8ed6d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8745741f-5443-4735-be94-58eabd83aa82",
+        "model": "unknown"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    }
+  }
+}
