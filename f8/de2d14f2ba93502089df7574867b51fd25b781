@@ -1,0 +1,38 @@
+static/nginx/conf/conf.d/https.conf
+  s_40b41b06c8ed6d::t_c4f2756d470511 1-23
+static/Dockerfile
+  s_40b41b06c8ed6d::t_a23ea6c19fb528 32
+  s_40b41b06c8ed6d::t_3ab4d7546810b1 23,27-30
+static/nginx/conf/conf.d/http.conf
+  s_40b41b06c8ed6d::t_d7295457c2a01f 1-10
+static/nginx/conf/nginx.conf
+  s_40b41b06c8ed6d::t_db1eb2efaf9105 20-21
+static/nginx/conf/snippets/locations.inc
+  s_40b41b06c8ed6d::t_6d1c0eed52f60e 1-37
+static/nginx/conf/entrypoint.d/30-https.sh
+  s_40b41b06c8ed6d::t_d53d38c8f5349e 1-22
+docker-compose.yml
+  s_40b41b06c8ed6d::t_370b5b7b131dfb 66-68
+.gitattributes
+  s_40b41b06c8ed6d::t_ec18fc5f57ab82 1-2
+docs/deployment.md
+  s_40b41b06c8ed6d::t_c322de577a7e7a 10
+  s_40b41b06c8ed6d::t_bf69e8e77d63a1 163-170,178-186,194-195
+  s_40b41b06c8ed6d::t_8e41ed9ce33d5f 21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f8de2d14f2ba93502089df7574867b51fd25b781",
+  "prompts": {},
+  "sessions": {
+    "s_40b41b06c8ed6d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8745741f-5443-4735-be94-58eabd83aa82",
+        "model": "deepseek-flash"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    }
+  }
+}
