@@ -1,0 +1,61 @@
+src/apps/provisioning/services.py
+  s_40b41b06c8ed6d::t_f51af0c42ebe3e 62-66
+src/apps/provisioning/models.py
+  s_391980184528ae::t_49899329117cd2 28-40
+src/sql/pg_struct.sql
+  s_391980184528ae::t_9e82fa6820f562 99-113
+  s_391980184528ae::t_930811a9662022 121,124-133,137-140
+src/apps/provisioning/data.py
+  s_391980184528ae::t_4ae8c4a3c3c12c 337,347-422
+  s_391980184528ae::t_17f0fadf2e9353 297
+  s_391980184528ae::t_a7c5ae692b54e1 308-309
+  s_391980184528ae::t_50fa82260e3454 107,109,111,114-137,141-151,154-155,157-160,162-167,169-172,177-226
+  s_391980184528ae::t_245b275e960514 268,274,276
+  s_391980184528ae::t_51c99e428ab70b 227-228
+src/apps/provisioning/ddl.py
+  s_391980184528ae::t_99f970af728f37 84,86-89,103,105,108,110-117,122
+src/utils/custom_enum.py
+  s_391980184528ae::t_982a332f10dbe0 191-192,199-201
+src/apps/datasource/services.py
+  s_391980184528ae::t_f92abd38b26de8 427-438
+src/apps/provisioning/bulk.py
+  s_391980184528ae::t_45588d7dba8336 1-205
+src/config/conf.ini
+  s_40b41b06c8ed6d::t_79b26610dc227c 104
+  s_40b41b06c8ed6d::t_127fe27b885786 105-107
+  s_40b41b06c8ed6d::t_06ea04d511a64c 26-33,89,91,108-109
+src/sql/patch.sql
+  s_ca85dcdcc2d759::t_86cf1fba5b6410 111-146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "784061503daaeca6ef757670d1f19d8f6f346087",
+  "prompts": {},
+  "sessions": {
+    "s_391980184528ae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e7bece69-09ff-42a7-965f-c10260ab6fd3",
+        "model": "deepseek-flash"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    },
+    "s_40b41b06c8ed6d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8745741f-5443-4735-be94-58eabd83aa82",
+        "model": "deepseek-flash"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    },
+    "s_ca85dcdcc2d759": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "31d5c0ba-962b-4eb8-83fc-1971c315a04c",
+        "model": "unknown"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    }
+  }
+}
