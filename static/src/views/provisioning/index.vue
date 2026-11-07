@@ -247,7 +247,18 @@
       </el-dialog>
 
       <div class="toolbar">
-        <span class="meta">已创建的测试库 · 共 {{ recordsTotal }} 个</span>
+        <div class="toolbar-left">
+          <el-input
+            v-model="recordsKeyword"
+            placeholder="按库名/数据源搜索"
+            clearable
+            style="width: 240px"
+            @keyup.enter="searchRecords"
+            @clear="searchRecords"
+          />
+          <el-button @click="searchRecords">搜索</el-button>
+          <span class="meta">已创建的测试库 · 共 {{ recordsTotal }} 个</span>
+        </div>
         <el-button @click="loadRecords">刷新</el-button>
       </div>
           <el-table :data="records" v-loading="recordsLoading" border>
@@ -419,6 +430,7 @@ const confirmed = ref(false)
 const records = ref([])
 const recordsTotal = ref(0)
 const recordsLoading = ref(false)
+const recordsKeyword = ref('')
 const recordsQuery = reactive({ page: 1, page_size: 10 })
 
 const manageVisible = ref(false)
@@ -599,12 +611,21 @@ async function handleProvision() {
 async function loadRecords() {
   recordsLoading.value = true
   try {
-    const data = await provisioningApi.list(recordsQuery)
+    const data = await provisioningApi.list({
+      page: recordsQuery.page,
+      page_size: recordsQuery.page_size,
+      keyword: recordsKeyword.value
+    })
     records.value = data.results || []
     recordsTotal.value = data.total || 0
   } finally {
     recordsLoading.value = false
   }
+}
+
+function searchRecords() {
+  recordsQuery.page = 1
+  loadRecords()
 }
 
 function onRecordsPageChange(page) {

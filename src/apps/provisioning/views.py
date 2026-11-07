@@ -4,9 +4,11 @@
 预览只生成计划；执行会真正在测试环境新建独立 database，因此全部接口走 SuperUserView。
 """
 
+from django.db.models import Q
 from rest_framework.decorators import action
 
 from apps.base import baseviews
+from apps.datasource import services as datasource_services
 from apps.provisioning import models, serializers, services
 from utils import common, pagination
 
@@ -96,6 +98,13 @@ class ProvisioningView(baseviews.BaseView):
         queryset = self.get_queryset().order_by("-id")
         if not self._is_admin(request):
             queryset = queryset.filter(creator=self._creator(request))
+        keyword = (request.query_params.get("keyword") or "").strip()
+        if keyword:
+            condition = Q(db_name__icontains=keyword)
+            datasource_ids = datasource_services.datasource_ids_by_name(keyword)
+            if datasource_ids:
+                condition |= Q(datasource_id__in=datasource_ids)
+            queryset = queryset.filter(condition)
         return baseviews.ResponseOK(pagination.paginate(self, queryset))
 
     def create(self, request, *args, **kwargs):

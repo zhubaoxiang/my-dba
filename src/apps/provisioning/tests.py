@@ -1058,6 +1058,45 @@ class ProvisioningApiTests(TestCase):
 
         self.assertEqual(payload["code"], 2000)
 
+    def test_search_records_by_db_name(self):
+        match = models.ProvisionedDatabase.objects.create(
+            datasource_id=self.datasource.id, db_name="dba_search_match", creator="admin"
+        )
+        other = models.ProvisionedDatabase.objects.create(
+            datasource_id=self.datasource.id, db_name="dba_other", creator="admin"
+        )
+
+        payload = self.client.get(f"{self.URL}?keyword=search_match").json()
+
+        names = [item["db_name"] for item in payload["data"]["results"]]
+        self.assertIn(match.db_name, names)
+        self.assertNotIn(other.db_name, names)
+
+    def test_search_records_by_datasource_name(self):
+        record = models.ProvisionedDatabase.objects.create(
+            datasource_id=self.datasource.id, db_name=self.db_name, creator="admin"
+        )
+
+        payload = self.client.get(f"{self.URL}?keyword=api-ds").json()
+
+        names = [item["db_name"] for item in payload["data"]["results"]]
+        self.assertIn(record.db_name, names)
+
+    def test_user_search_only_returns_own_records(self):
+        own = models.ProvisionedDatabase.objects.create(
+            datasource_id=self.datasource.id, db_name=f"{self.db_name}_own", creator="user"
+        )
+        other = models.ProvisionedDatabase.objects.create(
+            datasource_id=self.datasource.id, db_name=f"{self.db_name}_other", creator="other"
+        )
+        self.client.force_authenticate(user=AuthedUser(2, "user", "user"))
+
+        payload = self.client.get(f"{self.URL}?keyword={self.db_name}").json()
+
+        names = [item["db_name"] for item in payload["data"]["results"]]
+        self.assertIn(own.db_name, names)
+        self.assertNotIn(other.db_name, names)
+
     def test_manage_endpoints_deny_non_owner(self):
         record = self._ready_record(creator="owner")
         self.client.force_authenticate(user=AuthedUser(2, "user", "user"))

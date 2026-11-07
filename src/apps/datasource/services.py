@@ -364,6 +364,17 @@ def datasource_brief(datasource_id: int):
     return {"id": row.id, "name": row.name, "db_type": row.db_type, "is_enabled": row.is_enabled}
 
 
+def datasource_ids_by_name(keyword: str) -> list:
+    """
+    名称包含关键字的未删除数据源 id（跨模块搜索用）
+    """
+    if not keyword:
+        return []
+    return list(
+        models.Datasource.objects.filter(is_deleted=False, name__icontains=keyword).values_list("id", flat=True)
+    )
+
+
 def provisioning_target(datasource_id: int):
     """
     测试库预置所需的数据源信息（跨模块契约）
