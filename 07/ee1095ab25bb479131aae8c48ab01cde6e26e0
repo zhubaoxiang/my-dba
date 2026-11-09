@@ -1,0 +1,30 @@
+.env.example
+  s_40b41b06c8ed6d::t_aa78c2c1df990c 9-10
+docs/deployment.md
+  s_40b41b06c8ed6d::t_45fbc4991f219b 88-95
+  s_40b41b06c8ed6d::t_6d9d558eb2a781 10-11
+  s_40b41b06c8ed6d::t_39eda91a9d2f09 260-262,264-265
+  s_40b41b06c8ed6d::t_c915c57ae85b71 123-125,132-136,148,150
+  s_40b41b06c8ed6d::t_c90f61ed134f79 24
+  s_40b41b06c8ed6d::t_f28d0005202ee1 84
+  s_40b41b06c8ed6d::t_399f38739cae01 122,126-131
+  s_40b41b06c8ed6d::t_ec7c5efb95f3cc 157-158,160-161,163-164,167
+  s_40b41b06c8ed6d::t_816f58e2470518 176
+  s_40b41b06c8ed6d::t_5a107f01485f47 276,278
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "07ee1095ab25bb479131aae8c48ab01cde6e26e0",
+  "prompts": {},
+  "sessions": {
+    "s_40b41b06c8ed6d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8745741f-5443-4735-be94-58eabd83aa82",
+        "model": "deepseek-flash"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    }
+  }
+}
