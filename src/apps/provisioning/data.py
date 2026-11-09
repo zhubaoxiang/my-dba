@@ -226,6 +226,42 @@ def _pools_from_generated(table: dict, generated: dict, selected_keys: set) -> d
     return pools
 
 
+def pool_targets(ordered: list, selected_keys: set) -> dict:
+    """
+    父表 key → [(pool_key, ref_columns)]；只收集被选中子表引用的非自引用外键
+    """
+    targets = {}
+    for table in ordered:
+        self_key = (table.get("schema"), table.get("name"))
+        for foreign_key in table.get("foreign_keys") or []:
+            ref = (foreign_key.get("ref_schema"), foreign_key.get("ref_table"))
+            if ref not in selected_keys or ref == self_key:
+                continue
+            columns = tuple(foreign_key.get("ref_columns") or [])
+            if columns:
+                targets.setdefault(ref, []).append(((ref, columns), columns))
+    return targets
+
+
+def build_pools(targets: dict, limit: int) -> dict:
+    pools = {}
+    for entries in targets.values():
+        for pool_key, _ in entries:
+            pools.setdefault(pool_key, KeyPool(limit=limit))
+    return pools
+
+
+def track_pools(table_key: tuple, row_iter, targets: dict, pools: dict):
+    """
+    边生成边把父表键写入池，供后续子表采样；不物化父表
+    """
+    entries = targets.get(table_key) or []
+    for row in row_iter:
+        for pool_key, columns in entries:
+            pools[pool_key].add(row.get(column) for column in columns)
+        yield row
+
+
 def _fk_map(table: dict, selected_keys: set) -> dict:
     """
     列名 → 外键定义；自引用外键映射为 None（生成 NULL）

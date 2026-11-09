@@ -56,6 +56,8 @@ services:
       retries: 12
     tty: true
     restart: always
+    # 给大数据 worker 留出完成当前批次的时间，超时后由 stale 恢复兜底
+    stop_grace_period: 60s
 
   # 前端 nginx（静态资源 + /my-dba 反代）
   frontend:

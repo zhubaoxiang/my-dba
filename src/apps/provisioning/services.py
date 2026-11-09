@@ -11,11 +11,13 @@
 import random
 import re
 import secrets
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 import psycopg2
 import pymysql
+from django.db import IntegrityError, transaction
 from psycopg2 import sql as pg_sql
 
 from apps.datasource import services as datasource_services
@@ -44,6 +46,23 @@ class ProvisionPermissionError(ProvisionError):
     """
 
 
+@dataclass
+class Prepared:
+    """
+    HTTP 侧与 worker 共用的预置执行上下文
+    """
+
+    target: dict
+    snapshot: dict
+    ordered: list
+    rows_map: dict
+    seed: int
+    warnings: list
+    is_bulk: bool
+    total_rows: int
+    snapshot_id: int | None
+
+
 def _int_config(key: str, default: int) -> int:
     try:
         return int(CONF_ATTR.get(key))
@@ -52,30 +71,54 @@ def _int_config(key: str, default: int) -> int:
 
 
 def _config() -> dict:
+    max_rows_per_table = _int_config("provisioning_max_rows_per_table", 1000)
+    max_total_rows = _int_config("provisioning_max_total_rows", 5000)
+    bulk_max_rows_per_table = max(max_rows_per_table, _int_config("provisioning_bulk_max_rows_per_table", 100000000))
+    bulk_max_total_rows = max(max_total_rows, _int_config("provisioning_bulk_max_total_rows", 100000000))
     return {
         "db_prefix": (CONF_ATTR.get("provisioning_db_prefix") or "dba_test").strip() or "dba_test",
         "max_tables": _int_config("provisioning_max_tables", 20),
-        "max_rows_per_table": _int_config("provisioning_max_rows_per_table", 1000),
-        "max_total_rows": _int_config("provisioning_max_total_rows", 5000),
+        "max_rows_per_table": max_rows_per_table,
+        "max_total_rows": max_total_rows,
         "timeout_seconds": _int_config("provisioning_timeout_seconds", 120),
         "snapshot_max_age_days": _int_config("provisioning_snapshot_max_age_days", 7),
-        "bulk_threshold": _int_config("provisioning_bulk_threshold", 100000),
-        "bulk_max_rows_per_table": _int_config("provisioning_bulk_max_rows_per_table", 100000000),
-        "bulk_max_total_rows": _int_config("provisioning_bulk_max_total_rows", 100000000),
+        # 同步与异步的分界；不能超过 bulk 总量上限
+        "bulk_threshold": min(_int_config("provisioning_bulk_threshold", 100000), bulk_max_total_rows),
+        "bulk_max_rows_per_table": bulk_max_rows_per_table,
+        "bulk_max_total_rows": bulk_max_total_rows,
         "bulk_batch_rows": _int_config("provisioning_bulk_batch_rows", 20000),
         "bulk_commit_rows": _int_config("provisioning_bulk_commit_rows", 1000000),
+        "bulk_pool_rows": _int_config("provisioning_bulk_pool_rows", 100000),
+        "bulk_timeout_seconds": _int_config("provisioning_bulk_timeout_seconds", 3600),
+        "bulk_tmp_dir": (CONF_ATTR.get("provisioning_bulk_tmp_dir") or "").strip(),
+        "worker_poll_seconds": _int_config("provisioning_worker_poll_seconds", 3),
+        "worker_heartbeat_seconds": _int_config("provisioning_worker_heartbeat_seconds", 10),
+        "worker_stale_seconds": _int_config("provisioning_worker_stale_seconds", 900),
     }
 
 
-def preview(datasource_id: int, tables: list, seed=None, actor: str = "", is_admin: bool = True) -> dict:
+def preview(
+    datasource_id: int,
+    tables: list,
+    seed=None,
+    actor: str = "",
+    is_admin: bool = True,
+    snapshot_id: int | None = None,
+) -> dict:
     """
     只生成计划，不连接目标库、不创建任何 database
     """
     config = _config()
-    target, snapshot, ordered, rows_map, seed, warnings = _prepare(datasource_id, tables, seed, config, actor, is_admin)
-    db_name = _generate_db_name(config["db_prefix"], target["id"])
-    payload = _plan_payload(target, snapshot, ordered, rows_map, db_name, seed, warnings)
-    LOGGER.info("测试库预置预览 datasource_id=%s tables=%s rows=%s", target["id"], len(ordered), payload["total_rows"])
+    prepared = _prepare(datasource_id, tables, seed, config, actor, is_admin, snapshot_id=snapshot_id)
+    db_name = _generate_db_name(config["db_prefix"], prepared.target["id"])
+    payload = _plan_payload(prepared, db_name, config)
+    LOGGER.info(
+        "测试库预置预览 datasource_id=%s tables=%s rows=%s mode=%s",
+        prepared.target["id"],
+        len(prepared.ordered),
+        payload["total_rows"],
+        payload["mode"],
+    )
     return payload
 
 
@@ -87,6 +130,7 @@ def provision(
     confirm: bool = False,
     creator: str = "",
     is_admin: bool = True,
+    snapshot_id: int | None = None,
 ):
     """
     执行预置；返回 (记录, 警告)
@@ -95,14 +139,16 @@ def provision(
         raise ProvisionError("请先确认在测试环境创建独立数据库")
 
     config = _config()
-    target, snapshot, ordered, rows_map, seed, warnings = _prepare(
-        datasource_id, tables, seed, config, creator, is_admin
-    )
+    prepared = _prepare(datasource_id, tables, seed, config, creator, is_admin, snapshot_id=snapshot_id)
+    target = prepared.target
     _validate_db_name(db_name, config["db_prefix"], target["id"], target["db_type"])
     if models.ProvisionedDatabase.objects.filter(
         datasource_id=target["id"], db_name=db_name, is_deleted=False
     ).exists():
         raise ProvisionError("该库名已有预置记录，请重新预览")
+    if prepared.is_bulk:
+        return _enqueue_bulk(prepared, db_name, creator)
+
     try:
         exists = _database_exists(target, db_name)
     except Exception as exc:  # noqa: BLE001 连接目标库失败要转成可读业务错误
@@ -110,23 +156,29 @@ def provision(
     if exists:
         raise ProvisionError("目标服务器上已存在同名数据库，请重新预览")
 
-    payload = _plan_payload(target, snapshot, ordered, rows_map, db_name, seed, warnings)
+    payload = _plan_payload(prepared, db_name, config)
     record = models.ProvisionedDatabase.objects.create(
         datasource_id=target["id"],
         db_name=db_name,
         status=custom_enum.ProvisionStatusEnum.CREATING.value,
         tables=[
-            {"schema": item.get("schema"), "name": item.get("name"), "rows": rows_map[_key(item)]} for item in ordered
+            {"schema": item.get("schema"), "name": item.get("name"), "rows": prepared.rows_map[_key(item)]}
+            for item in prepared.ordered
         ],
         row_count=0,
         creator=creator,
+        snapshot_id=prepared.snapshot_id,
+        seed=prepared.seed,
+        total_rows=prepared.total_rows,
     )
 
     created = False
     try:
         _create_database(target, db_name)
         created = True
-        row_count = _create_tables_and_data(target, db_name, payload["statements"][1:], ordered, rows_map, seed, config)
+        row_count = _create_tables_and_data(
+            target, db_name, payload["statements"][1:], prepared.ordered, prepared.rows_map, prepared.seed, config
+        )
         record.status = custom_enum.ProvisionStatusEnum.READY.value
         record.row_count = row_count
         record.error = ""
@@ -135,7 +187,7 @@ def provision(
             "测试库预置成功 datasource_id=%s db_name=%s tables=%s rows=%s creator=%s",
             target["id"],
             db_name,
-            len(ordered),
+            len(prepared.ordered),
             row_count,
             creator,
         )
@@ -156,14 +208,82 @@ def provision(
         raise ProvisionError(message) from exc
 
 
+def _enqueue_bulk(prepared: Prepared, db_name: str, creator: str):
+    """
+    只落排队记录，实际执行交给 provisioning worker
+    """
+    tables = [
+        {"schema": item.get("schema"), "name": item.get("name"), "rows": prepared.rows_map[_key(item)]}
+        for item in prepared.ordered
+    ]
+    try:
+        with transaction.atomic():
+            record = models.ProvisionedDatabase.objects.create(
+                datasource_id=prepared.target["id"],
+                db_name=db_name,
+                status=custom_enum.ProvisionStatusEnum.PENDING.value,
+                tables=tables,
+                row_count=0,
+                creator=creator,
+                snapshot_id=prepared.snapshot_id,
+                seed=prepared.seed,
+                bulk=True,
+                total_rows=prepared.total_rows,
+            )
+    except IntegrityError as exc:
+        raise ProvisionError("该数据源已有排队或执行中的预置任务，请等待完成或取消") from exc
+    LOGGER.info(
+        "测试库大数据任务已排队 datasource_id=%s db_name=%s tables=%s rows=%s creator=%s",
+        prepared.target["id"],
+        db_name,
+        len(tables),
+        prepared.total_rows,
+        creator,
+    )
+    return record, prepared.warnings
+
+
+def cancel_record(record, actor: str = "", is_admin: bool = True):
+    """
+    排队中直接取消；执行中只置取消标志，由 worker 在批边界退出
+    """
+    if not is_admin and record.creator != actor:
+        raise ProvisionPermissionError("只能取消自己创建的测试库")
+    with transaction.atomic():
+        locked = models.ProvisionedDatabase.objects.select_for_update().get(id=record.id)
+        if locked.status == custom_enum.ProvisionStatusEnum.PENDING.value:
+            locked.status = custom_enum.ProvisionStatusEnum.CANCELLED.value
+            locked.end_time = datetime.now()
+            locked.error = "已取消"
+            locked.save(update_fields=["status", "end_time", "error", "update_time"])
+            LOGGER.info("测试库排队任务已取消 datasource_id=%s db_name=%s", locked.datasource_id, locked.db_name)
+            return locked
+        if locked.status == custom_enum.ProvisionStatusEnum.RUNNING.value:
+            locked.cancel_requested = True
+            locked.save(update_fields=["cancel_requested", "update_time"])
+            LOGGER.info("测试库执行中任务请求取消 datasource_id=%s db_name=%s", locked.datasource_id, locked.db_name)
+            return locked
+    raise ProvisionError("当前状态不可取消")
+
+
 def delete_record(record, actor: str = "", is_admin: bool = True) -> None:
     """
     删除本功能创建过的测试库；只接受记录里的库名
     """
     if not is_admin and record.creator != actor:
         raise ProvisionPermissionError("只能删除自己创建的测试库")
-    if record.status == custom_enum.ProvisionStatusEnum.DROPPED.value:
-        raise ProvisionError("该测试库已删除")
+    with transaction.atomic():
+        record = models.ProvisionedDatabase.objects.select_for_update().get(id=record.id)
+        if record.status == custom_enum.ProvisionStatusEnum.DROPPED.value:
+            raise ProvisionError("该测试库已删除")
+        if record.status == custom_enum.ProvisionStatusEnum.RUNNING.value:
+            raise ProvisionError("任务正在执行，请先取消")
+        if record.status == custom_enum.ProvisionStatusEnum.PENDING.value:
+            record.status = custom_enum.ProvisionStatusEnum.DROPPED.value
+            record.end_time = datetime.now()
+            record.save(update_fields=["status", "end_time", "update_time"])
+            LOGGER.info("测试库排队任务已删除 datasource_id=%s db_name=%s", record.datasource_id, record.db_name)
+            return
     target = datasource_services.provisioning_target(record.datasource_id)
     if target is None:
         raise ProvisionError("数据源不存在，无法删除该测试库")
@@ -770,12 +890,29 @@ def _refresh_record_counts(conn, db_type: int, record) -> None:
 # ----------------------------------------------------------------------
 
 
-def _prepare(datasource_id: int, tables: list, seed, config: dict, actor: str, is_admin: bool):
+def _prepare(
+    datasource_id: int,
+    tables: list,
+    seed,
+    config: dict,
+    actor: str,
+    is_admin: bool,
+    *,
+    snapshot_id: int | None = None,
+) -> Prepared:
     target = _target_or_error(datasource_id, actor, is_admin)
-    _validate_limits(tables, config)
-    snapshot = datasource_services.latest_snapshot_data(datasource_id)
-    if snapshot is None:
-        raise ProvisionError("该数据源尚未采集，无法预置")
+    is_bulk, total_rows = _validate_preset_limits(tables, config)
+
+    if snapshot_id is not None:
+        snapshot = datasource_services.snapshot_data_by_id(snapshot_id)
+        if snapshot is None:
+            raise ProvisionError("固定快照不存在或已删除，请重新预览")
+        if snapshot.get("datasource_id") != target["id"]:
+            raise ProvisionError("快照不属于该数据源，请重新预览")
+    else:
+        snapshot = datasource_services.latest_snapshot_data(datasource_id)
+        if snapshot is None:
+            raise ProvisionError("该数据源尚未采集，无法预置")
 
     index = {(table.get("schema"), table.get("name")): table for table in snapshot.get("tables") or []}
     selected = []
@@ -788,9 +925,51 @@ def _prepare(datasource_id: int, tables: list, seed, config: dict, actor: str, i
 
     warnings = []
     ordered = _ordered_tables(selected, warnings)
+    if is_bulk:
+        for table in ordered:
+            for risk in data_gen.bulk_risks(table, rows_map[_key(table)]):
+                if risk["level"] == "error":
+                    raise ProvisionError(risk["message"])
+                warnings.append(risk["message"])
     if seed is None:
         seed = secrets.randbelow(2**31)
-    return target, snapshot, ordered, rows_map, seed, warnings
+    return Prepared(
+        target=target,
+        snapshot=snapshot,
+        ordered=ordered,
+        rows_map=rows_map,
+        seed=seed,
+        warnings=warnings,
+        is_bulk=is_bulk,
+        total_rows=total_rows,
+        snapshot_id=snapshot.get("snapshot_id"),
+    )
+
+
+def _validate_preset_limits(tables: list, config: dict) -> tuple:
+    """
+    预置创建的模式判定与上限校验；总行数超过阈值即走异步大数据模式
+    """
+    if len(tables) > config["max_tables"]:
+        raise ProvisionError(f"最多只能选择 {config['max_tables']} 张表")
+    seen = set()
+    total = 0
+    for item in tables:
+        key = (item.get("schema") or "", item["name"])
+        if key in seen:
+            raise ProvisionError(f"表 {item['name']} 被重复选择")
+        seen.add(key)
+        if item["rows"] < 1:
+            raise ProvisionError(f"表 {item['name']} 的行数必须大于 0")
+        total += item["rows"]
+    is_bulk = total > config["bulk_threshold"]
+    if is_bulk:
+        for item in tables:
+            if item["rows"] > config["bulk_max_rows_per_table"]:
+                raise ProvisionError(f"单表行数不能超过 {config['bulk_max_rows_per_table']}")
+        if total > config["bulk_max_total_rows"]:
+            raise ProvisionError(f"总行数不能超过 {config['bulk_max_total_rows']}")
+    return is_bulk, total
 
 
 def _target_or_error(datasource_id: int, actor: str, is_admin: bool) -> dict:
@@ -882,9 +1061,10 @@ def _ordered_tables(selected: list, warnings: list) -> list:
     return [by_key[key] for key in result]
 
 
-def _plan_payload(target: dict, snapshot: dict, ordered: list, rows_map: dict, db_name: str, seed: int, warnings: list):
-    config = _config()
-    warnings = list(warnings)
+def _plan_payload(prepared: Prepared, db_name: str, config: dict):
+    target = prepared.target
+    snapshot = prepared.snapshot
+    warnings = list(prepared.warnings)
     age_warning = _snapshot_age_warning(snapshot, config)
     if age_warning:
         warnings.append(age_warning)
@@ -893,22 +1073,18 @@ def _plan_payload(target: dict, snapshot: dict, ordered: list, rows_map: dict, d
         warnings.append(f"快照存在未采集项（{'、'.join(str(item) for item in unavailable)}），结构可能不完整")
 
     try:
-        plan = ddl.build_plan(target["db_type"], db_name, ordered)
+        plan = ddl.build_plan(target["db_type"], db_name, prepared.ordered, defer_indexes=prepared.is_bulk)
     except ddl.DdlError as exc:
         raise ProvisionError(str(exc)) from exc
     warnings.extend(plan["warnings"])
 
     table_payload = []
-    total_rows = 0
-    for table in ordered:
-        key = _key(table)
-        rows = rows_map[key]
-        total_rows += rows
+    for table in prepared.ordered:
         table_payload.append(
             {
                 "schema": table.get("schema"),
                 "name": table.get("name"),
-                "rows": rows,
+                "rows": prepared.rows_map[_key(table)],
                 "semantic_columns": data_gen.describe_semantics(table),
             }
         )
@@ -919,12 +1095,17 @@ def _plan_payload(target: dict, snapshot: dict, ordered: list, rows_map: dict, d
         "db_type": target["db_type"],
         "db_type_label": custom_enum.DbTypeEnum(target["db_type"]).label,
         "db_name": db_name,
-        "seed": seed,
+        "seed": prepared.seed,
+        "snapshot_id": prepared.snapshot_id,
         "snapshot_collect_time": snapshot.get("collect_time", ""),
+        "mode": "bulk" if prepared.is_bulk else "normal",
+        "bulk": prepared.is_bulk,
+        "bulk_threshold": config["bulk_threshold"],
         "tables": table_payload,
-        "total_rows": total_rows,
+        "total_rows": prepared.total_rows,
         "create_database_sql": plan["create_database_sql"],
         "statements": [plan["create_database_sql"]] + plan["statements"],
+        "post_statements": plan["post_statements"],
         "warnings": warnings,
     }
 
@@ -1001,7 +1182,7 @@ def _connect_admin(target: dict):
     )
 
 
-def _connect_target(target: dict, db_name: str):
+def _connect_target(target: dict, db_name: str, *, bulk: bool = False, timeout: int = 120):
     password = _write_password(target)
     if target["db_type"] == POSTGRESQL:
         return psycopg2.connect(
@@ -1019,8 +1200,9 @@ def _connect_target(target: dict, db_name: str):
         password=password,
         database=db_name,
         connect_timeout=10,
-        read_timeout=120,
-        write_timeout=120,
+        read_timeout=timeout,
+        write_timeout=timeout,
+        local_infile=bulk,
         charset="utf8mb4",
     )
 

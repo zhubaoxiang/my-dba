@@ -421,6 +421,8 @@ def latest_snapshot_data(datasource_id: int):
         return None
     data = dict(snapshot.raw_data or {})
     data["collect_time"] = snapshot.collect_time.strftime("%Y-%m-%d %H:%M:%S")
+    data["snapshot_id"] = snapshot.id
+    data["datasource_id"] = snapshot.datasource_id
     return data
 
 
@@ -433,6 +435,8 @@ def snapshot_data_by_id(snapshot_id: int):
         return None
     data = dict(snapshot.raw_data or {})
     data["collect_time"] = snapshot.collect_time.strftime("%Y-%m-%d %H:%M:%S")
+    data["snapshot_id"] = snapshot.id
+    data["datasource_id"] = snapshot.datasource_id
     return data
 
 

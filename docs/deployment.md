@@ -229,9 +229,11 @@ static/nginx/cert/server.key   # 私钥，权限 600
 
 容器内 `src/start.sh` 启动 gunicorn（配置在 `src/settings/gunicorn.py`）：
 
-- 监听 `0.0.0.0:8080`，3 个 worker，每 worker 6 线程
+- 监听 `0.0.0.0:8080`，3 个 worker，每 worker 6 线程；单请求超时 300 秒（同步预置可跑到 `bulk_threshold`）
 - 访问日志与错误日志在 `src/logs/gunicorn.log`，按天切割保留 7 天
 - 同时启动独立指标采集进程，日志在 `src/logs/metrics.log`
+- 同时启动大数据预置 worker（`jobs/provisioning_worker.py`），日志在 `src/logs/provisioning_worker.log`；`sh` 会转发 SIGTERM，容器停止宽限 60 秒
+- 大数据模式使用 MySQL `LOAD DATA LOCAL INFILE` 时需要服务端开启 `local_infile`；否则自动回退多行 INSERT
 
 常用命令：
 

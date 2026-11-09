@@ -26,9 +26,25 @@
 2. 进入「造数 → 测试库」：页面默认展示已创建的测试库；点击右上角「新建测试库」打开创建弹框
 3. 数据源默认不选中；选择自己创建的数据源后才加载最新快照的库表。库表列表**每页 5 条**，支持按表名/注释搜索
 4. 勾选表、**逐表设置行数**（可选设置随机种子），点击底部「下一步：预览」
-5. 预览将创建的库名、表清单、DDL 与警告；勾选确认后点击「执行预置」
-6. 在「已创建的测试库」列表中查看状态；支持按库名/数据源搜索；不再需要时删除
-7. 普通用户只会看到自己创建的测试库记录，管理员可查看全部
+5. 预览将创建的库名、表清单、DDL 与警告；同时显示执行方式（同步 / 异步排队）。勾选确认后点击「执行预置」
+6. 同步模式下等待执行完成；总行数超过 `bulk_threshold` 时自动进入异步大数据模式，提交后立即返回「排队中」，在列表中查看进度或取消
+7. 在「已创建的测试库」列表中查看状态；支持按库名/数据源搜索；不再需要时删除
+8. 普通用户只会看到自己创建的测试库记录，管理员可查看全部
+
+## 大数据模式
+
+**判定**：总行数超过 `bulk_threshold` 时自动走异步模式；否则维持同步执行。同步模式不再受旧的 `max_rows_per_table` / `max_total_rows` 约束，但受 `bulk_threshold` 与 gunicorn 300 秒超时约束，阈值应按目标库实际吞吐配置。
+
+异步任务由 `jobs/provisioning_worker.py` 执行，`start.sh` 守护，与 gunicorn 独立：
+
+- 排队期间固定预览时的快照与种子，后续采集不影响本次任务
+- 先建表并流式写入数据，最后创建唯一索引、普通索引与外键
+- PG 使用 `COPY FROM STDIN`；MySQL 优先 `LOAD DATA LOCAL INFILE`，不可用时回退多行 `INSERT`
+- 列表展示 `processed_rows / total_rows` 与当前表；存在排队/执行中记录时前端每 5 秒轮询
+- 取消只在批次边界生效；取消或失败都会删除本次创建的数据库
+- worker 心跳超时（默认 900 秒）后，重启时会把任务标记失败并清理半成品库
+
+同一数据源同时只允许一个排队或执行中的任务（由部分唯一索引保证）。
 
 ## 已创建测试库的后续维护
 
@@ -95,9 +111,10 @@ CHECK 约束、触发器、视图、序列、扩展、权限、分区定义、�
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/preview` | 生成计划（库名、DDL、行数、警告），**不连接目标库** |
-| POST | `/provision` | 执行预置；要求 `confirm=true`，重新校验环境与限制 |
-| GET | `/` | 预置记录列表（分页） |
-| DELETE | `/{id}` | 删除本功能创建过的测试库 |
+| POST | `/provision` | 执行预置；要求 `confirm=true`。同步模式返回 `ready`，大数据模式立即返回 `pending` |
+| POST | `/{id}/cancel` | 取消排队中或执行中的任务 |
+| GET | `/` | 预置记录列表（分页），含进度与异步状态字段 |
+| DELETE | `/{id}` | 删除本功能创建过的测试库；执行中需先取消 |
 | POST | `/{id}/rows` | 向记录中的表**追加数据**（`schema` / `name` / `rows` / 可选 `seed`） |
 | DELETE | `/{id}/rows?schema=&name=` | **清空**记录中某张表的数据 |
 | POST | `/{id}/tables` | 从最新快照**新增表**并造数 |
@@ -113,9 +130,14 @@ CHECK 约束、触发器、视图、序列、扩展、权限、分区定义、�
 {
   "db_name": "dba_test_1_20261105173000_abcd",
   "seed": 123456,
-  "total_rows": 500,
+  "snapshot_id": 12,
+  "mode": "bulk",
+  "bulk": true,
+  "bulk_threshold": 100000,
+  "total_rows": 500000,
   "create_database_sql": "CREATE DATABASE \"...\"",
   "statements": ["CREATE DATABASE ...", "CREATE TABLE ...", "..."],
+  "post_statements": ["CREATE UNIQUE INDEX ...", "ALTER TABLE ... ADD CONSTRAINT ..."],
   "tables": [{"schema": "public", "name": "orders", "rows": 100, "semantic_columns": []}],
   "warnings": ["..."],
   "snapshot_collect_time": "2026-11-01 10:00:00"
@@ -132,15 +154,27 @@ CHECK 约束、触发器、视图、序列、扩展、权限、分区定义、�
 | `max_tables` | 20 | 单次最多选择的表数 |
 | `max_rows_per_table` | 1000 | 单表最大行数 |
 | `max_total_rows` | 5000 | 单次总行数上限 |
-| `timeout_seconds` | 120 | PG 语句超时；MySQL 连接读写超时 |
+| `timeout_seconds` | 120 | 同步模式 PG 语句超时；MySQL 连接读写超时 |
 | `snapshot_max_age_days` | 7 | 快照超过该天数时给出警告（不阻止） |
+| `bulk_threshold` | 100000 | 总行数超过该值转异步大数据模式 |
+| `bulk_max_rows_per_table` | 100000000 | 大数据模式单表上限 |
+| `bulk_max_total_rows` | 100000000 | 大数据模式总量上限 |
+| `bulk_batch_rows` | 20000 | COPY / LOAD DATA 每批行数 |
+| `bulk_commit_rows` | 1000000 | 每多少行提交一次 |
+| `bulk_pool_rows` | 100000 | 父表外键键池保留的最大键数 |
+| `bulk_timeout_seconds` | 3600 | 目标库语句 / 读写超时；后置建索引阶段不设语句超时 |
+| `bulk_tmp_dir` | 空 | MySQL LOAD DATA 临时文件目录；空表示系统临时目录 |
+| `worker_poll_seconds` | 3 | worker 空闲轮询间隔 |
+| `worker_heartbeat_seconds` | 10 | 进度与心跳写库间隔 |
+| `worker_stale_seconds` | 900 | 心跳超时判定，超过后由重启的 worker 清理 |
 
 ## 记录与审计
 
 每次预置在 `provisioned_database` 表记录：
 
 - 数据源、库名、选中的表与每表行数、写入行数
-- 状态：`creating` / `ready` / `failed` / `dropped`
+- 状态：`creating` / `ready` / `failed` / `dropped` / `pending` / `running` / `cancelled`
+- 大数据模式下的固定快照、种子、总行数、已写入行数、当前表、worker 心跳与取消标志
 - 失败原因、发起人、时间
 
 删除接口只接受该表里记录的库名，不接受任意库名。普通用户只能看到和删除自己创建的记录，管理员可管理全部。审计日志写入 `provisioning.log`，不包含任何密码。
@@ -153,9 +187,15 @@ CHECK 约束、触发器、视图、序列、扩展、权限、分区定义、�
 - **目标库版本差异**：快照里的类型语法按目标库自身方言使用；跨版本行为需实测
 - **外键循环/不可空自引用**：无法确定插入顺序，预览阶段直接拒绝
 - **不含数据导出**：不读取、不复制源库任何业务数据
+- **唯一索引后置创建**：大数据模式先灌数据后建唯一索引，重复值要到建索引阶段才暴露，会整库清理；`bulk_risks` 只做容量预检
+- **MySQL `local_infile`**：`LOAD DATA LOCAL INFILE` 需要服务端开启；不可用时自动回退多行 `INSERT`，吞吐下降
+- **单 worker**：默认只运行一个 provisioning worker；任务状态以数据库为准，崩溃后靠心跳超时恢复
+- **建库与标记 `database_created` 的极短窗口**：最坏情况残留一个空库，需要人工清理
 
 ## 部署前提
 
-1. 执行 `src/sql/patch.sql` 中 `add-test-db-provisioning` 段的增量 DDL
+1. 执行 `src/sql/patch.sql` 中 `add-test-db-provisioning` 段与 `add-bulk-test-db-provisioning` 段的增量 DDL
 2. 给测试数据源配置的写账号授予：建库（PG `CREATEDB` / MySQL `CREATE`）与目标库的 DDL/DML 权限
 3. 不要复用只读采集账号；写账号仅用于本功能
+4. 后端容器需运行 provisioning worker（`start.sh` 已守护），日志见 `logs/provisioning_worker.log`
+5. MySQL 如需启用 `LOAD DATA LOCAL INFILE`，服务端设置 `local_infile=ON`；否则自动回退多行 INSERT

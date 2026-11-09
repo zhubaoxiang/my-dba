@@ -2355,7 +2355,7 @@ class SnapshotDataShapeTests(SimpleTestCase):
             ],
             "unavailable": [],
         }
-        snapshot = SimpleNamespace(raw_data=raw, collect_time=datetime(2026, 10, 19, 10, 0, 0))
+        snapshot = SimpleNamespace(id=7, datasource_id=1, raw_data=raw, collect_time=datetime(2026, 10, 19, 10, 0, 0))
         with mock.patch.object(services, "latest_snapshot", return_value=snapshot):
             data = services.latest_snapshot_data(1)
         self.assertEqual(data["tables"][0]["indexes"][0]["name"], "pk_orders")

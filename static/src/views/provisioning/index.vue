@@ -148,7 +148,7 @@
                       <el-input-number
                         v-model="rowCounts[row.key]"
                         :min="1"
-                        :max="1000"
+                        :max="100000000"
                         size="small"
                         controls-position="right"
                       />
@@ -183,7 +183,22 @@
                 <span class="summary-label">总行数</span>
                 <span class="summary-value">{{ plan.total_rows }}</span>
               </div>
+              <div class="summary-item">
+                <span class="summary-label">执行方式</span>
+                <el-tag :type="plan.bulk ? 'warning' : 'success'" size="small">
+                  {{ plan.bulk ? '异步排队' : '同步执行' }}
+                </el-tag>
+              </div>
             </div>
+
+            <el-alert
+              v-if="plan.bulk"
+              class="notice"
+              type="info"
+              :closable="false"
+              show-icon
+              title="本次行数超过同步阈值，将进入后台队列；提交后可在列表查看进度或取消。"
+            />
 
             <el-alert
               v-for="(warning, index) in plan.warnings"
@@ -218,7 +233,10 @@
                 </el-table>
               </el-tab-pane>
               <el-tab-pane label="DDL" name="ddl">
-                <pre class="ddl preview-ddl">{{ plan.statements.join(';\n\n') }};</pre>
+                <pre class="ddl preview-ddl">{{ previewDdl(plan) }}</pre>
+                <div v-if="plan.post_statements && plan.post_statements.length" class="meta post-ddl-hint">
+                  索引与外键将在数据写入完成后创建
+                </div>
               </el-tab-pane>
             </el-tabs>
 
@@ -284,7 +302,7 @@
                     </el-table-column>
                   </el-table>
                   <div v-if="row.status !== 2" class="muted record-hint">
-                    只有状态为「可用」的测试库才能继续操作
+                    {{ recordHint(row.status) }}
                   </div>
                 </div>
               </template>
@@ -306,10 +324,22 @@
               </template>
             </el-table-column>
             <el-table-column prop="row_count" label="行数" width="100" />
+            <el-table-column label="进度" width="200">
+              <template #default="{ row }">
+                <template v-if="row.bulk && (row.status === 5 || row.status === 6)">
+                  <el-progress :percentage="progressPercent(row)" :stroke-width="10" />
+                  <div class="meta progress-meta">
+                    {{ row.processed_rows }} / {{ row.total_rows }} · {{ row.current_table || '准备中' }}
+                  </div>
+                </template>
+                <span v-else-if="row.bulk && row.status === 2" class="muted">已完成</span>
+                <span v-else class="muted">—</span>
+              </template>
+            </el-table-column>
             <el-table-column prop="creator" label="创建人" width="120" />
             <el-table-column prop="create_time" label="创建时间" width="170" />
             <el-table-column prop="error" label="失败原因" min-width="180" show-overflow-tooltip />
-            <el-table-column label="操作" width="160" fixed="right">
+            <el-table-column label="操作" width="220" fixed="right">
               <template #default="{ row }">
                 <el-button
                   v-if="row.status !== 4"
@@ -320,7 +350,23 @@
                 >
                   新增表
                 </el-button>
-                <el-button v-if="row.status !== 4" link type="danger" @click="handleRemove(row)">删除</el-button>
+                <el-button
+                  v-if="row.status === 5 || row.status === 6"
+                  link
+                  type="warning"
+                  @click="handleCancel(row)"
+                >
+                  取消
+                </el-button>
+                <el-button
+                  v-if="row.status !== 4"
+                  link
+                  type="danger"
+                  :disabled="row.status === 6"
+                  @click="handleRemove(row)"
+                >
+                  删除
+                </el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -398,7 +444,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { authApi } from '@/api/auth'
 import { catalogApi, datasourceApi } from '@/api/datasource'
@@ -434,6 +480,9 @@ const recordsTotal = ref(0)
 const recordsLoading = ref(false)
 const recordsKeyword = ref('')
 const recordsQuery = reactive({ page: 1, page_size: 10 })
+
+const POLL_INTERVAL = 5000
+let pollTimer = null
 
 const manageVisible = ref(false)
 const manageLoading = ref(false)
@@ -596,9 +645,14 @@ async function handleProvision() {
       tables: plan.value.tables.map(({ schema, name, rows }) => ({ schema, name, rows })),
       db_name: plan.value.db_name,
       seed: plan.value.seed,
+      snapshot_id: plan.value.snapshot_id,
       confirm: true
     })
-    ElMessage.success(`测试库 ${data.db_name} 已创建，共 ${data.row_count} 行`)
+    if (data.status === 5) {
+      ElMessage.success('已进入后台队列，可在列表查看进度或取消')
+    } else {
+      ElMessage.success(`测试库 ${data.db_name} 已创建，共 ${data.row_count} 行`)
+    }
     plan.value = null
     confirmed.value = false
     createStep.value = 0
@@ -610,8 +664,8 @@ async function handleProvision() {
   }
 }
 
-async function loadRecords() {
-  recordsLoading.value = true
+async function loadRecords({ silent = false } = {}) {
+  if (!silent) recordsLoading.value = true
   try {
     const data = await provisioningApi.list({
       page: recordsQuery.page,
@@ -620,8 +674,21 @@ async function loadRecords() {
     })
     records.value = data.results || []
     recordsTotal.value = data.total || 0
+  } catch (error) {
+    if (!silent) throw error
   } finally {
-    recordsLoading.value = false
+    if (!silent) recordsLoading.value = false
+    ensurePolling()
+  }
+}
+
+function ensurePolling() {
+  const active = records.value.some((row) => row.status === 5 || row.status === 6)
+  if (active && !pollTimer) {
+    pollTimer = setInterval(() => loadRecords({ silent: true }), POLL_INTERVAL)
+  } else if (!active && pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
   }
 }
 
@@ -639,6 +706,17 @@ async function handleRemove(row) {
   await ElMessageBox.confirm(`确认删除测试库「${row.db_name}」？此操作不可恢复。`, '提示', { type: 'warning' })
   await provisioningApi.remove(row.id)
   ElMessage.success('已删除')
+  loadRecords()
+}
+
+async function handleCancel(row) {
+  await ElMessageBox.confirm(
+    `确认取消任务「${row.db_name}」？已创建的中间数据库会被清理。`,
+    '提示',
+    { type: 'warning' }
+  )
+  await provisioningApi.cancel(row.id)
+  ElMessage.success('已提交取消')
   loadRecords()
 }
 
@@ -761,11 +839,34 @@ function tableNames(tables) {
 function statusTagType(status) {
   if (status === 2) return 'success'
   if (status === 3) return 'danger'
-  if (status === 4) return 'info'
+  if (status === 4 || status === 7) return 'info'
+  if (status === 6) return 'primary'
   return 'warning'
 }
 
+function progressPercent(row) {
+  if (!row.total_rows) return 0
+  return Math.min(100, Math.floor((row.processed_rows / row.total_rows) * 100))
+}
+
+function previewDdl(plan) {
+  return [...plan.statements, ...(plan.post_statements || [])].join(';\n\n') + ';'
+}
+
+function recordHint(status) {
+  if (status === 5 || status === 6) return '任务排队或执行中，完成后才能继续维护'
+  if (status === 7) return '任务已取消，不能继续维护'
+  if (status === 3) return '任务执行失败，不能继续维护'
+  return '只有状态为「可用」的测试库才能继续操作'
+}
+
 onMounted(loadRecords)
+onUnmounted(() => {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+})
 </script>
 
 <style scoped>
@@ -890,6 +991,17 @@ onMounted(loadRecords)
 
 .preview-ddl {
   max-height: 240px;
+}
+
+.post-ddl-hint {
+  margin-top: 8px;
+}
+
+.progress-meta {
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .confirm-check {

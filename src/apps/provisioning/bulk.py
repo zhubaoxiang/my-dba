@@ -5,6 +5,7 @@ PostgreSQL 使用 COPY FROM STDIN；MySQL 使用 LOAD DATA LOCAL INFILE，失败
 所有值都由生成器产出，不拼接原始 SQL 字符串（LOAD DATA 的临时文件由服务端生成）。
 """
 
+import contextlib
 import io
 import os
 import tempfile
@@ -105,10 +106,8 @@ def load_data_batch(conn, table: dict, columns: list, batch: list, tmp_dir: str 
         with conn.cursor() as cursor:
             cursor.execute(sql, [path])
     finally:
-        try:
+        with contextlib.suppress(OSError):
             os.remove(path)
-        except OSError:
-            pass
 
 
 def insert_batch(cursor, table: dict, columns: list, batch: list, chunk: int = 1000) -> None:
@@ -118,9 +117,7 @@ def insert_batch(cursor, table: dict, columns: list, batch: list, chunk: int = 1
     target = ddl.qualified_table(MYSQL, table)
     for start in range(0, len(batch), chunk):
         part = batch[start : start + chunk]
-        placeholders = ", ".join(
-            "(" + ", ".join(["%s"] * len(columns)) + ")" for _ in part
-        )
+        placeholders = ", ".join("(" + ", ".join(["%s"] * len(columns)) + ")" for _ in part)
         sql = f"INSERT INTO {target} ({quoted}) VALUES {placeholders}"
         params = [row.get(column) for row in part for column in columns]
         cursor.execute(sql, params)
@@ -184,15 +181,23 @@ def load_table(
             since_commit = 0
         on_progress(processed, label)
 
-    for row in row_iter:
+    try:
+        for row in row_iter:
+            batch.append(row)
+            if len(batch) >= batch_rows:
+                if cancel_check():
+                    raise BulkCancelled()
+                flush()
         if cancel_check():
             raise BulkCancelled()
-        batch.append(row)
-        if len(batch) >= batch_rows:
-            flush()
-    flush()
-    if since_commit:
-        conn.commit()
+        flush()
+        if since_commit:
+            conn.commit()
+    except Exception:
+        # 已提交批次无法回滚，调用方通过删除目标库完成清理
+        with contextlib.suppress(Exception):
+            conn.rollback()
+        raise
     on_progress(processed, label)
     return processed
 

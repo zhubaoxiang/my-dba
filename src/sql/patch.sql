@@ -126,7 +126,7 @@ ALTER TABLE provisioned_database ADD COLUMN IF NOT EXISTS worker_id varchar(128)
 ALTER TABLE provisioned_database ADD COLUMN IF NOT EXISTS heartbeat_time timestamp NULL;
 ALTER TABLE provisioned_database ADD COLUMN IF NOT EXISTS start_time timestamp NULL;
 ALTER TABLE provisioned_database ADD COLUMN IF NOT EXISTS end_time timestamp NULL;
-ALTER TABLE provisioned_database ALTER COLUMN status SET DEFAULT 5;
+ALTER TABLE provisioned_database ALTER COLUMN status SET DEFAULT 1;
 
 COMMENT ON COLUMN provisioned_database.status IS '状态：1=创建中 2=可用 3=失败 4=已删除 5=排队中 6=执行中 7=已取消';
 COMMENT ON COLUMN provisioned_database.snapshot_id IS '大数据任务执行时固定的快照 id';

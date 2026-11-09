@@ -117,11 +117,13 @@ src/                          # 后端代码根目录
 │   │   ├── services.py       #   record_call / 聚合查询 / 过期清理
 │   │   └── views.py          #   GET /v1/llm-usage（SuperUserView）
 │   ├── provisioning/         # 造数：测试库预置 + 测试数据文件导出（按数据源归属）→ docs/test-db-provisioning.md / docs/test-data-export.md
-│   │   ├── models.py         #   provisioned_database 记录
-│   │   ├── ddl.py            #   从快照生成近似 DDL
-│   │   ├── data.py           #   造数与简单语义推断
-│   │   ├── services.py       #   环境/限制校验、建库编排、失败清理
-│   │   └── views.py          #   ProvisioningView(SuperUserView)
+│   │   ├── models.py         #   provisioned_database 记录（含异步进度与状态）
+│   │   ├── ddl.py            #   从快照生成近似 DDL（可延迟索引/外键）
+│   │   ├── data.py           #   造数、流式生成、父键池与语义推断
+│   │   ├── bulk.py           #   COPY / LOAD DATA 批量写入
+│   │   ├── runner.py         #   大数据任务领取、执行、心跳与清理
+│   │   ├── services.py       #   环境/限制校验、同步编排、入队与取消
+│   │   └── views.py          #   ProvisioningView(BaseView)
 │   ├── overview/             # 首页状态总览（跨模块只读聚合，无模型）→ docs/overview.md
 │   │   ├── services.py       #   聚合各块数据 + 概览数字 + 分块兜底
 │   │   └── views.py          #   GET /v1/overview（StatelessView）
@@ -256,15 +258,17 @@ ViewSet 基类（`apps/base/baseviews.py`）：
 项目**没有调度机制**（`simple-background-task` 是队列不是调度器，`apscheduler` / `django-q` 均未安装）。需要周期执行的任务放在 `jobs/`，由 `src/start.sh` 以**独立于 gunicorn 的进程**启动：
 
 ```bash
-( while true; do python /home/src/jobs/metrics.py; sleep 5; done ) > "${METRICS_LOG}" 2>&1 &
+python /home/src/jobs/metrics.py > "${METRICS_LOG}" 2>&1 &
 ```
 
 两条硬性要求：
 
 - **独立进程** —— gunicorn 跑 3 个 worker，任何随 web 进程启动的周期任务都会每个 worker 各跑一份
-- **外层 `while true` 守护** —— 容器的 `restart: always` 只管容器、不管里面的单个进程；进程崩了没有别的东西会拉起它
+- **可被 SIGTERM 结束** —— 直接启动 python 并记录 PID，由 `start.sh` 的 `trap` 在容器停止时转发信号；脚本自身的 `while True` 负责持续运行，循环内兜住异常
 
 任务脚本体自己是个 `while True` 循环（间隔取配置），且**循环内要兜住所有异常**——业务出错绝不该让它退出。参考实现：`jobs/metrics.py`（[datasource-metrics.md](datasource-metrics.md)）。该循环同时承担模型用量的保留期清理（每天一次，超期记录物理删除）。
+
+大数据预置 worker（`jobs/provisioning_worker.py`）同样是独立进程，但它不是周期任务：从 `provisioned_database` 以 `select_for_update(skip_locked=True)` 领取 `PENDING` 任务，执行期间写心跳与进度，启动时回收心跳超时的 `RUNNING` 任务。任务状态以数据库为准，不依赖进程内队列。启动方式见 `src/start.sh`。
 
 ## 代码规范入口
 

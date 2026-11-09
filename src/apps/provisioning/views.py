@@ -141,6 +141,7 @@ class ProvisioningView(baseviews.BaseView):
                 data.get("seed"),
                 actor=self._creator(request),
                 is_admin=self._is_admin(request),
+                snapshot_id=data.get("snapshot_id"),
             )
         except services.ProvisionPermissionError as exc:
             return baseviews.ResponsePermissionDenied(str(exc))
@@ -260,6 +261,7 @@ class ProvisioningView(baseviews.BaseView):
                 confirm=True,
                 creator=self._creator(request),
                 is_admin=self._is_admin(request),
+                snapshot_id=data.get("snapshot_id"),
             )
         except services.ProvisionPermissionError as exc:
             return baseviews.ResponsePermissionDenied(str(exc))
@@ -268,3 +270,16 @@ class ProvisioningView(baseviews.BaseView):
         payload = serializers.ProvisionedDatabaseSerializer(record).data
         payload["warnings"] = warnings
         return baseviews.ResponseOK(payload)
+
+    @action(detail=True, methods=["POST"], url_path="cancel")
+    def cancel(self, request, **kwargs):
+        record = self._record_or_none(kwargs)
+        if record is None:
+            return baseviews.ResponseNotFound("预置记录不存在")
+        try:
+            record = services.cancel_record(record, actor=self._creator(request), is_admin=self._is_admin(request))
+        except services.ProvisionPermissionError as exc:
+            return baseviews.ResponsePermissionDenied(str(exc))
+        except services.ProvisionError as exc:
+            return baseviews.ResponseExpectationFailed(str(exc))
+        return baseviews.ResponseOK(serializers.ProvisionedDatabaseSerializer(record).data)

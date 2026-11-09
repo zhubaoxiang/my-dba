@@ -17,6 +17,10 @@ export const provisioningApi = {
   remove(id) {
     return request.delete(`/v1/test-db/${id}`)
   },
+  // 取消排队中或执行中的任务
+  cancel(id) {
+    return request.post(`/v1/test-db/${id}/cancel`)
+  },
   // 向已创建的表追加数据
   appendRows(id, data) {
     return request.post(`/v1/test-db/${id}/rows`, data, { timeout: PROVISION_TIMEOUT })

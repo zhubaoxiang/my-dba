@@ -165,6 +165,17 @@ ruff format --check src/ --config .ci/lint-rules/ruff.toml
 cd static && npm run build
 ```
 
+### 本地运行大数据 worker
+
+异步预置任务由独立进程消费，开发时需要与 web 并行启动：
+
+```bash
+cd src
+ENV_TYPE=local python jobs/provisioning_worker.py
+```
+
+PowerShell：`$env:ENV_TYPE='local'; python jobs/provisioning_worker.py`。worker 会轮询 `provisioned_database` 的 `PENDING` 记录；环境配置沿用 `conf.ini` 的 `[db_local]`。
+
 ### 跑测试要知道的三件事
 
 **1. 用 `ENV_TYPE=test`**，它指向 `conf.ini` 的 `[db_test]`（库名 `test`）。不指定时会按 `local` 走，Django 建出的是 `test_dba` 之类的中间库。

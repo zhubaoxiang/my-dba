@@ -11,6 +11,8 @@ bind = "0.0.0.0:8080"
 workers = 3
 # 每个进程线程数
 threads = NUM_CORES * 2
+# 同步预置最多可跑到 bulk_threshold 行，与前端 300s 超时对齐
+timeout = 300
 # 访问日志
 accesslog = "-"
 

@@ -13,7 +13,7 @@ from django.test import SimpleTestCase, TestCase
 from rest_framework.test import APIClient
 
 from apps.datasource import models as ds_models
-from apps.provisioning import data, ddl, models, services
+from apps.provisioning import bulk, data, ddl, models, runner, services
 from utils import crypto, custom_enum
 from utils.authentication import AuthedUser
 
@@ -24,6 +24,9 @@ PROD_ENV = custom_enum.DatasourceEnvEnum.PRODUCTION.value
 READY = custom_enum.ProvisionStatusEnum.READY.value
 FAILED = custom_enum.ProvisionStatusEnum.FAILED.value
 DROPPED = custom_enum.ProvisionStatusEnum.DROPPED.value
+PENDING = custom_enum.ProvisionStatusEnum.PENDING.value
+RUNNING = custom_enum.ProvisionStatusEnum.RUNNING.value
+CANCELLED = custom_enum.ProvisionStatusEnum.CANCELLED.value
 
 
 def _column(name, data_type="integer", length=-1, nullable=False, comment="", default=""):
@@ -277,7 +280,7 @@ class ProvisionPreviewTests(TestCase):
 
     def test_row_limit_is_enforced(self):
         with self.assertRaisesMessage(services.ProvisionError, "单表行数"):
-            services.preview(self.datasource.id, [{"schema": "public", "name": "users", "rows": 1001}])
+            services.preview(self.datasource.id, [{"schema": "public", "name": "users", "rows": 100000001}])
 
     def test_cyclic_foreign_keys_are_rejected(self):
         a = _table(
@@ -1108,3 +1111,439 @@ class ProvisioningApiTests(TestCase):
         ).json()
 
         self.assertEqual(payload["code"], 4005)
+
+
+class BulkModeTests(TestCase):
+    """
+    同步 / 异步模式判定、入队、取消与删除守卫
+    """
+
+    def setUp(self):
+        self.datasource = _datasource("bulk-ds")
+        self.table = _table(
+            "users",
+            columns=[_column("id"), _column("email", "varchar", 100)],
+            indexes=[{"name": "uk_users_email", "columns": ["email"], "unique": True, "primary": False}],
+        )
+        self.snapshot = _snapshot(self.datasource, [self.table])
+        self.threshold = services._config()["bulk_threshold"]
+
+    def _selection(self, rows=None):
+        return [{"schema": "public", "name": "users", "rows": rows or self.threshold + 1}]
+
+    def _record(self, status, db_name=None, **kwargs):
+        return models.ProvisionedDatabase.objects.create(
+            datasource_id=self.datasource.id,
+            db_name=db_name or services._generate_db_name(services._config()["db_prefix"], self.datasource.id),
+            status=status,
+            tables=self._selection(),
+            creator="owner",
+            **kwargs,
+        )
+
+    def test_preview_above_threshold_switches_to_bulk(self):
+        payload = services.preview(self.datasource.id, self._selection())
+
+        self.assertEqual(payload["mode"], "bulk")
+        self.assertTrue(payload["bulk"])
+        self.assertEqual(payload["snapshot_id"], self.snapshot.id)
+        self.assertTrue(payload["post_statements"])
+
+    def test_preview_below_threshold_stays_normal(self):
+        payload = services.preview(self.datasource.id, self._selection(1001))
+
+        self.assertEqual(payload["mode"], "normal")
+
+    def test_bulk_provision_enqueues_without_connecting(self):
+        db_name = services._generate_db_name(services._config()["db_prefix"], self.datasource.id)
+        with (
+            mock.patch.object(services, "_database_exists") as exists,
+            mock.patch.object(services, "_create_database") as create,
+        ):
+            record, _ = services.provision(
+                self.datasource.id,
+                self._selection(),
+                db_name,
+                seed=7,
+                confirm=True,
+                creator="tester",
+            )
+
+        exists.assert_not_called()
+        create.assert_not_called()
+        self.assertEqual(record.status, PENDING)
+        self.assertTrue(record.bulk)
+        self.assertEqual(record.total_rows, self.threshold + 1)
+        self.assertEqual(record.snapshot_id, self.snapshot.id)
+        self.assertEqual(record.seed, 7)
+
+    def test_duplicate_active_task_is_rejected(self):
+        first = self._record(PENDING)
+        with self.assertRaisesMessage(services.ProvisionError, "排队或执行中"):
+            services.provision(
+                self.datasource.id,
+                self._selection(),
+                services._generate_db_name(services._config()["db_prefix"], self.datasource.id),
+                confirm=True,
+                creator="owner",
+            )
+        self.assertEqual(models.ProvisionedDatabase.objects.filter(id=first.id).count(), 1)
+
+    def test_cancel_pending_marks_cancelled(self):
+        record = self._record(PENDING)
+
+        cancelled = services.cancel_record(record, actor="owner", is_admin=False)
+
+        self.assertEqual(cancelled.status, CANCELLED)
+        self.assertIsNotNone(cancelled.end_time)
+
+    def test_cancel_running_sets_flag(self):
+        record = self._record(RUNNING)
+
+        cancelled = services.cancel_record(record, actor="owner", is_admin=False)
+
+        self.assertEqual(cancelled.status, RUNNING)
+        self.assertTrue(cancelled.cancel_requested)
+
+    def test_cancel_ready_is_rejected(self):
+        record = self._record(READY)
+
+        with self.assertRaisesMessage(services.ProvisionError, "不可取消"):
+            services.cancel_record(record, actor="owner", is_admin=False)
+
+    def test_delete_pending_does_not_touch_target(self):
+        record = self._record(PENDING)
+        with mock.patch.object(services, "_drop_database") as drop:
+            services.delete_record(record, actor="owner", is_admin=False)
+
+        drop.assert_not_called()
+        record.refresh_from_db()
+        self.assertEqual(record.status, DROPPED)
+
+    def test_delete_running_is_rejected(self):
+        record = self._record(RUNNING)
+
+        with self.assertRaisesMessage(services.ProvisionError, "先取消"):
+            services.delete_record(record, actor="owner", is_admin=False)
+
+
+class _BulkCursor(_FakeCursor):
+    def __init__(self):
+        super().__init__()
+        self.copied = []
+
+    def copy_expert(self, sql, stream):
+        self.copied.append((sql, stream.read()))
+
+
+class _BulkConnection:
+    def __init__(self):
+        self.autocommit = False
+        self.commits = 0
+        self.rollbacks = 0
+        self.closed = False
+        self.cursor_obj = _BulkCursor()
+
+    def cursor(self):
+        return self.cursor_obj
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        self.rollbacks += 1
+
+    def close(self):
+        self.closed = True
+
+
+class BulkWriterTests(SimpleTestCase):
+    """
+    bulk.load_table 的批边界取消、提交与异常回滚
+    """
+
+    def setUp(self):
+        self.table = _table("users", columns=[_column("id")])
+
+    def test_cancel_checked_at_batch_boundary(self):
+        connection = _BulkConnection()
+        calls = []
+
+        def cancel_check():
+            calls.append(1)
+            return False
+
+        rows = [{"id": index} for index in range(5)]
+        total = bulk.load_table(
+            connection,
+            POSTGRESQL,
+            self.table,
+            iter(rows),
+            batch_rows=2,
+            commit_rows=100,
+            on_progress=lambda *args: None,
+            cancel_check=cancel_check,
+        )
+
+        self.assertEqual(total, 5)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(len(connection.cursor_obj.copied), 3)
+
+    def test_commit_rows_boundary(self):
+        connection = _BulkConnection()
+        rows = [{"id": index} for index in range(4)]
+
+        bulk.load_table(
+            connection,
+            POSTGRESQL,
+            self.table,
+            iter(rows),
+            batch_rows=1,
+            commit_rows=2,
+            on_progress=lambda *args: None,
+            cancel_check=lambda: False,
+        )
+
+        self.assertEqual(connection.commits, 2)
+
+    def test_exception_rolls_back(self):
+        connection = _BulkConnection()
+
+        def rows():
+            yield {"id": 1}
+            yield {"id": 2}
+            raise RuntimeError("boom")
+
+        with self.assertRaisesMessage(RuntimeError, "boom"):
+            bulk.load_table(
+                connection,
+                POSTGRESQL,
+                self.table,
+                rows(),
+                batch_rows=2,
+                commit_rows=100,
+                on_progress=lambda *args: None,
+                cancel_check=lambda: False,
+            )
+
+        self.assertEqual(connection.rollbacks, 1)
+
+
+class RunnerTests(TestCase):
+    """
+    worker 领取、执行、取消、失败清理与 stale 恢复
+    """
+
+    def setUp(self):
+        self.datasource = _datasource("runner-ds")
+        self.table = _table("users", columns=[_column("id")])
+        self.snapshot = _snapshot(self.datasource, [self.table])
+        self.db_name = services._generate_db_name(services._config()["db_prefix"], self.datasource.id)
+
+    def _record(self, status=RUNNING, **kwargs):
+        defaults = {
+            "datasource_id": self.datasource.id,
+            "db_name": self.db_name,
+            "status": status,
+            "tables": [{"schema": "public", "name": "users", "rows": 3}],
+            "creator": "owner",
+            "snapshot_id": self.snapshot.id,
+            "seed": 1,
+            "bulk": True,
+            "total_rows": 3,
+        }
+        defaults.update(kwargs)
+        return models.ProvisionedDatabase.objects.create(**defaults)
+
+    def test_claim_next_marks_running(self):
+        record = self._record(PENDING)
+
+        claimed = runner.claim_next("host:1")
+
+        self.assertEqual(claimed.id, record.id)
+        claimed.refresh_from_db()
+        self.assertEqual(claimed.status, RUNNING)
+        self.assertEqual(claimed.worker_id, "host:1")
+        self.assertIsNotNone(claimed.start_time)
+        self.assertIsNone(runner.claim_next("host:1"))
+
+    def test_run_success_marks_ready(self):
+        record = self._record()
+        connection = _BulkConnection()
+
+        def fake_load(conn, db_type, table, row_iter, *, on_progress, **kwargs):
+            count = sum(1 for _ in row_iter)
+            on_progress(count, f"{table['schema']}.{table['name']}")
+            return count
+
+        with (
+            mock.patch.object(services, "_database_exists", return_value=False),
+            mock.patch.object(services, "_create_database"),
+            mock.patch.object(services, "_connect_target", return_value=connection),
+            mock.patch.object(bulk, "load_table", side_effect=fake_load),
+        ):
+            runner.run(record)
+
+        record.refresh_from_db()
+        self.assertEqual(record.status, READY)
+        self.assertEqual(record.row_count, 3)
+        self.assertEqual(record.processed_rows, 3)
+        self.assertEqual(record.current_table, "")
+        self.assertTrue(connection.closed)
+
+    def test_run_failure_cleans_database(self):
+        record = self._record()
+        connection = _BulkConnection()
+
+        with (
+            mock.patch.object(services, "_database_exists", return_value=False),
+            mock.patch.object(services, "_create_database"),
+            mock.patch.object(services, "_connect_target", return_value=connection),
+            mock.patch.object(bulk, "load_table", side_effect=RuntimeError("boom")),
+            mock.patch.object(services, "_drop_database") as drop,
+        ):
+            runner.run(record)
+
+        drop.assert_called_once()
+        record.refresh_from_db()
+        self.assertEqual(record.status, FAILED)
+        self.assertIn("boom", record.error)
+
+    def test_run_cancel_marks_cancelled_and_cleans(self):
+        record = self._record(cancel_requested=True)
+        connection = _BulkConnection()
+
+        def cancel_load(*args, **kwargs):
+            kwargs["cancel_check"]()
+            raise bulk.BulkCancelled()
+
+        with (
+            mock.patch.object(services, "_database_exists", return_value=False),
+            mock.patch.object(services, "_create_database"),
+            mock.patch.object(services, "_connect_target", return_value=connection),
+            mock.patch.object(bulk, "load_table", side_effect=cancel_load),
+            mock.patch.object(services, "_drop_database") as drop,
+        ):
+            runner.run(record)
+
+        drop.assert_called_once()
+        record.refresh_from_db()
+        self.assertEqual(record.status, CANCELLED)
+
+    def test_run_stop_event_marks_failed(self):
+        import threading
+
+        record = self._record()
+        connection = _BulkConnection()
+        stop = threading.Event()
+        stop.set()
+
+        with (
+            mock.patch.object(services, "_database_exists", return_value=False),
+            mock.patch.object(services, "_create_database"),
+            mock.patch.object(services, "_connect_target", return_value=connection),
+            mock.patch.object(services, "_drop_database") as drop,
+        ):
+            runner.run(record, stop_event=stop)
+
+        drop.assert_called_once()
+        record.refresh_from_db()
+        self.assertEqual(record.status, FAILED)
+        self.assertIn("执行进程停止", record.error)
+
+    def test_recover_stale_cleans_running(self):
+        from datetime import timedelta
+
+        record = self._record(
+            RUNNING,
+            database_created=True,
+            heartbeat_time=datetime.now() - timedelta(hours=1),
+        )
+        with mock.patch.object(services, "_drop_database") as drop:
+            recovered = runner.recover_stale(60)
+
+        self.assertEqual(recovered, 1)
+        drop.assert_called_once()
+        record.refresh_from_db()
+        self.assertEqual(record.status, FAILED)
+        self.assertIsNotNone(record.end_time)
+
+
+class BulkProvisioningApiTests(TestCase):
+    URL = "/my-dba/v1/test-db"
+
+    def setUp(self):
+        self.client = APIClient()
+        self.client.force_authenticate(user=AuthedUser(1, "admin", "admin"))
+        self.datasource = _datasource("bulk-api-ds")
+        _snapshot(self.datasource, [_table("users", columns=[_column("id")])])
+        self.threshold = services._config()["bulk_threshold"]
+        self.tables = [{"schema": "public", "name": "users", "rows": self.threshold + 1}]
+        self.db_name = services._generate_db_name(services._config()["db_prefix"], self.datasource.id)
+
+    def test_preview_api_returns_bulk_mode(self):
+        payload = self.client.post(
+            f"{self.URL}/preview",
+            {"datasource_id": self.datasource.id, "tables": self.tables},
+            format="json",
+        ).json()
+
+        self.assertEqual(payload["code"], 2000)
+        self.assertEqual(payload["data"]["mode"], "bulk")
+        self.assertIsNotNone(payload["data"]["snapshot_id"])
+
+    def test_provision_api_returns_pending(self):
+        payload = self.client.post(
+            f"{self.URL}/provision",
+            {
+                "datasource_id": self.datasource.id,
+                "tables": self.tables,
+                "db_name": self.db_name,
+                "confirm": True,
+            },
+            format="json",
+        ).json()
+
+        self.assertEqual(payload["code"], 2000)
+        self.assertEqual(payload["data"]["status"], PENDING)
+
+    def test_cancel_api(self):
+        record = models.ProvisionedDatabase.objects.create(
+            datasource_id=self.datasource.id,
+            db_name=self.db_name,
+            status=PENDING,
+            tables=self.tables,
+            creator="admin",
+        )
+
+        payload = self.client.post(f"{self.URL}/{record.id}/cancel").json()
+
+        self.assertEqual(payload["code"], 2000)
+        self.assertEqual(payload["data"]["status"], CANCELLED)
+
+    def test_cancel_api_denies_non_owner(self):
+        record = models.ProvisionedDatabase.objects.create(
+            datasource_id=self.datasource.id,
+            db_name=self.db_name,
+            status=PENDING,
+            tables=self.tables,
+            creator="owner",
+        )
+        self.client.force_authenticate(user=AuthedUser(2, "user", "user"))
+
+        payload = self.client.post(f"{self.URL}/{record.id}/cancel").json()
+
+        self.assertEqual(payload["code"], 4005)
+
+    def test_delete_running_record_returns_4017(self):
+        record = models.ProvisionedDatabase.objects.create(
+            datasource_id=self.datasource.id,
+            db_name=self.db_name,
+            status=RUNNING,
+            tables=self.tables,
+            creator="admin",
+        )
+
+        payload = self.client.delete(f"{self.URL}/{record.id}").json()
+
+        self.assertEqual(payload["code"], 4017)

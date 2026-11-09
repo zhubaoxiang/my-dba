@@ -16,13 +16,15 @@ class ProvisionTableSerializer(serializers.Serializer):
 
     schema = serializers.CharField(max_length=128, required=False, allow_blank=True, default="")
     name = serializers.CharField(max_length=128)
-    rows = serializers.IntegerField(min_value=1, max_value=100000)
+    # 上限由服务端配置校验，这里只做整数范围兜底
+    rows = serializers.IntegerField(min_value=1, max_value=2**31 - 1)
 
 
 class ProvisionPreviewSerializer(serializers.Serializer):
     datasource_id = serializers.IntegerField()
     tables = ProvisionTableSerializer(many=True, allow_empty=False)
     seed = serializers.IntegerField(required=False, allow_null=True, min_value=0, max_value=2**31 - 1)
+    snapshot_id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
 
 
 class ProvisionExecuteSerializer(ProvisionPreviewSerializer):
