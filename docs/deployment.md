@@ -7,7 +7,8 @@
 ## 部署形态
 
 ```
-浏览器 :443（80 自动跳转）或 :8765（纯 HTTP）
+浏览器 :8765（纯 HTTP，始终可用）
+        或 :443（HTTPS；80 自动跳转，受 NGINX_HTTPS 控制）
   → frontend（nginx）
       ├─ /static/*、/login、/home …  → 前端静态资源
       └─ /my-dba/*                   → 127.0.0.1:8080
@@ -20,7 +21,7 @@
 |------|------|------|------|
 | `frontend` | host | 80 / 443 / 8765 | 前端 nginx；80 跳 443（受 `NGINX_HTTPS` 控制），8765 为常驻 HTTP 入口，静态资源 + `/my-dba` 反代 |
 | `web` | host | 8080 | Django + gunicorn；同时启动指标采集进程 |
-| `postgres` | host | 5432 | 业务库；使用已有数据卷 |
+| `postgres` | host | 5432 | 业务库；数据卷为已有卷（迁移）或新建卷（首次部署） |
 | `qdrant` | bridge | 6333 / 6334 | 知识问答向量库 |
 
 > `frontend` / `web` / `postgres` 都使用 host 网络，所以 nginx 直接反代 `127.0.0.1:8080`，应用直接连 `127.0.0.1:5432`。
@@ -80,9 +81,17 @@ ENV_TYPE=prod
 NGINX_HTTPS=auto
 ```
 
-`.env` 已被 `.gitignore` 与 `.dockerignore` 排除，不会进仓库或镜像。
+`.env` 已被 `.gitignore` 与 `.dockerignore` 排除，不会进仓库或镜像。`ENV_TYPE=prod` 决定后端读取 `conf.ini` 的 `[db_prod]` 段。
 
 > `POSTGRES_PASSWORD` 只在**首次初始化空卷**时生效；已有数据卷的密码以库内实际值为准，`[db_prod].password` 必须填实际口令。
+
+> **首次部署**没有已有数据卷时，先手工建一个空卷，再把它填进 `PG_VOLUME_NAME`：
+>
+> ```bash
+> docker volume create my-dba-pg-data
+> ```
+>
+> 从已有部署**迁移**时，用 `docker volume ls` / `docker inspect <现有容器>` 找到实际卷名，切勿新建空卷。
 
 ## 二、构建镜像
 
@@ -110,6 +119,21 @@ python package.py --only frontend
 
 ## 三、启动
 
+**首次部署**（空数据卷）：先只启动数据库，等 `pg_isready` 通过后按第四节导入表结构，再回来启动全栈。
+
+```bash
+docker compose up -d postgres
+docker compose logs -f postgres
+```
+
+导入完成后：
+
+```bash
+docker compose up -d
+```
+
+**已有数据库**（迁移 / 升级）可直接启动全部服务：
+
 ```bash
 docker compose up -d
 docker compose logs -f web postgres frontend
@@ -121,26 +145,26 @@ compose 已配置：
 - `web` 等 `postgres` 健康后再启动
 - `frontend` 等 `web` 健康后再启动
 
-访问 `http://<服务器>/`。
+访问 `http://<服务器>:8765/`；启用 HTTPS 时访问 `https://<服务器>/`。
 
-> 如果服务器的 80 / 443 端口已被其他 nginx 占用，二选一：停掉原服务，或修改 `static/nginx/conf/nginx.conf` 的 `listen` 端口并重新构建前端镜像。也可以保留宿主机 nginx，直接让它托管 `static/dist` 并反代 `/my-dba` 到 `127.0.0.1:8080`。
+> 如果服务器的 80 / 443 端口已被其他 nginx 占用，二选一：停掉原服务，或修改 `static/nginx/conf/conf.d/http.conf` / `https.conf` 的 `listen` 端口并重新构建前端镜像。也可以保留宿主机 nginx，直接让它托管 `static/dist` 并反代 `/my-dba` 到 `127.0.0.1:8080`。
 
 ## 四、数据库初始化（手动）
 
 compose 的 postgres 服务**不会自动执行**项目 SQL。数据库健康后进入容器执行，宿主机不需要安装 `psql`：
 
 ```bash
-# 确认库已存在（库名与 .env 的 POSTGRES_DB、[db_prod].name 一致）
-docker exec -it my-dba-postgres psql -U postgres -l
+# 确认库已存在（POSTGRES_DB 在首次初始化时自动创建，库名需与 [db_prod].name 一致）
+docker exec -it my-dba-postgres psql -U <POSTGRES_USER> -l
 
-# 库不存在时先建库（示例库名 prod）
-docker exec -it my-dba-postgres createdb -U postgres prod
+# 库名与 POSTGRES_DB 不一致时才需要手工建库
+docker exec -it my-dba-postgres createdb -U <POSTGRES_USER> <库名>
 
-# 新库：一次建全
-docker exec -i my-dba-postgres psql -v ON_ERROR_STOP=1 -U postgres -d <库名> < src/sql/pg_struct.sql
+# 全新库：一次建全
+docker exec -i my-dba-postgres psql -v ON_ERROR_STOP=1 -U <POSTGRES_USER> -d <库名> < src/sql/pg_struct.sql
 
 # 已有库：执行增量补丁
-docker exec -i my-dba-postgres psql -v ON_ERROR_STOP=1 -U postgres -d <库名> < src/sql/patch.sql
+docker exec -i my-dba-postgres psql -v ON_ERROR_STOP=1 -U <POSTGRES_USER> -d <库名> < src/sql/patch.sql
 ```
 
 > `-v ON_ERROR_STOP=1` 不能省：默认 psql 遇到错误会继续执行，最后仍返回 0。
@@ -149,7 +173,7 @@ docker exec -i my-dba-postgres psql -v ON_ERROR_STOP=1 -U postgres -d <库名> <
 >
 > ```bash
 > docker cp src/sql/pg_struct.sql my-dba-postgres:/tmp/pg_struct.sql
-> docker exec -it my-dba-postgres psql -v ON_ERROR_STOP=1 -U postgres -d <库名> -f /tmp/pg_struct.sql
+> docker exec -it my-dba-postgres psql -v ON_ERROR_STOP=1 -U <POSTGRES_USER> -d <库名> -f /tmp/pg_struct.sql
 > ```
 
 容器内通过 Unix socket 连接，默认 `trust`，不需要再输口令。
@@ -233,9 +257,12 @@ docker compose up -d
 
 ## 八、已知坑
 
-### 数据卷必须引用已有的
+### 数据卷：迁移引用已有卷，首次部署新建卷
 
-`pg_data` 使用 `external: true` + `${PG_VOLUME_NAME}`，避免手滑起出空库：
+`pg_data` 使用 `external: true` + `${PG_VOLUME_NAME}`，compose 不会自动创建：
+
+- **首次部署**：先 `docker volume create <名字>`，再把名字填进 `PG_VOLUME_NAME`
+- **从已有部署迁移**：用下面命令找到实际卷名，避免起出一个空库
 
 ```bash
 docker volume ls
@@ -246,9 +273,9 @@ docker inspect <现有容器>
 
 数据目录是 Alpine/musl 的：Alpine 的 `postgres` 用户是 uid 70、Debian 是 uid 999；换基础镜像会导致数据目录属主不匹配，PostgreSQL 启动失败。musl 与 glibc 的排序规则也不同，混用可能让文本索引静默失效。因此固定使用 `postgres:17-alpine`。
 
-### qdrant 不要长期使用 latest
+### qdrant 固定版本
 
-`docker-compose.yml` 目前是 `qdrant/qdrant:latest`；上线前请固定到已验证的版本。
+`docker-compose.yml` 使用 `qdrant/qdrant:v1.19.1`；升级前先验证新版本的存储格式兼容性，不要改用 `latest`。
 
 ### 安全项
 
