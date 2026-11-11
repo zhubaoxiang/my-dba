@@ -1,0 +1,44 @@
+static/nginx/conf/conf.d/redirect.conf
+  s_40b41b06c8ed6d::t_4faafe9a43d5cd 1-6
+static/nginx/conf/conf.d/http.conf
+  s_40b41b06c8ed6d::t_f0802b536b2dff 1
+  s_40b41b06c8ed6d::t_ed096597040e0c 3
+docker-compose.yml
+  s_40b41b06c8ed6d::t_2f2e44c0f0497c 69
+  s_40b41b06c8ed6d::t_0b17d14e8635d4 71-72
+static/nginx/conf/entrypoint.d/30-https.sh
+  s_40b41b06c8ed6d::t_3d71e216fd5c10 15
+  s_40b41b06c8ed6d::t_b6c03438ec0610 3,7,9,12
+  s_40b41b06c8ed6d::t_63e11ee1643220 2,4,8,10-11,13-14,16,28-38,40
+.env.example
+  s_40b41b06c8ed6d::t_c16ca4302d002c 18-19
+  s_40b41b06c8ed6d::t_3bef9203d1b083 16
+docs/deployment.md
+  s_40b41b06c8ed6d::t_571778027b11d8 217-218,220
+  s_40b41b06c8ed6d::t_2294ae48c82276 148
+  s_40b41b06c8ed6d::t_43db2640954c80 22
+  s_40b41b06c8ed6d::t_c8c98d955d08b2 210,212-216,219
+  s_40b41b06c8ed6d::t_668bd236ba3805 150
+  s_40b41b06c8ed6d::t_db3dc9e537f33b 198-199
+  s_40b41b06c8ed6d::t_538a1dbfa69cff 10
+  s_40b41b06c8ed6d::t_cac5f4f32a207c 11
+  s_40b41b06c8ed6d::t_0e0357510c3878 197
+static/nginx/conf/conf.d/https.conf
+  s_40b41b06c8ed6d::t_ec81d712af8d9e 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6855d54953ac0435afecaa734a3c93944dad5b01",
+  "prompts": {},
+  "sessions": {
+    "s_40b41b06c8ed6d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8745741f-5443-4735-be94-58eabd83aa82",
+        "model": "deepseek-flash"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    }
+  }
+}
