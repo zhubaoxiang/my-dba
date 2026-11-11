@@ -37,6 +37,7 @@
 | **造数**（支撑） | 「给我一套能直接用的测试数据」 | ✅ 已实现（[测试库](docs/test-db-provisioning.md) / [数据文件](docs/test-data-export.md)；可选手填表结构） |
 
 已确定的技术选型：数据源支持 PostgreSQL + MySQL；RAG 向量存储用独立的 Qdrant 服务；LLM 走公有云 API。
+<img width="3840" height="1890" alt="image" src="https://github.com/user-attachments/assets/504869e7-da23-4175-9dcd-7d69dc5091ac" />
 
 ## 快速开始
 
