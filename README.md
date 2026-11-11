@@ -20,6 +20,8 @@
 | 在**测试环境**新建独立测试库并造数（限自己创建的数据源，生产禁用） | 写入任何已有数据库 |
 | 解答数据库相关的问题 | 生产库变更执行 |
 
+<img width="2756" height="1268" alt="image" src="https://github.com/user-attachments/assets/66edbc66-8ebc-4336-a4d6-9f1b8fb21c10" />
+
 ## 能力与路线图
 
 四条能力围绕使用者的三条诉求展开，另有 2 项支撑性能力：
