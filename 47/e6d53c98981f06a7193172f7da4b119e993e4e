@@ -1,0 +1,40 @@
+src/apps/accounts/services.py
+  s_40b41b06c8ed6d::t_0970f0f5594543 24
+  s_40b41b06c8ed6d::t_3c89faf13b8674 23,25-40
+docs/auth.md
+  s_40b41b06c8ed6d::t_26001de343da15 3
+  s_40b41b06c8ed6d::t_d9510f5f0a1fbd 75
+  s_40b41b06c8ed6d::t_e3002df37fef3b 76-77
+src/apps/accounts/views.py
+  s_40b41b06c8ed6d::t_5565ef4377c63a 23-32
+src/apps/accounts/tests.py
+  s_40b41b06c8ed6d::t_1cb8229854e14c 288-297,299-300,305-310
+  s_40b41b06c8ed6d::t_37eac4ab1958c6 298
+src/config/conf.ini
+  s_40b41b06c8ed6d::t_d763ef949da8d9 95
+  s_40b41b06c8ed6d::t_e9bb86fe94430c 96
+  s_40b41b06c8ed6d::t_2e881d15cc53d6 87
+static/src/api/auth.js
+  s_40b41b06c8ed6d::t_55a73d15b84f4e 5-8
+static/src/views/login/index.vue
+  s_40b41b06c8ed6d::t_17ccb8d0801b5a 128-131
+  s_40b41b06c8ed6d::t_02d4c770285a4c 56-74
+  s_40b41b06c8ed6d::t_fcdf842fbb9127 7-13
+  s_40b41b06c8ed6d::t_0b4678300a8134 44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "47e6d53c98981f06a7193172f7da4b119e993e4e",
+  "prompts": {},
+  "sessions": {
+    "s_40b41b06c8ed6d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8745741f-5443-4735-be94-58eabd83aa82",
+        "model": "deepseek-flash"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    }
+  }
+}
