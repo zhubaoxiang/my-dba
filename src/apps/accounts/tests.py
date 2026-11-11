@@ -285,9 +285,28 @@ class TokenTests(SimpleTestCase):
         self.assertEqual(user, {"username": "alice", "role": "admin", "is_staff": True})
 
 
+class LoginPageConfigTests(SimpleTestCase):
+    def test_disabled_by_default(self):
+        with mock.patch.object(services, "CONF_ATTR", {}):
+            self.assertEqual(services.login_page_config(), {"show_trial_account": False})
+
+    def test_enabled_returns_trial_account(self):
+        with mock.patch.object(services, "CONF_ATTR", {"auth_show_trial_account": "true"}):
+            config = services.login_page_config()
+        self.assertTrue(config["show_trial_account"])
+        self.assertEqual(config["trial_username"], "admin")
+        self.assertEqual(config["trial_password"], "admin123456")
+
+
 class AuthApiTests(SimpleTestCase):
     def setUp(self):
         self.client = APIClient()
+
+    def test_login_config_is_public(self):
+        with mock.patch.object(services, "login_page_config", return_value={"show_trial_account": False}):
+            payload = self.client.get(f"{AUTH}/login-config").json()
+        self.assertEqual(payload["code"], 2000)
+        self.assertFalse(payload["data"]["show_trial_account"])
 
     def test_login_success(self):
         with mock.patch.object(

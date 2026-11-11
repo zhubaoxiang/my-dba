@@ -4,6 +4,13 @@
       <div class="login-title">数据库管理专家</div>
       <div class="login-hint">请使用域账号或本地账号登录</div>
 
+      <el-alert v-if="trial.enabled" class="trial-alert" type="info" :closable="false" show-icon>
+        <template #title>
+          试用账号：{{ trial.username }} / {{ trial.password }}
+          <el-button link type="primary" @click="fillTrial">填入</el-button>
+        </template>
+      </el-alert>
+
       <el-form :model="form" @submit.prevent="submit">
         <el-form-item>
           <el-input
@@ -34,7 +41,7 @@
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { authApi } from '@/api/auth'
@@ -46,6 +53,25 @@ const userStore = useUserStore()
 
 const form = reactive({ username: '', password: '' })
 const loading = ref(false)
+const trial = reactive({ enabled: false, username: '', password: '' })
+
+function fillTrial() {
+  form.username = trial.username
+  form.password = trial.password
+}
+
+onMounted(async () => {
+  try {
+    const data = await authApi.loginConfig()
+    if (data.show_trial_account) {
+      trial.enabled = true
+      trial.username = data.trial_username
+      trial.password = data.trial_password
+    }
+  } catch {
+    // 配置拉取失败不影响正常登录
+  }
+})
 
 async function submit() {
   if (loading.value) return
@@ -98,5 +124,9 @@ async function submit() {
 
 .login-button {
   width: 100%;
+}
+
+.trial-alert {
+  margin-bottom: 16px;
 }
 </style>

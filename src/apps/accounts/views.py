@@ -22,6 +22,16 @@ class AuthView(baseviews.StatelessView):
 
     @action(
         detail=False,
+        methods=["GET"],
+        url_path="login-config",
+        permission_classes=[],
+        authentication_classes=[],
+    )
+    def login_config(self, request):
+        return baseviews.ResponseOK(services.login_page_config())
+
+    @action(
+        detail=False,
         methods=["POST"],
         url_path="login",
         permission_classes=[],

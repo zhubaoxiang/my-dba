@@ -20,6 +20,24 @@ from utils.logger import get_logger
 
 LOGGER = get_logger("accounts.log")
 
+TRIAL_USERNAME = "admin"
+TRIAL_PASSWORD = "admin123456"
+_TRUE_VALUES = ("1", "true", "yes", "on")
+
+
+def login_page_config() -> dict:
+    """
+    登录页展示配置；试用账号仅在显式开启时返回，默认关闭
+    """
+    enabled = str(CONF_ATTR.get("auth_show_trial_account") or "").strip().lower() in _TRUE_VALUES
+    if not enabled:
+        return {"show_trial_account": False}
+    return {
+        "show_trial_account": True,
+        "trial_username": TRIAL_USERNAME,
+        "trial_password": TRIAL_PASSWORD,
+    }
+
 
 class AuthError(Exception):
     """

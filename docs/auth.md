@@ -1,6 +1,6 @@
 # 登录与认证（JWT + LDAP）
 
-系统使用 **JWT** 做登录态：登录成功后签发 token，前端放在 `Token` 请求头里；所有业务接口要求有效 token，只有登录接口公开。
+系统使用 **JWT** 做登录态：登录成功后签发 token，前端放在 `Token` 请求头里；所有业务接口要求有效 token，只有登录接口与登录页配置接口公开。
 
 **本地 Django 账号优先**；只有本地不存在该用户时，才走 LDAP 的 UPN（`username@domain`）认证。
 
@@ -72,6 +72,9 @@ LDAP 只做 UPN bind，不读取组属性；v1 不做 LDAP 组到角色的映射
 | `ldap_domain` | UPN 后缀，例如 `corp.example.com`；启用 LDAP 时必填 |
 | `ldap_connect_timeout` | 连接超时（秒），默认 10 |
 | `ldap_use_ssl` | LDAPS（636 端口）设为 `true`；普通 389 设为 `false`（默认） |
+| `show_trial_account` | 登录页展示试用账号（`admin` / `admin123456`）；默认 `false`，仅演示/试用环境开启 |
+
+> `show_trial_account` 开启后，未登录用户可通过 `GET /v1/auth/login-config` 拿到这组账号密码，**生产环境不要开启**。
 
 登录框支持三种账号写法：短账号（`alice`）、完整 UPN（`alice@corp.example.com`）、域前缀（`CORP\alice`）。短账号会自动拼成 `alice@<ldap_domain>`；完整 UPN 不会重复拼后缀。
 
