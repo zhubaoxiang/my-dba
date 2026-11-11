@@ -1,0 +1,19 @@
+static/src/views/knowledge/provider.vue
+  s_40b41b06c8ed6d::t_f705f44a804d7c 227-232
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "07d768521bdfa4181c5e0956ea1324a17c170276",
+  "prompts": {},
+  "sessions": {
+    "s_40b41b06c8ed6d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8745741f-5443-4735-be94-58eabd83aa82",
+        "model": "deepseek-flash"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    }
+  }
+}
