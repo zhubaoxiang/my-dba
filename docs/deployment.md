@@ -7,8 +7,8 @@
 ## 部署形态
 
 ```
-浏览器 :8765（纯 HTTP，始终可用）
-        或 :443（HTTPS；80 自动跳转，受 NGINX_HTTPS 控制）
+浏览器 :80（纯 HTTP，默认；端口由 NGINX_HTTP_PORT 配置）
+        或 :443（HTTPS，受 NGINX_HTTPS 控制）
   → frontend（nginx）
       ├─ /static/*、/login、/home …  → 前端静态资源
       └─ /my-dba/*                   → 127.0.0.1:8080
@@ -19,7 +19,7 @@
 
 | 服务 | 网络 | 端口 | 说明 |
 |------|------|------|------|
-| `frontend` | host | 80 / 443 / 8765 | 前端 nginx；80 跳 443（受 `NGINX_HTTPS` 控制），8765 为常驻 HTTP 入口，静态资源 + `/my-dba` 反代 |
+| `frontend` | host | 80 / 443 / `NGINX_HTTP_PORT` | 前端 nginx；HTTP 端口默认 80、可改为其他端口 |
 | `web` | host | 8080 | Django + gunicorn；同时启动指标采集进程 |
 | `postgres` | host | 5432 | 业务库；数据卷为已有卷（迁移）或新建卷（首次部署） |
 | `qdrant` | bridge | 6333 / 6334 | 知识问答向量库 |
@@ -145,9 +145,9 @@ compose 已配置：
 - `web` 等 `postgres` 健康后再启动
 - `frontend` 等 `web` 健康后再启动
 
-访问 `http://<服务器>:8765/`；启用 HTTPS 时访问 `https://<服务器>/`。
+访问 `http://<服务器>/`（HTTP 端口默认 80）；如修改了 `NGINX_HTTP_PORT`，访问对应端口。启用 HTTPS 时访问 `https://<服务器>/`。
 
-> 如果服务器的 80 / 443 端口已被其他 nginx 占用，二选一：停掉原服务，或修改 `static/nginx/conf/conf.d/http.conf` / `https.conf` 的 `listen` 端口并重新构建前端镜像。也可以保留宿主机 nginx，直接让它托管 `static/dist` 并反代 `/my-dba` 到 `127.0.0.1:8080`。
+> 如果服务器的 80 / 443 端口已被其他 nginx 占用，二选一：停掉原服务，或调整 `NGINX_HTTP_PORT` / `static/nginx/conf/conf.d/https.conf` 并重新构建前端镜像。也可以保留宿主机 nginx，直接让它托管 `static/dist` 并反代 `/my-dba` 到 `127.0.0.1:8080`。
 
 ## 四、数据库初始化（手动）
 
@@ -194,8 +194,9 @@ LDAP 用户不需要本地账号；本地账号优先，只有本地不存在该
 前端镜像基于 `static/Dockerfile`，nginx 配置在 `static/nginx/conf/`：
 
 - `nginx.conf`：全局配置，加载 `conf.d/*.conf`
-- `conf.d/http.conf`：8765 纯 HTTP 入口，始终启用
-- `conf.d/https.conf`：80 跳 443 与 443 SSL，可关闭
+- `conf.d/http.conf`：纯 HTTP 入口，监听端口由 `NGINX_HTTP_PORT` 决定（默认 80）
+- `conf.d/https.conf`：443 SSL，可关闭
+- `conf.d/redirect.conf`：80 跳 443；HTTP 端口设为 80 或 HTTPS 关闭时由启动脚本移除
 - `snippets/locations.inc`：HTTP / HTTPS 共用的路由
 
 共用路由包括：
@@ -206,13 +207,17 @@ LDAP 用户不需要本地账号；本地账号优先，只有本地不存在该
 - 知识问答 SSE 单独关闭了 `proxy_buffering`，避免流式回答被攒住
 - 上传限制 `client_max_body_size 25m`
 
-HTTPS 由 compose 的 `NGINX_HTTPS` 控制：
+HTTPS 由 compose 的 `NGINX_HTTPS` 控制，HTTP 端口由 `NGINX_HTTP_PORT` 控制：
 
-| 值 | 行为 |
-|----|------|
-| `auto`（默认） | 证书存在才启用 443 与 80 跳转 |
-| `on` | 强制启用（缺证书会启动失败） |
-| `off` | 关闭 443 与 80，仅保留 8765 的 HTTP |
+| 变量 | 值 | 行为 |
+|------|----|------|
+| `NGINX_HTTPS` | `auto`（默认） | 证书存在才启用 443 |
+| | `on` | 强制启用（缺证书会启动失败） |
+| | `off` | 关闭 443，仅保留 HTTP 入口 |
+| `NGINX_HTTP_PORT` | `80`（默认） | HTTP 直接走 80；HTTPS 启用时也不做 80→443 跳转 |
+| | `8765` 等 | HTTP 走指定端口；HTTPS 启用时 80 跳转 443 |
+
+> `NGINX_HTTP_PORT` 不能设为 443（与 HTTPS 冲突，容器会启动失败）。云主机需要在安全组放行对应端口（默认 80 / 443）。
 
 证书放在宿主机，compose 只读挂载到容器的 `/etc/nginx/cert`：
 
