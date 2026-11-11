@@ -224,7 +224,12 @@ async function handleActivate(row) {
 async function handleTest(row) {
   try {
     const data = await providerApi.test(row.id)
-    ElMessage.success(`连接成功，对话模型：${data.chat_model || '未知'}`)
+    const model = data.model_name || '未知'
+    if (row.model_type === 2) {
+      ElMessage.success(`连接成功，嵌入模型：${model}，维度：${data.dimensions || '未知'}`)
+    } else {
+      ElMessage.success(`连接成功，对话模型：${model}`)
+    }
   } catch (err) {
     // 拦截器已提示失败原因（后端已做脱敏）
   }
