@@ -1,0 +1,23 @@
+openspec/specs/datasource-management/spec.md
+  s_40b41b06c8ed6d::t_e4b4ed8b10e524 122-186
+openspec/specs/test-data-export/spec.md
+  s_40b41b06c8ed6d::t_49d6f6d8bc404b 1-131
+openspec/specs/test-db-provisioning/spec.md
+  s_40b41b06c8ed6d::t_f276a921682c2e 1-404
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "32ca8cf0e46ac37326a4122c17897d8add9faaed",
+  "prompts": {},
+  "sessions": {
+    "s_40b41b06c8ed6d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8745741f-5443-4735-be94-58eabd83aa82",
+        "model": "unknown"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    }
+  }
+}
