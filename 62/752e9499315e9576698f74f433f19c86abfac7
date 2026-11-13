@@ -1,0 +1,23 @@
+README.md
+  s_40b41b06c8ed6d::t_9a3131053df2df 26
+  s_40b41b06c8ed6d::t_c817a012447ff0 166-169
+  s_40b41b06c8ed6d::t_8cc60cc4bec154 1-2,5-14,16-18,22-25,27-41
+LICENSE
+  s_40b41b06c8ed6d::t_02a7b34868a0a4 1-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "62752e9499315e9576698f74f433f19c86abfac7",
+  "prompts": {},
+  "sessions": {
+    "s_40b41b06c8ed6d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8745741f-5443-4735-be94-58eabd83aa82",
+        "model": "deepseek-flash"
+      },
+      "human_author": "zhubaoxiang <31495734+zhubaoxiang@users.noreply.github.com>"
+    }
+  }
+}
