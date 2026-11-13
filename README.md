@@ -1,10 +1,43 @@
+<div align="center">
+
 # 我的数据库管理专家（my-dba）
 
-**面向开发与测试人员**的数据库助手。把你要用的库接进来，就能看懂表结构、发现设计隐患、写出正确的 SQL，并随时问数据库相关的问题。
+**面向开发与测试人员的数据库助手**
 
-后端 Django 3.2 + DRF，前端 Vue 3 + Element Plus，数据库 PostgreSQL。**通过 docker compose 部署**（对外路径前缀 `my-dba`）。
+[![Python](https://img.shields.io/badge/Python-3.11.9-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Django](https://img.shields.io/badge/Django-3.2-092E20?logo=django&logoColor=white)](https://www.djangoproject.com/)
+[![Vue](https://img.shields.io/badge/Vue-3-4FC08D?logo=vuedotjs&logoColor=white)](https://vuejs.org/)
+[![Element Plus](https://img.shields.io/badge/Element%20Plus-2.8-409EFF)](https://element-plus.org/)
+[![Docker Compose](https://img.shields.io/badge/Docker%20Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+把你要用的库接进来，就能看懂表结构、发现设计隐患、写出正确的 SQL，并随时问数据库相关的问题。
+
+<img width="2756" height="1268" alt="首页截图" src="https://github.com/user-attachments/assets/66edbc66-8ebc-4336-a4d6-9f1b8fb21c10" />
+
+</div>
 
 > 本文档只讲**项目定位、路线图与上手步骤**。各模块的架构、API、配置与限制见 [文档索引](#文档索引)。
+
+## 目录
+
+- [目标使用者与边界](#目标使用者与边界)
+- [技术栈](#技术栈)
+- [能力与路线图](#能力与路线图)
+- [快速开始](#快速开始)
+- [目录结构](#目录结构)
+- [文档索引](#文档索引)
+- [License](#license)
+
+## 技术栈
+
+| 层 | 选型 |
+|----|------|
+| 后端 | Python 3.11 · Django 3.2 · Django REST Framework |
+| 前端 | Vue 3 · Vite 5 · Element Plus 2 · Pinia |
+| 数据库 | PostgreSQL（业务库）· Qdrant（向量检索） |
+| 部署 | Docker Compose（前端 nginx + gunicorn + PostgreSQL + Qdrant） |
+| 工程化 | uv · ruff · OpenSpec |
 
 ## 目标使用者与边界
 
@@ -19,8 +52,6 @@
 | 帮使用者**判断**自己 SQL 的规范与性能 | 慢查询平台、SQL 上线审批流 |
 | 在**测试环境**新建独立测试库并造数（限自己创建的数据源，生产禁用） | 写入任何已有数据库 |
 | 解答数据库相关的问题 | 生产库变更执行 |
-
-<img width="2756" height="1268" alt="image" src="https://github.com/user-attachments/assets/66edbc66-8ebc-4336-a4d6-9f1b8fb21c10" />
 
 ## 能力与路线图
 
@@ -131,4 +162,8 @@ my-dba/
 | [docs/auth.md](docs/auth.md) | 登录与认证：JWT、本地账号优先 + LDAP 兜底、角色、配置、API、已知限制 |
 | [docs/development.md](docs/development.md) | 开发规范：新增模块、Model/ViewSet/Serializer/URL、日志、SQL、代码风格、测试与质量检查、已知问题 |
 | [docs/deployment.md](docs/deployment.md) | 部署：镜像构建、compose 编排的两个坑、数据库初始化、生产运行方式、平台化部署备查 |
+
+## License
+
+本项目采用 [MIT License](LICENSE) 开源。
 
